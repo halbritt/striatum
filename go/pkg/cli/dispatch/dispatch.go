@@ -47,6 +47,54 @@ type globalOptions struct {
 	CommandArgs  []string
 }
 
+// suggestCommand offers a "did you mean" for an unknown command by matching the
+// typed leading tokens (order-independent, singular/plural-insensitive) against
+// the known route table. It rescues common transpositions like `run list` ->
+// `list runs` without hand-maintaining aliases (#48).
+func suggestCommand(args []string) string {
+	norm := func(s string) string { return strings.TrimSuffix(strings.ToLower(s), "s") }
+	lead := []string{}
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		lead = append(lead, norm(a))
+		if len(lead) == 2 {
+			break
+		}
+	}
+	if len(lead) == 0 {
+		return ""
+	}
+	typed := map[string]bool{}
+	for _, t := range lead {
+		typed[t] = true
+	}
+	for _, r := range routes.All() {
+		toks := map[string]bool{norm(r.Command): true}
+		if r.Subcommand != "" {
+			toks[norm(r.Subcommand)] = true
+		}
+		if len(toks) != len(typed) {
+			continue
+		}
+		match := true
+		for t := range toks {
+			if !typed[t] {
+				match = false
+				break
+			}
+		}
+		if match {
+			if r.Subcommand != "" {
+				return r.Command + " " + r.Subcommand
+			}
+			return r.Command
+		}
+	}
+	return ""
+}
+
 func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, options Options) int {
 	globals, err := parseGlobal(args)
 	if err != nil {
@@ -57,6 +105,9 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 	if !ok {
 		if len(globals.CommandArgs) > 0 {
 			fmt.Fprintf(stderr, "unknown command: %s\n", strings.Join(globals.CommandArgs, " "))
+			if suggestion := suggestCommand(globals.CommandArgs); suggestion != "" {
+				fmt.Fprintf(stderr, "did you mean: striatum %s\n", suggestion)
+			}
 		} else {
 			fmt.Fprintln(stderr, "usage: striatum [global options] command ...")
 		}

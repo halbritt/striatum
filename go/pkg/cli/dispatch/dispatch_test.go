@@ -74,6 +74,34 @@ func TestDispatchUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestSuggestCommandRescuesTranspositionAndPlural(t *testing.T) {
+	cases := map[string]string{
+		"run list":      "list runs",     // transposition + plural
+		"runs list":     "list runs",     // plural on first token
+		"sessions list": "list sessions", // transposition + plural
+		"list run":      "list runs",     // singular subcommand
+	}
+	for input, want := range cases {
+		if got := suggestCommand(strings.Fields(input)); got != want {
+			t.Fatalf("suggestCommand(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if got := suggestCommand([]string{"totally", "bogus"}); got != "" {
+		t.Fatalf("expected no suggestion for nonsense, got %q", got)
+	}
+}
+
+func TestDispatchUnknownCommandSuggests(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exit := Run(context.Background(), []string{"run", "list"}, &stdout, &stderr, Options{Invoker: &fakeInvoker{}})
+	if exit != 2 {
+		t.Fatalf("exit = %d", exit)
+	}
+	if !strings.Contains(stderr.String(), "did you mean: striatum list runs") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
 func TestDispatchUsesExitCodeMapper(t *testing.T) {
 	wantErr := errors.New("daemon down")
 	var stdout, stderr bytes.Buffer

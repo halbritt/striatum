@@ -19,7 +19,7 @@ func HandleWhy(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (ma
 	}
 	targetID := stringParam(envelope, "target_id")
 	if targetID == "" {
-		return nil, rpc.NewError("schema_invalid", "why requires target_id", nil)
+		return nil, rpc.NewError("schema_invalid", "why requires a target_id positional argument — a run_id, job_id, session_id, message_id, lease_id, or blocker_id (e.g. `striatum why <run_id>`); list runs with `striatum list runs` and find ids with `striatum status --run-id <id>`", nil)
 	}
 	events, err := collectRows(ctx, runner,
 		`SELECT event_id, run_id, event_type, job_id, message_id, lease_id,
