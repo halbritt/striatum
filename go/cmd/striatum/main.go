@@ -453,6 +453,14 @@ func optionalBool(value string, hasValue bool) (bool, error) {
 }
 
 func refuseSameModelLint(workflow map[string]any) error {
+	// Inline workflow override (parity with cycle.allow_same_model): record the
+	// same-model review pairing acceptance in the workflow file itself, so a
+	// panel where the builder shares a model family with a reviewer (unavoidable
+	// when only N model families exist and the builder is one of them) validates
+	// clean without a CLI flag.
+	if workflow["allow_same_model_review_pairing"] == true {
+		return nil
+	}
 	result, err := workflowauthoring.Lint(workflow)
 	if err != nil {
 		return err
@@ -468,6 +476,9 @@ func refuseSameModelLint(workflow map[string]any) error {
 			if strings.TrimSpace(message) == "" {
 				message = "same-model review pairing refused"
 			}
+			// Make the override discoverable (this is a warning-severity lint,
+			// not a hard structural error): point at the three resolutions.
+			message += " — to accept this pairing: pass --allow-same-model-pairing, set \"allow_same_model_review_pairing\": true in the workflow (or cycle.allow_same_model for a revision cycle), or use an independent review lane."
 			return errors.New(message)
 		}
 	}

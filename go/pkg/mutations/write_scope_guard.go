@@ -40,6 +40,18 @@ func enforceWriteScopeClean(ctx context.Context, runner any, repositoryID string
 	if err != nil {
 		return rpc.NewError("invalid_transition", "write_scope check failed: "+err.Error(), nil)
 	}
+	// #46: paths already dirty/changed at claim time (the baseline) that lie
+	// outside allowed_paths are pre-existing operator state, not job writes.
+	// Operator actions on them (e.g. committing an unrelated untracked file
+	// mid-run, which removes it from `git status` and thus reads as "touched")
+	// must not count as this job violating its write scope. Forbidden paths are
+	// still enforced — the violation matcher checks forbidden before ignored.
+	if ignoredPaths == nil {
+		ignoredPaths = map[string]bool{}
+	}
+	for clean := range baselinePreexistingOutOfScope(job, allowed) {
+		ignoredPaths[clean] = true
+	}
 	violations := writeScopeViolationsWithIgnored(paths, allowed, forbidden, ignoredPaths)
 	if len(violations) == 0 {
 		return nil
@@ -121,6 +133,29 @@ func gitTouchedPathsSinceBaseline(ctx context.Context, repoRoot string, job map[
 	}
 	sort.Strings(touched)
 	return dedupeStrings(touched), nil
+}
+
+// baselinePreexistingOutOfScope returns the normalized baseline paths (paths
+// already dirty/changed when the job claimed) that lie outside allowed_paths —
+// pre-existing operator state the job did not write. These are excluded from
+// write_scope violations so an operator action on an unrelated out-of-scope path
+// during a live job (e.g. committing an untracked file) is not blamed on the job.
+func baselinePreexistingOutOfScope(job map[string]any, allowed []string) map[string]bool {
+	out := map[string]bool{}
+	allowedMatchers := normalizedScopeMatchers(allowed)
+	if len(allowedMatchers) == 0 {
+		return out
+	}
+	for path := range gitBaselineFromJob(job) {
+		clean, ok := normalizeScopePath(path)
+		if !ok {
+			continue
+		}
+		if !pathMatchesAny(clean, allowedMatchers) {
+			out[clean] = true
+		}
+	}
+	return out
 }
 
 func gitBaselineFromJob(job map[string]any) map[string]string {

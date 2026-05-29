@@ -666,6 +666,11 @@ func TestSuperviseStopMarksSupervisorStoppedAndUnlinksPipe(t *testing.T) {
 	if !tx.sawExec("UPDATE striatumd.process_supervisors", "ended_at") {
 		t.Fatalf("missing stopped update: %#v", tx.execs)
 	}
+	// #50: the stopped supervisor's session must be closed (guarded on no active
+	// lease) so it stops reading as `active` in live-session lookups.
+	if !tx.sawExec("UPDATE striatumd.sessions", "state = 'closed'") {
+		t.Fatalf("missing guarded session-close update: %#v", tx.execs)
+	}
 	event := tx.lastEventInsert()
 	if event == nil || event.args[3] != "supervisor.stopped" {
 		t.Fatalf("event insert = %#v", event)

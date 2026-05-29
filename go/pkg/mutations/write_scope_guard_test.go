@@ -88,6 +88,37 @@ func TestParseGitPorcelainZIncludesRenameOldAndNewPaths(t *testing.T) {
 	}
 }
 
+func TestBaselinePreexistingOutOfScopeIgnoresOnlyOutOfScopeBaselinePaths(t *testing.T) {
+	job := map[string]any{
+		"write_scope_baseline": map[string]any{
+			"changed_paths": []any{
+				map[string]any{"path": "docs/operator/workflows/x/workflow.json", "hash": "h1"},
+				map[string]any{"path": "go/pkg/foo/foo.go", "hash": "h2"},
+				map[string]any{"path": ".agents/scratch.md", "hash": "h3"},
+			},
+		},
+	}
+	allowed := []string{"go/", "docs/operator/workflows/x/artifacts/"}
+	got := baselinePreexistingOutOfScope(job, allowed)
+	// In-scope baseline path (under go/) must NOT be ignored; out-of-scope
+	// pre-existing paths (the workflow.json + unrelated .agents scratch) must be.
+	if got["go/pkg/foo/foo.go"] {
+		t.Fatalf("in-scope baseline path should not be ignored: %v", got)
+	}
+	if !got["docs/operator/workflows/x/workflow.json"] || !got[".agents/scratch.md"] {
+		t.Fatalf("out-of-scope baseline paths should be ignored: %v", got)
+	}
+}
+
+func TestBaselinePreexistingOutOfScopeEmptyWhenNoAllowedPaths(t *testing.T) {
+	job := map[string]any{"write_scope_baseline": map[string]any{"changed_paths": []any{
+		map[string]any{"path": "anything.txt", "hash": "h"},
+	}}}
+	if got := baselinePreexistingOutOfScope(job, nil); len(got) != 0 {
+		t.Fatalf("no allowed_paths means no baseline filtering, got %v", got)
+	}
+}
+
 func TestGitTouchedPathsSinceBaselineIgnoresPreExistingUntrackedPaths(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")

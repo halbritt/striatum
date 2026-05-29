@@ -437,6 +437,22 @@ func HandleSuperviseStop(ctx context.Context, runner db.Runner, envelope rpc.Env
 		if err := updateSupervisorState(ctx, tx, repositoryID, supervisor.SupervisorID, supervisor.DaemonSupervisorID, "stopped", endedAt, 0, "", "", &endedAt, &reason); err != nil {
 			return nil, err
 		}
+		// #50: a stopped supervisor must not leave its session reading as
+		// `active` — that pollutes "find the latest active <role>/<lane> session"
+		// lookups (interrogation targeting, reviewer prompts). Close the session
+		// in one guarded UPDATE: only when it is still `active` AND holds no
+		// active lease (mid-work sessions are left for explicit recovery). Done
+		// as a single conditional statement so no extra row read is required.
+		if err := tx.Exec(ctx, `
+			UPDATE striatumd.sessions
+			   SET state = 'closed', closed_at = $1, close_reason = $2
+			 WHERE repository_id = $3 AND session_id = $4 AND state = 'active'
+			   AND NOT EXISTS (
+				 SELECT 1 FROM striatumd.leases l
+				  WHERE l.repository_id = $3 AND l.owner_session_id = $4 AND l.state = 'active')`,
+			endedAt, "supervisor stopped: "+reason, repositoryID, sessionID); err != nil {
+			return nil, err
+		}
 		eventPayload := map[string]any{
 			"supervisor_id":        supervisor.SupervisorID,
 			"daemon_supervisor_id": nullableString(supervisor.DaemonSupervisorID),
