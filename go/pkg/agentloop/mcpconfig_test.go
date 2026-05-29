@@ -59,13 +59,10 @@ func TestInjectLaneMCPConfigClaudeWritesEphemeralStrictConfig(t *testing.T) {
 	}
 }
 
-func TestInjectLaneMCPConfigAgyWritesEphemeralStrictConfig(t *testing.T) {
+func TestInjectLaneMCPConfigAgyWritesEphemeralGeminiSettings(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, ".striatum", "scratch"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	cmd, cleanup, err := injectLaneMCPConfig(
-		[]string{"/home/x/.local/bin/agy", "--model", "opus"},
+		[]string{"/home/x/.local/bin/agy", "--dangerously-skip-permissions"},
 		repo, "http://127.0.0.1:34135/mcp", TokenMaterial{Token: "dtok_secret"},
 	)
 	if err != nil {
@@ -73,40 +70,74 @@ func TestInjectLaneMCPConfigAgyWritesEphemeralStrictConfig(t *testing.T) {
 	}
 	defer cleanup()
 
-	// Flags appended after the original command.
-	if len(cmd) < 5 || cmd[len(cmd)-1] != "--strict-mcp-config" || cmd[len(cmd)-3] != "--mcp-config" {
-		t.Fatalf("unexpected command: %#v", cmd)
+	// agy has no --mcp-config flag, so the command is unchanged.
+	if len(cmd) != 2 || cmd[1] != "--dangerously-skip-permissions" {
+		t.Fatalf("agy command should be unchanged (no claude-shaped flags): %#v", cmd)
 	}
-	cfgPath := cmd[len(cmd)-2]
-	if !strings.HasPrefix(cfgPath, filepath.Join(repo, ".striatum", "scratch")) {
-		t.Fatalf("config not under .striatum/scratch: %q", cfgPath)
+	for _, a := range cmd {
+		if a == "--mcp-config" || a == "--strict-mcp-config" {
+			t.Fatalf("agy must not receive claude-shaped MCP flags: %#v", cmd)
+		}
 	}
-	info, err := os.Stat(cfgPath)
+
+	// MCP config is written to project-level .gemini/settings.json (gemini schema).
+	settingsPath := filepath.Join(repo, ".gemini", "settings.json")
+	info, err := os.Stat(settingsPath)
 	if err != nil {
-		t.Fatalf("stat config: %v", err)
+		t.Fatalf("stat .gemini/settings.json: %v", err)
 	}
 	if info.Mode()&0o077 != 0 {
-		t.Fatalf("config not 0600: %v", info.Mode())
+		t.Fatalf("settings not 0600: %v", info.Mode())
 	}
-	body, _ := os.ReadFile(cfgPath)
+	body, _ := os.ReadFile(settingsPath)
 	var parsed struct {
 		MCPServers map[string]struct {
-			URL     string            `json:"url"`
+			HTTPURL string            `json:"httpUrl"`
 			Headers map[string]string `json:"headers"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		t.Fatalf("config json: %v", err)
+		t.Fatalf("settings json: %v", err)
 	}
 	s, ok := parsed.MCPServers["striatum"]
-	if !ok || s.URL != "http://127.0.0.1:34135/mcp" || s.Headers["Authorization"] != "Bearer dtok_secret" {
-		t.Fatalf("config content wrong: %s", body)
+	if !ok || s.HTTPURL != "http://127.0.0.1:34135/mcp" || s.Headers["Authorization"] != "Bearer dtok_secret" {
+		t.Fatalf("gemini settings content wrong: %s", body)
 	}
 
-	// Cleanup removes the file.
+	// Teardown removes the file we created (no pre-existing settings here).
 	cleanup()
-	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
-		t.Fatalf("ephemeral config not removed")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Fatalf("ephemeral .gemini/settings.json not removed on teardown")
+	}
+}
+
+func TestInjectLaneMCPConfigAgyPreservesExistingGeminiSettings(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, ".gemini")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(dir, "settings.json")
+	original := []byte(`{"security":{"auth":{"selectedType":"oauth-personal"}}}`)
+	if err := os.WriteFile(settingsPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, cleanup, err := injectLaneMCPConfig(
+		[]string{"agy"}, repo, "http://127.0.0.1:34135/mcp", TokenMaterial{Token: "dtok_secret"},
+	)
+	if err != nil {
+		t.Fatalf("inject: %v", err)
+	}
+	// While active, both the preserved auth block and our mcpServers are present.
+	body, _ := os.ReadFile(settingsPath)
+	if !strings.Contains(string(body), "oauth-personal") || !strings.Contains(string(body), "httpUrl") {
+		t.Fatalf("settings should merge existing auth with striatum mcpServers: %s", body)
+	}
+	// Teardown restores the original file verbatim.
+	cleanup()
+	restored, _ := os.ReadFile(settingsPath)
+	if string(restored) != string(original) {
+		t.Fatalf("teardown should restore original settings, got: %s", restored)
 	}
 }
 

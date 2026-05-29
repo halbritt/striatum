@@ -83,10 +83,14 @@ func TestPrepareLaneCommandForBootstrapUsesAgyInitialPromptArg(t *testing.T) {
 	if got := cmd[len(cmd)-2]; got != "--prompt-interactive" {
 		t.Fatalf("arg before prompt = %q, want --prompt-interactive", got)
 	}
-	// The claude-shaped MCP config flags must still be present (P2 wiring).
+	// agy has NO --mcp-config flag (those make it print usage and exit); its
+	// MCP config goes through .gemini/settings.json instead.
 	joined := strings.Join(cmd, "\x00")
-	if !strings.Contains(joined, "--strict-mcp-config") {
-		t.Fatalf("prepared agy command missing --strict-mcp-config: %#v", cmd)
+	if strings.Contains(joined, "--mcp-config") || strings.Contains(joined, "--strict-mcp-config") {
+		t.Fatalf("agy command must not carry claude-shaped MCP flags: %#v", cmd)
+	}
+	if _, err := os.Stat(repo + "/.gemini/settings.json"); err != nil {
+		t.Fatalf("agy MCP config should be written to .gemini/settings.json: %v", err)
 	}
 }
 
