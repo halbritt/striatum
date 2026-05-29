@@ -347,7 +347,8 @@ func dashboardAllStaleLeasesForRun(ctx context.Context, runner db.Runner, reposi
 		    AND qm.message_id = j.current_message_id
 		  WHERE j.repository_id = $1
 		    AND j.run_id = $2
-		    AND (j.state = 'stale_lease' OR l.state = 'expired')
+		    AND (j.state = 'stale_lease'
+		         OR (l.state = 'expired' AND j.state IN ('claimed', 'running')))
 		  ORDER BY j.workflow_job_id, l.expires_at`,
 		repositoryID, runID,
 	)

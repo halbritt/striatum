@@ -23,9 +23,22 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 
 	staleLeases := 0
 	if repositoryID != "" {
+		// #45: an expired lease row persists forever, so counting every
+		// `state = 'expired'` lease keeps reporting stale leases long after the
+		// work was recovered/completed. A lease is only genuinely stale when it
+		// is still a job's CURRENT lease AND that job is still actionable
+		// (claimed/running/stale_lease) — matching the authoritative predicate in
+		// status.go. Recovery or completion swaps current_lease_id / advances the
+		// job state, which makes the count drop as expected.
 		rows, err := collectRows(ctx, runner,
-			`SELECT COUNT(*) AS c FROM striatumd.leases
-			  WHERE repository_id = $1 AND state = 'expired'`,
+			`SELECT COUNT(*) AS c
+			   FROM striatumd.jobs j
+			   JOIN striatumd.leases l
+			     ON l.repository_id = j.repository_id
+			    AND l.lease_id = j.current_lease_id
+			  WHERE j.repository_id = $1
+			    AND l.state = 'expired'
+			    AND j.state IN ('claimed', 'running', 'stale_lease')`,
 			repositoryID,
 		)
 		if err == nil && len(rows) > 0 {
