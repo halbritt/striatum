@@ -1,8 +1,20 @@
 # RFC 0088: Deprecate `-p` — daemon-owned interactive PTY lanes, owned-PTY attestation, and the AGY migration
 
-Status: proposed
+Status: accepted
 Date: 2026-05-27
 Author: proposer-claude-opus-4-7-001
+Decisions: D148, D149, D150, D151 (accepted 2026-05-29)
+
+> **Acceptance note (2026-05-29).** Decisions D148-D151 accepted. The
+> turn-driver, `single_shot` capability, `gemini_cli`/`gemini_default` family,
+> and the `--print`/`exec` supervised wrapper are deleted. Owned-PTY agent-loop
+> verified end-to-end for **claude** (P1) and **codex** (P3); **agy** (P2)
+> verified through MCP discovery + `work.claim` via the submit-driver +
+> `.gemini/settings.json` fixes (#52). Remaining implementation follow-up before
+> agy's one-shot pipe lane is also retired: agy must reliably *complete* a
+> claimed packet (it currently over-builds a poll loop instead of executing),
+> plus cleanup-on-kill of the token-bearing `.gemini/settings.json` — both
+> tracked in #51.
 
 ## Summary
 

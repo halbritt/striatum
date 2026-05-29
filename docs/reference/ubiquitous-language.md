@@ -246,3 +246,13 @@ Boundary](spec.md) and [RFC 0057](../rfcs/0057-corpus-contract-v2.md).
   visible request that still needs external enforcement.
 - The **deterministic coordinator** enforces gates; the **AI coordinator**
   helps the human move the workflow through those gates.
+- **agy** (Antigravity) is the canonical claude-shaped tool family that replaced
+  the retired `gemini_cli` family (RFC 0088 / D150). Its agent-loop bootstrap is
+  delivered as `--prompt-interactive` argv (not PTY stdin-submit), and its MCP
+  server is configured through a fresh project-level `.gemini/settings.json`
+  (gemini `httpUrl` schema), not a `--mcp-config` flag.
+- The **`single_shot` capability**, the agent-loop **turn-driver** (F42-F45),
+  and the **`--print`/`exec` supervised wrapper** are **retired** (RFC 0088 /
+  D148, D150): agent lanes are daemon-owned long-lived interactive PTY/agent-loop
+  sessions, not per-packet fresh processes. (The RFC 0086 *conversation*
+  turn-driver for multi-party floor management is a separate, live mechanism.)
