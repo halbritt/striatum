@@ -140,21 +140,36 @@ func prepareLaneCommandForBootstrap(command []string, repoRoot, endpoint string,
 	}
 	mode := bootstrapDeliveryModeFor(laneCommand)
 	if mode == bootstrapDeliveryArgv {
-		out := append([]string(nil), laneCommand...)
-		out = append(out, prompt)
-		return out, cleanupMCP, mode, nil
+		return appendBootstrapArgv(laneCommand, prompt), cleanupMCP, mode, nil
 	}
 	return laneCommand, cleanupMCP, mode, nil
 }
 
 func bootstrapDeliveryModeFor(command []string) bootstrapDeliveryMode {
-	if len(command) > 0 && laneAdapterName(command[0]) == "codex" {
-		// Codex accepts an initial prompt argv and submits it itself. Typing the
-		// multi-line bootstrap into its TUI leaves the text buffered in the input
-		// editor, even when followed by CR/double-CR.
-		return bootstrapDeliveryArgv
+	if len(command) == 0 {
+		return bootstrapDeliveryPTYSubmit
 	}
-	return bootstrapDeliveryPTYSubmit
+	switch laneAdapterName(command[0]) {
+	case "codex", "agy":
+		// Codex and agy accept an initial prompt via argv and submit it
+		// themselves. Typing the multi-line bootstrap into their TUI leaves the
+		// text buffered in the input editor, even when followed by CR/double-CR.
+		return bootstrapDeliveryArgv
+	default:
+		return bootstrapDeliveryPTYSubmit
+	}
+}
+
+// appendBootstrapArgv attaches the bootstrap prompt to a lane command that
+// accepts an initial prompt via argv. Codex takes the prompt as a trailing
+// positional; agy takes it as the value of --prompt-interactive (-i), after
+// which it continues the session as a long-lived interactive agent-loop.
+func appendBootstrapArgv(command []string, prompt string) []string {
+	out := append([]string(nil), command...)
+	if len(command) > 0 && laneAdapterName(command[0]) == "agy" {
+		return append(out, "--prompt-interactive", prompt)
+	}
+	return append(out, prompt)
 }
 
 func runWithIO(ctx context.Context, cfg runConfig, stdin io.Reader, stdout, stderr io.Writer) error {

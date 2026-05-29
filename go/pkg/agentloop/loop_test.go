@@ -58,6 +58,38 @@ func TestPrepareLaneCommandForBootstrapUsesCodexInitialPromptArg(t *testing.T) {
 	}
 }
 
+func TestPrepareLaneCommandForBootstrapUsesAgyInitialPromptArg(t *testing.T) {
+	repo := t.TempDir()
+	prompt := "bootstrap prompt\nwith multiple lines"
+	cmd, cleanup, mode, err := prepareLaneCommandForBootstrap(
+		[]string{"/home/x/.local/bin/agy", "--dangerously-skip-permissions"},
+		repo,
+		"http://127.0.0.1:42727/mcp",
+		TokenMaterial{Token: "dtok_secret"},
+		prompt,
+	)
+	if err != nil {
+		t.Fatalf("prepare agy: %v", err)
+	}
+	defer cleanup()
+	if mode != bootstrapDeliveryArgv {
+		t.Fatalf("mode = %q, want %q (agy must not use the PTY-submit path; its TUI buffers the prompt unsubmitted)", mode, bootstrapDeliveryArgv)
+	}
+	// agy takes the initial prompt as the VALUE of --prompt-interactive, not a
+	// trailing positional like codex.
+	if got := cmd[len(cmd)-1]; got != prompt {
+		t.Fatalf("last arg = %q, want bootstrap prompt", got)
+	}
+	if got := cmd[len(cmd)-2]; got != "--prompt-interactive" {
+		t.Fatalf("arg before prompt = %q, want --prompt-interactive", got)
+	}
+	// The claude-shaped MCP config flags must still be present (P2 wiring).
+	joined := strings.Join(cmd, "\x00")
+	if !strings.Contains(joined, "--strict-mcp-config") {
+		t.Fatalf("prepared agy command missing --strict-mcp-config: %#v", cmd)
+	}
+}
+
 func TestPrepareLaneCommandForBootstrapKeepsClaudePTYSubmit(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.MkdirAll(repo+"/.striatum/scratch", 0o755); err != nil {
