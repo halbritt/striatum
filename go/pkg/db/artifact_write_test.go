@@ -20,6 +20,9 @@ func (t *recordingArtifactTx) Exec(_ context.Context, sql string, _ ...any) erro
 }
 func (t *recordingArtifactTx) QueryRow(context.Context, string, ...any) Row { return nil }
 func (t *recordingArtifactTx) QueryScalar(_ context.Context, sql string, _ ...any) (string, error) {
+	if strings.Contains(sql, "information_schema.columns") {
+		return "false", nil
+	}
 	t.scalarSQL = sql
 	return "", nil
 }
@@ -62,5 +65,66 @@ func TestAppendArtifactRoutesByPhase(t *testing.T) {
 				t.Fatalf("phase %s: pre-P1 must not call the SD function (scalar=%q)", tc.phase, tx.scalarSQL)
 			}
 		}
+	}
+}
+
+func TestAppendArtifactDirectIncludesPlacementWhenColumnExists(t *testing.T) {
+	tx := &recordingPlacementArtifactTx{placementColumnPresent: true}
+	row := ArtifactRow{
+		RepositoryID: "repo", ArtifactID: "art", RunID: "run", LogicalName: "log",
+		Placement: "git_publication",
+	}
+	if err := appendArtifactRowDirect(context.Background(), tx, row); err != nil {
+		t.Fatalf("appendArtifactRowDirect: %v", err)
+	}
+	if !strings.Contains(tx.execSQL, "placement") || len(tx.execArgs) != 18 || tx.execArgs[17] != "git_publication" {
+		t.Fatalf("direct placement insert sql=%q args=%#v", tx.execSQL, tx.execArgs)
+	}
+}
+
+func TestAppendArtifactSDIncludesPlacementWhenOverloadExists(t *testing.T) {
+	tx := &recordingPlacementArtifactTx{placementOverloadPresent: true}
+	row := ArtifactRow{
+		RepositoryID: "repo", ArtifactID: "art", RunID: "run", LogicalName: "log",
+		Placement: "blob_exhaust",
+	}
+	if err := appendArtifactRowSD(context.Background(), tx, row); err != nil {
+		t.Fatalf("appendArtifactRowSD: %v", err)
+	}
+	if !strings.Contains(tx.scalarSQL, "$18") || len(tx.scalarArgs) != 18 || tx.scalarArgs[17] != "blob_exhaust" {
+		t.Fatalf("sd placement call sql=%q args=%#v", tx.scalarSQL, tx.scalarArgs)
+	}
+}
+
+type recordingPlacementArtifactTx struct {
+	recordingArtifactTx
+	placementColumnPresent   bool
+	placementOverloadPresent bool
+	execArgs                 []any
+	scalarArgs               []any
+}
+
+func (t *recordingPlacementArtifactTx) Exec(_ context.Context, sql string, args ...any) error {
+	t.execSQL = sql
+	t.execArgs = args
+	return nil
+}
+
+func (t *recordingPlacementArtifactTx) QueryScalar(_ context.Context, sql string, args ...any) (string, error) {
+	switch {
+	case strings.Contains(sql, "information_schema.columns"):
+		if t.placementColumnPresent {
+			return "true", nil
+		}
+		return "false", nil
+	case strings.Contains(sql, "to_regprocedure"):
+		if t.placementOverloadPresent {
+			return "true", nil
+		}
+		return "false", nil
+	default:
+		t.scalarSQL = sql
+		t.scalarArgs = args
+		return "", nil
 	}
 }

@@ -111,12 +111,12 @@ func fetchTrajectory(ctx context.Context, runner db.Runner, repositoryID, runID,
 
 	// 3. Artifacts (Dialogue + Provenance) projected as 'artifact_published'.
 	queries = append(queries, `
-		SELECT created_at AS ts, 3 AS src, artifact_id::text AS tiebreak, 'artifact_published' AS kind,
-		       session_id, NULL AS role_id, NULL AS lane_id, NULL AS parent_message_id,
-		       jsonb_build_object('artifact_id', artifact_id, 'logical_name', logical_name, 'kind', artifact_kind, 'path', repo_path) AS body,
+		SELECT a.created_at AS ts, 3 AS src, a.artifact_id::text AS tiebreak, 'artifact_published' AS kind,
+		       a.session_id, NULL AS role_id, NULL AS lane_id, NULL AS parent_message_id,
+		       jsonb_build_object('artifact_id', a.artifact_id, 'logical_name', a.logical_name, 'kind', a.artifact_kind, 'path', a.repo_path, 'placement', `+artifactPlacementExpression(ctx, runner, "a")+`) AS body,
 		       NULL::jsonb AS refs
-		  FROM striatumd.artifacts
-		 WHERE repository_id = $1 AND run_id = $2`)
+		  FROM striatumd.artifacts a
+		 WHERE a.repository_id = $1 AND a.run_id = $2`)
 
 	// 4. Verdicts (Provenance only)
 	if profile == "provenance" {

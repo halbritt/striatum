@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -494,6 +495,7 @@ func newPhaseSynthesisJob(workflow map[string]any, phaseID, jobID string) map[st
 			"kind":         "synthesis",
 			"path":         "striatum/" + phaseID + "/SYNTHESIS.md",
 			"required":     true,
+			"placement":    artifactcontracts.PlacementGitPublication,
 		}},
 		"phase_id": phaseID,
 	}

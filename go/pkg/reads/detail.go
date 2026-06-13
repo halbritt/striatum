@@ -208,6 +208,7 @@ func HandleJobDetail(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(artifacts)
 	decorateArtifactProvenance(artifacts)
 	verdicts, err := collectRows(ctx, runner,
 		`SELECT *
@@ -247,7 +248,7 @@ func HandleArtifactShow(ctx context.Context, runner db.Runner, envelope rpc.Enve
 		`SELECT a.artifact_id, a.run_id, a.job_id, a.session_id, a.logical_name,
 		        a.artifact_kind, a.repo_path, a.content_sha256, a.size_bytes,
 		        a.publish_mode, a.created_at, a.author_line,
-		        a.attestation_override_rationale`+artifactProvenanceColumns+`
+		        a.attestation_override_rationale`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+`
 		  WHERE a.repository_id = $1 AND a.artifact_id = $2`,
 		repositoryID, artifactID,
@@ -258,6 +259,7 @@ func HandleArtifactShow(ctx context.Context, runner db.Runner, envelope rpc.Enve
 	if len(artifacts) == 0 {
 		return nil, rpc.NewError("not_found", "artifact not found: "+artifactID, nil)
 	}
+	decorateArtifactPlacements(artifacts)
 	artifact := artifacts[0]
 	decorateArtifactProvenance(artifacts)
 	if runID := stringParam(envelope, "run_id"); runID != "" && stringFrom(artifact, "run_id") != runID {

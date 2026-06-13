@@ -48,10 +48,10 @@ func HandleArtifactGetContent(ctx context.Context, runner db.Runner, envelope rp
 		return nil, rpc.NewError("schema_invalid", "artifact.get_content requires artifact_id", nil)
 	}
 	rows, err := collectRows(ctx, runner,
-		`SELECT artifact_id, run_id, repo_path, content_sha256, artifact_kind,
-		        blob_key, blob_sha256, blob_content_type
-		   FROM striatumd.artifacts
-		  WHERE repository_id = $1 AND artifact_id = $2
+		`SELECT a.artifact_id, a.run_id, a.repo_path, a.content_sha256, a.artifact_kind,
+		        a.blob_key, a.blob_sha256, a.blob_content_type`+artifactPlacementProjection(ctx, runner, "a")+`
+		   FROM striatumd.artifacts a
+		  WHERE a.repository_id = $1 AND a.artifact_id = $2
 		  LIMIT 1`,
 		repositoryID, artifactID,
 	)
@@ -62,6 +62,7 @@ func HandleArtifactGetContent(ctx context.Context, runner db.Runner, envelope rp
 		return nil, rpc.NewError("not_found", "artifact not found: "+artifactID, nil)
 	}
 	row := rows[0]
+	decorateArtifactPlacements(rows)
 	blobKey := stringFrom(row, "blob_key")
 	blobSha256 := stringFrom(row, "blob_sha256")
 	contentSha256 := stringFrom(row, "content_sha256")
@@ -90,7 +91,7 @@ func HandleArtifactListForRun(ctx context.Context, runner db.Runner, envelope rp
 		`SELECT a.artifact_id, a.run_id, a.job_id, a.session_id, a.logical_name,
 		        a.artifact_kind, a.repo_path, a.content_sha256, a.size_bytes,
 		        a.publish_mode, a.created_at, a.author_line,
-		        a.blob_key, a.blob_sha256, a.blob_content_type`+artifactProvenanceColumns+`
+		        a.blob_key, a.blob_sha256, a.blob_content_type`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+`
 		  WHERE a.repository_id = $1 AND a.run_id = $2
 		  ORDER BY a.created_at ASC`,
@@ -99,6 +100,7 @@ func HandleArtifactListForRun(ctx context.Context, runner db.Runner, envelope rp
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(items)
 	decorateArtifactProvenance(items)
 	return map[string]any{
 		"run_id": runID,
@@ -154,6 +156,7 @@ func getContentFromBlob(
 		"sha256":       expected,
 		"verified":     true,
 		"source":       "blob",
+		"placement":    stringFrom(row, "placement"),
 	}, nil
 }
 
@@ -210,6 +213,7 @@ func getContentFromRepoPath(
 		"sha256":       contentSha256,
 		"verified":     contentSha256 != "",
 		"source":       "repo_path",
+		"placement":    stringFrom(row, "placement"),
 	}, nil
 }
 

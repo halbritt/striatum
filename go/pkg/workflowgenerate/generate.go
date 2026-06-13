@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
 	"github.com/halbritt/striatum/go/pkg/workflowauthoring"
 	"github.com/halbritt/striatum/go/pkg/workflowtemplates"
 )
@@ -696,7 +697,17 @@ func job(id, jobType, title, role, lane, root, filename, artifactKind, logicalNa
 			"kind":         artifactKind,
 			"path":         root + "/" + filename,
 			"required":     true,
+			"placement":    generatedArtifactPlacement(jobType, artifactKind),
 		}},
+	}
+}
+
+func generatedArtifactPlacement(jobType, artifactKind string) string {
+	switch jobType {
+	case "synthesis", "phase_synthesis":
+		return artifactcontracts.PlacementGitPublication
+	default:
+		return artifactcontracts.DefaultPlacementForKind(artifactKind)
 	}
 }
 

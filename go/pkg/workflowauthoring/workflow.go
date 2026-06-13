@@ -400,6 +400,13 @@ func validateJobPaths(jobIndex int, jobID string, job map[string]any) error {
 				jobID, kind, strings.Join(sortedKindList(), ", "),
 			)
 		}
+		if placement := strings.TrimSpace(stringValue(artifact["placement"])); placement != "" && !artifactcontracts.IsAllowedPlacement(placement) {
+			return fieldErr(
+				fmt.Sprintf("jobs[%d].expected_artifacts[%d].placement", jobIndex, artifactIndex),
+				"job %q declares unknown artifact placement %q; valid placements: %s",
+				jobID, placement, strings.Join(artifactcontracts.AllowedPlacementList(), ", "),
+			)
+		}
 		if err := validateArtifactInWriteScope(jobID, job, path); err != nil {
 			return err
 		}

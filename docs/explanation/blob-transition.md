@@ -76,15 +76,18 @@ When blob storage is configured and reachable, the doctor blob block reports:
 }
 ```
 
-When the bucket status is `ok`, repository-scoped doctor also runs the
-artifact-anchor integrity check for completed repo-write jobs. For each
-published artifact with a repository path and recorded `content_sha256`, it
-checks the durable git anchor (`run_branch` or `job_pin`) for matching file
-content. Mismatches and missing files make doctor fail with stable
-`artifact_anchor_hash_mismatch` or `artifact_anchor_missing_file` problems, and
+When the bucket status is `ok`, repository-scoped doctor also runs a
+placement-aware artifact integrity check for completed repo-write jobs.
+`git_publication` and `git_pointer_manifest` artifacts are checked against the
+durable git anchor (`run_branch` or `job_pin`) for matching file content.
+Mismatches and missing files make doctor fail with stable
+`artifact_anchor_hash_mismatch` or `artifact_anchor_missing_file` problems.
+`blob_exhaust` artifacts are checked for blob metadata and, when blob storage is
+configured, a sha-verified blob body. Missing or unreadable blob bodies produce
+`artifact_blob_metadata_missing` or `artifact_blob_body_verify_failed`.
 `doctor --verbose --json` includes problem records with run, job, artifact,
-path, hash, and anchor metadata. The check does not print artifact bodies or
-blob credential material.
+placement, path/hash, and anchor/blob metadata. The check does not print
+artifact bodies or blob credential material.
 
 The artifact-anchor check skips cleanly when blob storage is disabled,
 unreachable, not repo-provisioned, or has any bucket status other than `ok`.
@@ -137,12 +140,15 @@ already claimed by a different repository (a claim marker
 contains striatum-shaped keys without any claim marker. Either pick
 a different bucket name or empty the conflicting bucket.
 
-## Step 4 — Verify new artifacts route to blob
+## Step 4 — Verify artifact placement
 
-Trigger a workflow that publishes a blob-routed artifact kind
-(`finding`, `synthesis`, `support_ledger`, `action_item_ledger`,
-`harness_improvement_proposal`, `findings_ledger`, or
-`progress_note`). After the publish:
+Trigger a workflow that declares `expected_artifacts[].placement`. Use
+`blob_exhaust` for lane exhaust that should live in blob storage and
+`git_publication` for source-like or human-reviewable records that should stay
+anchored in git. Older workflows that omit placement still use the legacy kind
+default: `finding`, `synthesis`, ledgers, `harness_improvement_proposal`, and
+`progress_note` resolve to `blob_exhaust`; other kinds resolve to
+`git_publication`. After the publish:
 
 ```bash
 BASE_URL=$(sed 's#/mcp$##' "${XDG_RUNTIME_DIR}/striatum/mcp-http-endpoint")
@@ -151,10 +157,10 @@ curl -H "Authorization: Bearer ${TOKEN}" \
   "${BASE_URL}/v1/runs/<run_id>/artifacts" | jq .
 ```
 
-Expected: each blob-routed artifact carries non-null `blob_key` and
-`blob_sha256`. Decisional kinds (`decision`, `escalation`,
-`work_plan`, `operator_brief`, `operator_report`) still have
-`blob_key: null` — they stay git-tracked.
+Expected: each artifact row reports `placement`. A `blob_exhaust` artifact
+carries non-null `blob_key` and `blob_sha256` when the repository has a
+provisioned blob bucket. A `git_publication` artifact may have `blob_key: null`
+and must be reachable through its durable git anchor.
 
 Fetch the raw artifact body through the Go web service:
 
@@ -202,7 +208,7 @@ all of that content lives in
 ## Verifying the round trip after the cutover
 
 ```bash
-# Web UI viewer (blob-routed artifacts):
+# Web UI viewer (blob_exhaust artifacts):
 $EDITOR / web-browser → http://localhost:<port>/run/<run_id>/artifacts/<artifact_id>
 
 # Corpus export should produce the same redacted bundle:
@@ -213,10 +219,11 @@ striatum --repo /path/to/striatum doctor --verbose --json | jq '.blob.bucket_sta
 # → "ok"
 ```
 
-## What did NOT migrate to blob
+## What stays in git
 
-Per RFC 0072 § Boundary, the following kinds stay git-tracked
-because they are PR-review-shaped, not per-run data:
+Per RFC 0123, placement is explicit. The following artifact roles normally use
+`git_publication` because they are PR-review-shaped or durable operator records,
+not lane exhaust:
 
 - `decision` (decision log entries)
 - `escalation` (human-principal blocker artifacts)

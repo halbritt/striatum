@@ -176,6 +176,7 @@ func publishArtifactWithOptions(
 	// logical_name and DIFFERENT content is a conflict; a prior attempt's row is
 	// ignored and the fresh attempt INSERTs its own attempt-scoped row.
 	attempt := jobAttemptValue(job["attempt"])
+	placement := resolvePublishPlacement(job, kind, logicalName, pathText, attempt)
 	existing, err := oneRow(ctx, runner, `
 		SELECT * FROM striatumd.artifacts
 		 WHERE repository_id = $1 AND run_id = $2 AND job_id = $3 AND logical_name = $4
@@ -197,7 +198,7 @@ func publishArtifactWithOptions(
 					return nil, err
 				}
 			}
-			return map[string]any{"status": "already_published", "artifact_id": existing["artifact_id"]}, nil
+			return map[string]any{"status": "already_published", "artifact_id": existing["artifact_id"], "placement": placement}, nil
 		}
 		return nil, rpc.NewError("artifact_error", artifactLogicalNameConflictMessage, nil)
 	}
@@ -248,6 +249,7 @@ func publishArtifactWithOptions(
 			"status":         "already_published",
 			"artifact_id":    pathDup["artifact_id"],
 			"sha256":         digest,
+			"placement":      placement,
 			"notice":         "artifact with identical content already published at this path; reusing existing artifact_id (idempotent no-op)",
 			"logical_name":   fmt.Sprint(pathDup["logical_name"]),
 			"reused_logical": logicalName,
@@ -262,14 +264,11 @@ func publishArtifactWithOptions(
 	}
 	authorLine := firstAuthorLine(payload)
 
-	// RFC 0072: blob-routed artifact kinds upload to the per-repo S3
-	// bucket before the INSERT. The bucket is recorded on
-	// striatumd.repositories.blob_bucket at adopt time. The upload
-	// happens inside the publish transaction; the orphan-blob risk on
-	// rollback (successful PUT, failed INSERT) is documented and
-	// reconciled by a follow-on bucket-vs-PG cleanup job.
+	// RFC 0123: placement, not kind alone, decides whether the body uploads to
+	// blob storage. Workflows without explicit placement still resolve through
+	// the legacy RFC 0072 kind defaults.
 	var blobKey, blobSha256, blobContentType string
-	if packageBlobClient != nil && isBlobRoutedKind(kind) {
+	if packageBlobClient != nil && artifactcontracts.PlacementUsesBlob(placement) {
 		bucket, err := lookupRepoBlobBucket(ctx, runner, repositoryID)
 		if err != nil {
 			return nil, err
@@ -321,6 +320,7 @@ func publishArtifactWithOptions(
 		BlobSHA256:      nullable(blobSha256),
 		BlobContentType: nullable(blobContentType),
 		Attempt:         attempt,
+		Placement:       placement,
 	}); err != nil {
 		return nil, err
 	}
@@ -342,6 +342,7 @@ func publishArtifactWithOptions(
 		"logical_name": logicalName,
 		"path":         pathText,
 		"sha256":       digest,
+		"placement":    placement,
 	}
 	if blobKey != "" {
 		eventPayload["blob_key"] = blobKey
@@ -349,11 +350,21 @@ func publishArtifactWithOptions(
 	if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "artifact.published", sessionID, jobID, nil, artifactID, leaseID, eventPayload); err != nil {
 		return nil, err
 	}
-	result := map[string]any{"status": "published", "artifact_id": artifactID, "sha256": digest}
+	result := map[string]any{"status": "published", "artifact_id": artifactID, "sha256": digest, "placement": placement}
 	if blobKey != "" {
 		result["blob_key"] = blobKey
 	}
 	return result, nil
+}
+
+func resolvePublishPlacement(job map[string]any, kind, logicalName, pathText string, attempt int) string {
+	for _, item := range resolveExpectedArtifactCycles(asList(job["expected_artifacts_json"]), attempt) {
+		expected := asMap(item)
+		if expected["logical_name"] == logicalName && expected["kind"] == kind && expected["path"] == pathText {
+			return artifactcontracts.ResolvePlacement(kind, expected["placement"])
+		}
+	}
+	return artifactcontracts.DefaultPlacementForKind(kind)
 }
 
 func artifactSourcePath(repoRoot, pathText string, activeWorktree map[string]any) (string, error) {
@@ -366,37 +377,6 @@ func artifactSourcePath(repoRoot, pathText string, activeWorktree map[string]any
 		sourceRoot = target
 	}
 	return repoRelativePath(sourceRoot, pathText, false)
-}
-
-// blobRoutedKinds enumerates the artifact kinds whose body lives in
-// S3-compatible blob storage per RFC 0072 § Boundary. Kinds outside
-// this set keep the existing repo-path semantics: the body is reached
-// via repo_path, not blob_key.
-//
-// The split is by review surface:
-//   - Stays git-tracked (PR review surface): decision, escalation,
-//     work_plan, operator_brief, operator_report. These are
-//     decisional artifacts a human reads in a diff.
-//   - Goes to blob (per-run data): finding, synthesis, *_ledger,
-//     harness_improvement_proposal, progress_note. These pile up per
-//     dogfood run and do not get PR review.
-//
-// Other kinds (handoff, prompt, marker, etc.) remain repo-path-only in
-// V1; the maintainer can extend this set in a follow-on RFC.
-var blobRoutedKinds = map[string]struct{}{
-	"finding":                      {},
-	"findings_ledger":              {},
-	"synthesis":                    {},
-	"support_ledger":               {},
-	"action_item_ledger":           {},
-	"collaboration_ledger":         {},
-	"harness_improvement_proposal": {},
-	"progress_note":                {},
-}
-
-func isBlobRoutedKind(kind string) bool {
-	_, ok := blobRoutedKinds[kind]
-	return ok
 }
 
 // lookupRepoBlobBucket returns the per-repo bucket recorded at adopt

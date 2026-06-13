@@ -1,0 +1,182 @@
+{
+  "branch": {
+    "allow_dirty": true,
+    "mode": "confirm",
+    "suggested_name": "codex/rfc-0123-artifact-placement"
+  },
+  "context_docs": [
+    "docs/rfcs/0123-blob-routed-lane-exhaust-and-git-publication-specs.md",
+    "docs/operator/artifacts/rfc-0123-artifact-placement-design/DECISION.md",
+    "docs/operator/artifacts/rfc-0123-artifact-placement-design/ARBITRATOR_SYNTHESIS.md",
+    "docs/explanation/blob-transition.md",
+    "go/pkg/mutations/artifact.go",
+    "go/pkg/reads/artifact_content.go",
+    "go/pkg/reads/doctor_artifact_anchor.go",
+    "go/pkg/workflowauthoring/workflow.go",
+    "go/pkg/workflowgenerate/"
+  ],
+  "coordinator": {
+    "lane_id": "local",
+    "role_id": "author"
+  },
+  "cycles": [
+    {
+      "from": "review",
+      "max_iterations": 1,
+      "on_verdict": "needs_revision",
+      "to": "draft",
+      "allow_same_model": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "draft",
+      "on": "completed",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "on": "completed",
+      "to": "apply"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "draft",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/DRAFT.md",
+          "required": true,
+          "placement": "git_publication"
+        }
+      ],
+      "id": "draft",
+      "lane_id": "local",
+      "objective": "Produce the starter artifact for this workflow.",
+      "role_id": "author",
+      "task_prompt": {
+        "path": "prompts/draft.md"
+      },
+      "title": "Draft starter artifact",
+      "type": "draft",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "finding",
+          "logical_name": "review",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/review/REVIEW.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "review",
+      "lane_id": "local",
+      "objective": "Review the draft and record a finding.",
+      "role_id": "reviewer",
+      "task_prompt": {
+        "path": "prompts/review.md"
+      },
+      "title": "Review the draft",
+      "type": "review",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/review/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "review_only_artifact",
+        "repo_write": false
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "summary",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/SUMMARY.md",
+          "required": true,
+          "placement": "git_publication"
+        }
+      ],
+      "id": "apply",
+      "lane_id": "local",
+      "objective": "Apply the accepted review findings.",
+      "role_id": "author",
+      "task_prompt": {
+        "path": "prompts/apply.md"
+      },
+      "title": "Apply the accepted review",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/",
+          "docs/explanation/blob-transition.md",
+          "docs/reference/spec.md",
+          "docs/decisions/decision-log.md",
+          "go/pkg/artifactcontracts/",
+          "go/pkg/db/",
+          "go/pkg/mutations/",
+          "go/pkg/reads/",
+          "go/pkg/workflowauthoring/",
+          "go/pkg/workflowgenerate/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "local": {
+      "adapter": "process",
+      "capabilities": [
+        "write",
+        "review"
+      ],
+      "command": [
+        "sh",
+        "-c",
+        "cat >/dev/null"
+      ],
+      "display_model": "Local Fixture",
+      "allow_shared_checkout_repo_write": true,
+      "shared_checkout_repo_write_rationale": "This workflow is executed operator-by-hand inside the isolated /tmp/striatum-rfc-0123-implementation worktree for RFC 0123; no autonomous lane writes the primary checkout.",
+      "worktree_isolation": "off"
+    }
+  },
+  "name": "rfc-0123-artifact-placement-implementation",
+  "parallelism": {
+    "max_active_jobs": 1,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "roles": {
+    "author": {
+      "definition_path": "roles/author.md"
+    },
+    "reviewer": {
+      "definition_path": "roles/reviewer.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "rfc-0123-artifact-placement-implementation",
+  "workflow_version": "2026-06-13",
+  "operator_content_neutrality_override_rationale": "RFC 0123 implementation scaffold uses the local fixture lane inside an isolated implementation worktree; independent review is supplied by explicit guard passes and local verification for this autonomous execution.",
+  "allow_same_model_review_pairing": true
+}

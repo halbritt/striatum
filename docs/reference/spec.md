@@ -923,6 +923,25 @@ artifact kind, and content hash. Transcript artifacts are rejected by default.
 Markdown artifacts may include YAML front matter or title-block `author:`
 metadata; when they do, the line must exactly match the work packet's lowercase
 author line. The publisher still records artifacts rather than rewriting them.
+
+Artifact placement is explicit when a workflow declares
+`expected_artifacts[].placement`:
+
+- `blob_exhaust`: lane exhaust bodies are stored in the repository's blob
+  bucket when blob storage is configured. The artifact row records blob key,
+  blob sha, content type, and resolved placement.
+- `git_publication`: source-like or human-reviewable records stay anchored in
+  git through `repo_path` plus `content_sha256`.
+- `git_pointer_manifest`: a compact git-retained manifest points to blob
+  artifacts by id/hash/key without embedding lane-exhaust bodies.
+
+Workflows that omit placement remain valid. The compatibility default preserves
+the RFC 0072 kind routing: findings, syntheses, ledgers,
+`harness_improvement_proposal`, and `progress_note` default to `blob_exhaust`;
+other artifact kinds default to `git_publication`. New generated workflows emit
+explicit placement. `artifact.publish`, artifact reads/listings/exports, and
+doctor checks use the same resolved placement instead of treating artifact kind
+as the final storage authority.
 If a lane tries to publish or complete after its Striatum session is already
 terminal, the daemon returns `session_inactive` before lease validation and
 points at the daemon-backed same-attempt recovery path: requeue the job, claim

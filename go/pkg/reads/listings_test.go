@@ -136,7 +136,7 @@ func TestHandleListArtifactsUsesCurrentSchemaColumnNames(t *testing.T) {
 		t.Fatalf("count = %#v", result["count"])
 	}
 	items := result["items"].([]map[string]any)
-	if items[0]["kind"] != "synthesis" || items[0]["path"] != "docs/SUMMARY.md" {
+	if items[0]["kind"] != "synthesis" || items[0]["path"] != "docs/SUMMARY.md" || items[0]["placement"] != "blob_exhaust" {
 		t.Fatalf("artifact row = %#v", items[0])
 	}
 }

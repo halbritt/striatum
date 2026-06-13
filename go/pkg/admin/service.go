@@ -17,7 +17,8 @@ type Service struct {
 	// BlobClient is the daemon's S3 client. Nil when blob storage is
 	// not configured (STRIATUM_BLOB_ENDPOINT unset); RepoInit then
 	// records a NULL striatumd.repositories.blob_bucket and the
-	// publish path refuses blob-routed artifact kinds.
+	// publish path falls back to repo-path bodies even for blob_exhaust
+	// placements.
 	BlobClient *blob.Client
 }
 

@@ -8,14 +8,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
+	"github.com/halbritt/striatum/go/pkg/db"
 )
 
 const (
-	artifactAnchorHashMismatch = "artifact_anchor_hash_mismatch"
-	artifactAnchorMissingFile  = "artifact_anchor_missing_file"
+	artifactAnchorHashMismatch   = "artifact_anchor_hash_mismatch"
+	artifactAnchorMissingFile    = "artifact_anchor_missing_file"
+	artifactBlobMetadataMissing  = "artifact_blob_metadata_missing"
+	artifactBlobBodyVerifyFailed = "artifact_blob_body_verify_failed"
 )
 
-func doctorArtifactAnchorIntegrity(ctx context.Context, runner any, repositoryID string, blobBlock map[string]any) (map[string]any, []string, []map[string]any) {
+func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, repositoryID string, blobBlock map[string]any) (map[string]any, []string, []map[string]any) {
 	block := map[string]any{
 		"checked": false,
 		"skipped": artifactAnchorSkipReason(repositoryID, blobBlock),
@@ -27,6 +32,7 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner any, repositoryID
 	rows, err := collectRows(ctx, runner, `
 		SELECT a.repository_id, a.artifact_id, a.run_id, a.job_id, a.logical_name, a.repo_path,
 		       a.content_sha256, a.artifact_kind, a.blob_key,
+		       a.blob_sha256, a.blob_content_type`+artifactPlacementProjectionAny(ctx, runner, "a")+`,
 		       j.workflow_job_id, j.attempt, j.write_scope_json,
 		       r.repo_root, r.branch_name
 		  FROM striatumd.artifacts a
@@ -39,8 +45,6 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner any, repositoryID
 		 WHERE a.repository_id = $1
 		   AND j.state = 'completed'
 		   AND COALESCE(j.write_scope_json->>'repo_write', 'false') = 'true'
-		   AND NULLIF(a.repo_path, '') IS NOT NULL
-		   AND NULLIF(a.content_sha256, '') IS NOT NULL
 		 ORDER BY a.run_id, a.job_id, a.created_at, a.artifact_id`,
 		repositoryID,
 	)
@@ -52,18 +56,63 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner any, repositoryID
 	block["checked"] = true
 	block["skipped"] = nil
 	block["artifact_count"] = len(rows)
+	decorateArtifactPlacements(rows)
 	problems := []string{}
 	records := []map[string]any{}
+	gitChecked := 0
+	blobChecked := 0
+	bucket := ""
+	if packageBlobClient != nil {
+		var err error
+		bucket, err = lookupRepoBlobBucketRead(ctx, runner, repositoryID)
+		if err != nil {
+			block["error"] = err.Error()
+			return block, nil, nil
+		}
+	}
 	for _, row := range rows {
-		problem, record := checkArtifactAnchor(ctx, row)
+		placement := artifactcontracts.ResolvePlacement(stringFrom(row, "artifact_kind"), row["placement"])
+		row["placement"] = placement
+		var problem string
+		var record map[string]any
+		if artifactcontracts.PlacementUsesBlob(placement) {
+			blobChecked++
+			problem, record = checkBlobExhaustArtifact(ctx, row, bucket)
+		} else if artifactcontracts.PlacementUsesGitAnchor(placement) {
+			gitChecked++
+			problem, record = checkArtifactAnchor(ctx, row)
+		}
 		if problem == "" {
 			continue
 		}
 		problems = append(problems, problem)
 		records = append(records, record)
 	}
+	block["git_anchor_count"] = gitChecked
+	block["blob_exhaust_count"] = blobChecked
 	block["problem_count"] = len(problems)
 	return block, problems, records
+}
+
+func checkBlobExhaustArtifact(ctx context.Context, row map[string]any, bucket string) (string, map[string]any) {
+	blobKey := strings.TrimSpace(stringFrom(row, "blob_key"))
+	expected := strings.TrimSpace(stringFrom(row, "blob_sha256"))
+	if expected == "" {
+		expected = strings.TrimSpace(stringFrom(row, "content_sha256"))
+	}
+	if blobKey == "" || expected == "" {
+		return artifactBlobProblem(artifactBlobMetadataMissing, row, "blob_key_or_sha_missing")
+	}
+	if packageBlobClient == nil {
+		return "", nil
+	}
+	if bucket == "" {
+		return artifactBlobProblem(artifactBlobBodyVerifyFailed, row, "repository_blob_bucket_missing")
+	}
+	if _, err := packageBlobClient.GetBytes(ctx, bucket, blobKey, expected); err != nil {
+		return artifactBlobProblem(artifactBlobBodyVerifyFailed, row, err.Error())
+	}
+	return "", nil
 }
 
 func artifactAnchorSkipReason(repositoryID string, blobBlock map[string]any) string {
@@ -176,6 +225,7 @@ func artifactAnchorProblem(check string, row map[string]any, anchorRef, anchorCo
 		"logical_name":   row["logical_name"],
 		"repo_path":      row["repo_path"],
 		"content_sha256": row["content_sha256"],
+		"placement":      row["placement"],
 		"anchor_kind":    artifactAnchorKind(anchorRef),
 		"anchor_ref":     nullableString(anchorRef),
 		"anchor_commit":  nullableString(anchorCommit),
@@ -190,6 +240,33 @@ func artifactAnchorProblem(check string, row map[string]any, anchorRef, anchorCo
 		"check":   check,
 		"id":      artifactID,
 		"context": contextMap,
+	}
+	return message, record
+}
+
+func artifactBlobProblem(check string, row map[string]any, detail string) (string, map[string]any) {
+	artifactID := stringFrom(row, "artifact_id")
+	message := fmt.Sprintf("%s.%s: blob-exhaust artifact %s does not have a verified blob body", check, artifactID, artifactID)
+	if check == artifactBlobMetadataMissing {
+		message = fmt.Sprintf("%s.%s: blob-exhaust artifact %s is missing blob metadata", check, artifactID, artifactID)
+	}
+	record := map[string]any{
+		"check": check,
+		"id":    artifactID,
+		"context": map[string]any{
+			"repository_id":     row["repository_id"],
+			"run_id":            row["run_id"],
+			"job_id":            row["job_id"],
+			"artifact_id":       row["artifact_id"],
+			"logical_name":      row["logical_name"],
+			"repo_path":         row["repo_path"],
+			"content_sha256":    row["content_sha256"],
+			"placement":         row["placement"],
+			"blob_key":          row["blob_key"],
+			"blob_sha256":       row["blob_sha256"],
+			"blob_content_type": row["blob_content_type"],
+			"reason":            detail,
+		},
 	}
 	return message, record
 }

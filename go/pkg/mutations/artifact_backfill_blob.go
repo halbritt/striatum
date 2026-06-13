@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
 	"github.com/halbritt/striatum/go/pkg/blob"
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/rpc"
@@ -19,8 +20,8 @@ import (
 // RFC 0072 step 3 wired blob uploads into artifact.publish, and updates
 // the row's blob_key / blob_sha256 / blob_content_type columns.
 //
-// Used to recover artifacts that should have been blob-routed (per
-// blobRoutedKinds — finding, synthesis, etc.) but landed only on
+// Used to recover artifacts that resolve to blob_exhaust (explicit placement or
+// legacy kind default — finding, synthesis, etc.) but landed only on
 // repo_path because the publishing daemon binary predated step 3.
 //
 // Idempotent: if the row already has a non-empty blob_key, the handler
@@ -56,10 +57,14 @@ func backfillArtifactBlob(
 	artifactID string,
 	dryRun bool,
 ) (map[string]any, error) {
+	placementColumn := ""
+	if dbRunner, ok := runner.(db.Runner); ok && db.ArtifactPlacementColumnPresent(ctx, dbRunner) {
+		placementColumn = ", a.placement"
+	}
 	row, err := oneRow(ctx, runner, `
 		SELECT a.artifact_id, a.run_id, a.job_id, a.logical_name, a.artifact_kind,
 		       a.repo_path, a.content_sha256, a.size_bytes,
-		       a.blob_key, r.repo_root
+		       a.blob_key, r.repo_root`+placementColumn+`
 		  FROM striatumd.artifacts a
 		  JOIN striatumd.repositories r
 		    ON r.repository_id = a.repository_id
@@ -82,11 +87,12 @@ func backfillArtifactBlob(
 	}
 
 	kind, _ := row["artifact_kind"].(string)
-	if !isBlobRoutedKind(kind) {
+	placement := artifactcontracts.ResolvePlacement(kind, row["placement"])
+	if !artifactcontracts.PlacementUsesBlob(placement) {
 		return nil, rpc.NewError(
 			"invalid_transition",
-			fmt.Sprintf("artifact kind %q is not blob-routed (see blobRoutedKinds); only finding/synthesis/*_ledger/etc. are eligible for backfill", kind),
-			map[string]any{"skipped_kind": kind},
+			fmt.Sprintf("artifact placement %q is not blob_exhaust; only blob-exhaust artifacts are eligible for backfill", placement),
+			map[string]any{"skipped_kind": kind, "placement": placement},
 		)
 	}
 

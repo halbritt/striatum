@@ -90,6 +90,42 @@ func TestDoctorArtifactAnchorIntegrityAcceptsRunBranchMatch(t *testing.T) {
 	}
 }
 
+func TestDoctorArtifactAnchorIntegrityDoesNotGitCheckBlobExhaustArtifact(t *testing.T) {
+	row := artifactAnchorRow("/tmp/repo", "art_blob", "run_blob", "job_blob", "main", "docs/missing.md", testSHA256("blob body\n"))
+	row["artifact_kind"] = "synthesis"
+	row["placement"] = "blob_exhaust"
+
+	block, problems, records := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{artifactRows: []map[string]any{row}}, "repo_anchor", healthyBlobBlock())
+	if block["git_anchor_count"] != 0 || block["blob_exhaust_count"] != 1 {
+		t.Fatalf("block counts = %#v", block)
+	}
+	if !strings.Contains(strings.Join(problems, "\n"), "artifact_blob_metadata_missing.art_blob") {
+		t.Fatalf("problems = %#v, want blob metadata problem", problems)
+	}
+	if len(records) != 1 || records[0]["check"] != artifactBlobMetadataMissing {
+		t.Fatalf("records = %#v, want blob metadata record", records)
+	}
+	contextMap := records[0]["context"].(map[string]any)
+	if contextMap["placement"] != "blob_exhaust" {
+		t.Fatalf("record context = %#v, want placement", contextMap)
+	}
+}
+
+func TestDoctorArtifactAnchorIntegrityGitChecksExplicitGitPublicationSynthesis(t *testing.T) {
+	repoRoot, runBranch, artifactPath, contentSHA := seedAnchoredArtifact(t, "git synthesis\n")
+	row := artifactAnchorRow(repoRoot, "art_git_synth", "run_git_synth", "job_git_synth", runBranch, artifactPath, contentSHA)
+	row["artifact_kind"] = "synthesis"
+	row["placement"] = "git_publication"
+
+	block, problems, records := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{artifactRows: []map[string]any{row}}, "repo_anchor", healthyBlobBlock())
+	if block["git_anchor_count"] != 1 || block["blob_exhaust_count"] != 0 {
+		t.Fatalf("block counts = %#v", block)
+	}
+	if len(problems) != 0 || len(records) != 0 {
+		t.Fatalf("problems=%#v records=%#v, want clean git-published synthesis", problems, records)
+	}
+}
+
 func TestDoctorArtifactAnchorIntegrityReportsRunBranchMismatch(t *testing.T) {
 	repoRoot, runBranch, artifactPath, _ := seedAnchoredArtifact(t, "actual body\n")
 	expectedSHA := testSHA256("expected body\n")

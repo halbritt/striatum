@@ -1224,6 +1224,44 @@ func TestValidateAcceptsKnownArtifactKinds(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsKnownArtifactPlacements(t *testing.T) {
+	for _, placement := range []string{"blob_exhaust", "git_publication", "git_pointer_manifest"} {
+		workflow := validWorkflow()
+		jobs := workflow["jobs"].([]any)
+		draft := jobs[0].(map[string]any)
+		draft["expected_artifacts"] = []any{map[string]any{
+			"logical_name": "artifact",
+			"kind":         "synthesis",
+			"path":         "src/artifact.md",
+			"required":     true,
+			"placement":    placement,
+		}}
+		if err := Validate(workflow); err != nil {
+			t.Fatalf("Validate placement %q failed: %v", placement, err)
+		}
+	}
+}
+
+func TestValidateRejectsUnknownArtifactPlacement(t *testing.T) {
+	workflow := validWorkflow()
+	jobs := workflow["jobs"].([]any)
+	draft := jobs[0].(map[string]any)
+	draft["expected_artifacts"] = []any{map[string]any{
+		"logical_name": "artifact",
+		"kind":         "synthesis",
+		"path":         "src/artifact.md",
+		"required":     true,
+		"placement":    "warehouse",
+	}}
+	err := Validate(workflow)
+	if err == nil || !strings.Contains(err.Error(), "unknown artifact placement") {
+		t.Fatalf("Validate unknown artifact placement error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "warehouse") || !strings.Contains(err.Error(), "draft") {
+		t.Fatalf("Validate error must name placement and job: %v", err)
+	}
+}
+
 func writeWorkflow(t *testing.T, path string, workflow map[string]any) {
 	t.Helper()
 	raw, err := json.Marshal(workflow)

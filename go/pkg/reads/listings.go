@@ -158,7 +158,7 @@ func HandleListArtifacts(ctx context.Context, runner db.Runner, envelope rpc.Env
 		`SELECT a.artifact_id, a.run_id, a.job_id, a.session_id,
 		        a.artifact_kind AS kind, a.logical_name,
 		        a.repo_path AS path, a.content_sha256, a.author_line AS byline,
-		        a.created_at AS published_at`+artifactProvenanceColumns+`
+		        a.created_at AS published_at`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+
 			where+
 			` ORDER BY a.created_at DESC`+limit,
@@ -167,6 +167,7 @@ func HandleListArtifacts(ctx context.Context, runner db.Runner, envelope rpc.Env
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(items)
 	decorateArtifactProvenance(items)
 	return map[string]any{"count": len(items), "limit": count, "items": items}, nil
 }

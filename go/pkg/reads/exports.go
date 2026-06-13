@@ -76,7 +76,7 @@ func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelo
 	artifacts, err := collectRows(ctx, runner,
 		`SELECT a.artifact_id, a.job_id, a.artifact_kind AS kind, a.logical_name,
 		        a.repo_path AS path, a.content_sha256, a.author_line AS byline,
-		        a.created_at AS published_at`+artifactProvenanceColumns+`
+		        a.created_at AS published_at`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+`
 		  WHERE a.repository_id = $1 AND a.run_id = $2
 		  ORDER BY a.created_at`,
@@ -85,6 +85,7 @@ func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelo
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(artifacts)
 	decorateArtifactProvenance(artifacts)
 
 	verdicts, err := collectRows(ctx, runner,
@@ -206,7 +207,7 @@ func HandleEvidenceExport(ctx context.Context, runner db.Runner, envelope rpc.En
 	artifacts, err := collectRows(ctx, runner,
 		`SELECT a.artifact_id, a.run_id, a.job_id, a.artifact_kind AS kind,
 		        a.logical_name, a.repo_path AS path, a.content_sha256,
-		        a.author_line AS byline, a.created_at AS published_at`+artifactProvenanceColumns+`
+		        a.author_line AS byline, a.created_at AS published_at`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+`
 		  WHERE a.repository_id = $1 AND a.run_id = $2
 		  ORDER BY a.created_at DESC LIMIT 500`,
@@ -216,6 +217,7 @@ func HandleEvidenceExport(ctx context.Context, runner db.Runner, envelope rpc.En
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(artifacts)
 	decorateArtifactProvenance(artifacts)
 	verdicts, err := collectRows(ctx, runner,
 		`SELECT verdict_id, run_id, job_id, verdict,
@@ -375,7 +377,7 @@ func HandleCorpusExport(ctx context.Context, runner db.Runner, envelope rpc.Enve
 	rows, err := collectRows(ctx, runner,
 		`SELECT a.artifact_id, a.run_id, a.artifact_kind AS kind, a.logical_name,
 		        a.repo_path AS path, a.content_sha256, a.author_line AS byline,
-		        a.created_at AS published_at`+artifactProvenanceColumns+`
+		        a.created_at AS published_at`+artifactPlacementProjection(ctx, runner, "a")+artifactProvenanceColumns+`
 		   FROM striatumd.artifacts a`+artifactProvenanceJoins+`
 		  WHERE a.repository_id = $1
 		  ORDER BY a.created_at DESC`+limit,
@@ -384,6 +386,7 @@ func HandleCorpusExport(ctx context.Context, runner db.Runner, envelope rpc.Enve
 	if err != nil {
 		return nil, err
 	}
+	decorateArtifactPlacements(rows)
 	decorateArtifactProvenance(rows)
 	redactedRows := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {

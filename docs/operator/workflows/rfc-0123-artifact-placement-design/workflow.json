@@ -1,0 +1,499 @@
+{
+  "branch": {
+    "allow_dirty": false,
+    "mode": "confirm",
+    "suggested_name": "codex/rfc-0123-artifact-placement"
+  },
+  "context_docs": [
+    "docs/rfcs/0123-blob-routed-lane-exhaust-and-git-publication-specs.md",
+    "docs/explanation/blob-transition.md",
+    "go/pkg/mutations/artifact.go",
+    "go/pkg/reads/artifact_content.go",
+    "go/pkg/reads/doctor_artifact_anchor.go",
+    "go/pkg/workflowauthoring/workflow.go",
+    "go/pkg/workflowgenerate/"
+  ],
+  "coordinator": {
+    "lane_id": "local",
+    "role_id": "problem_framer"
+  },
+  "cycles": [
+    {
+      "allow_same_lane": true,
+      "from": "review_dissent",
+      "max_iterations": 1,
+      "on_verdict": "needs_revision",
+      "to": "arbitrate",
+      "allow_same_model": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "propose_option_a"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "propose_option_b"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "propose_option_c"
+    },
+    {
+      "from": "propose_option_a",
+      "on": "completed",
+      "to": "score_option_a"
+    },
+    {
+      "from": "propose_option_b",
+      "on": "completed",
+      "to": "score_option_b"
+    },
+    {
+      "from": "propose_option_c",
+      "on": "completed",
+      "to": "score_option_c"
+    },
+    {
+      "from": "score_option_a",
+      "on": "completed",
+      "to": "compile_tradeoffs"
+    },
+    {
+      "from": "score_option_b",
+      "on": "completed",
+      "to": "compile_tradeoffs"
+    },
+    {
+      "from": "score_option_c",
+      "on": "completed",
+      "to": "compile_tradeoffs"
+    },
+    {
+      "from": "compile_tradeoffs",
+      "on": "completed",
+      "to": "arbitrate"
+    },
+    {
+      "from": "arbitrate",
+      "on": "completed",
+      "to": "review_dissent"
+    },
+    {
+      "from": "review_dissent",
+      "on": "completed",
+      "to": "record_decision"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "problem_brief",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/PROBLEM_BRIEF.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "id": "frame_problem",
+      "lane_id": "local",
+      "objective": "Publish a concise implementation problem brief with constraints, goals, non-goals, and decision criteria.",
+      "role_id": "problem_framer",
+      "task_prompt": {
+        "path": "prompts/frame_problem.md"
+      },
+      "title": "Frame problem",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "proposal_a",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_a/PROPOSAL_A.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "propose_option_a",
+      "lane_id": "local",
+      "objective": "Develop implementation option A independently from the problem brief.",
+      "parallel_group": "proposals",
+      "role_id": "proposer_a",
+      "task_prompt": {
+        "path": "prompts/propose_option.md"
+      },
+      "title": "Propose option A",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_a/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "finding",
+          "logical_name": "scorecard_a",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/SCORECARD_A.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "score_option_a",
+      "lane_id": "local",
+      "objective": "Score proposal A against the implementation-panel dimensions: maintainability, migration_risk, reversibility.",
+      "parallel_group": "scorecards",
+      "review_posture": "custom:maintainability",
+      "role_id": "scorekeeper",
+      "task_prompt": {
+        "path": "prompts/score_option.md"
+      },
+      "title": "Score option A",
+      "type": "review",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "review_only_artifact",
+        "repo_write": false
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "proposal_b",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_b/PROPOSAL_B.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "propose_option_b",
+      "lane_id": "local",
+      "objective": "Develop implementation option B independently from the problem brief.",
+      "parallel_group": "proposals",
+      "role_id": "proposer_b",
+      "task_prompt": {
+        "path": "prompts/propose_option.md"
+      },
+      "title": "Propose option B",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_b/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "finding",
+          "logical_name": "scorecard_b",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/SCORECARD_B.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "score_option_b",
+      "lane_id": "local",
+      "objective": "Score proposal B against the implementation-panel dimensions: maintainability, migration_risk, reversibility.",
+      "parallel_group": "scorecards",
+      "review_posture": "custom:maintainability",
+      "role_id": "scorekeeper",
+      "task_prompt": {
+        "path": "prompts/score_option.md"
+      },
+      "title": "Score option B",
+      "type": "review",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "review_only_artifact",
+        "repo_write": false
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "proposal_c",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_c/PROPOSAL_C.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "propose_option_c",
+      "lane_id": "local",
+      "objective": "Develop implementation option C independently from the problem brief.",
+      "parallel_group": "proposals",
+      "role_id": "proposer_c",
+      "task_prompt": {
+        "path": "prompts/propose_option.md"
+      },
+      "title": "Propose option C",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/proposals/option_c/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "finding",
+          "logical_name": "scorecard_c",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/SCORECARD_C.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "score_option_c",
+      "lane_id": "local",
+      "objective": "Score proposal C against the implementation-panel dimensions: maintainability, migration_risk, reversibility.",
+      "parallel_group": "scorecards",
+      "review_posture": "custom:maintainability",
+      "role_id": "scorekeeper",
+      "task_prompt": {
+        "path": "prompts/score_option.md"
+      },
+      "title": "Score option C",
+      "type": "review",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/scorecards/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "review_only_artifact",
+        "repo_write": false
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "findings_ledger",
+          "logical_name": "tradeoff_ledger",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/TRADEOFF_LEDGER.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "id": "compile_tradeoffs",
+      "lane_id": "local",
+      "objective": "Compile proposal and scorecard evidence into a normalized tradeoff ledger.",
+      "role_id": "tradeoff_ledger",
+      "task_prompt": {
+        "path": "prompts/compile_tradeoffs.md"
+      },
+      "title": "Compile tradeoffs",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "arbitrator_synthesis",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/ARBITRATOR_SYNTHESIS.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "id": "arbitrate",
+      "lane_id": "local",
+      "objective": "Select or compose the preferred implementation path from the tradeoff ledger and evidence.",
+      "role_id": "arbitrator",
+      "task_prompt": {
+        "path": "prompts/arbitrate.md"
+      },
+      "title": "Arbitrate preferred option",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "finding",
+          "logical_name": "dissent_review",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/DISSENT_REVIEW.md",
+          "required": true,
+          "placement": "blob_exhaust"
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "review_dissent",
+      "lane_id": "local",
+      "objective": "Try to falsify the arbitration before the final decision is recorded.",
+      "review_posture": "devils_advocate",
+      "role_id": "dissent_reviewer",
+      "task_prompt": {
+        "path": "prompts/review_dissent.md"
+      },
+      "title": "Review dissent",
+      "type": "review",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "review_only_artifact",
+        "repo_write": false
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "decision",
+          "logical_name": "decision",
+          "path": "docs/operator/artifacts/rfc-0123-artifact-placement-design/DECISION.md",
+          "required": true,
+          "placement": "git_publication"
+        }
+      ],
+      "id": "record_decision",
+      "lane_id": "local",
+      "objective": "Publish the final implementation decision and required follow-up work.",
+      "role_id": "principal_decider",
+      "task_prompt": {
+        "path": "prompts/record_decision.md"
+      },
+      "title": "Record decision",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0123-artifact-placement-design/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "local": {
+      "adapter": "process",
+      "capabilities": [
+        "write",
+        "review"
+      ],
+      "command": [
+        "sh",
+        "-c",
+        "cat >/dev/null"
+      ],
+      "display_model": "Local Fixture",
+      "allow_shared_checkout_repo_write": true,
+      "shared_checkout_repo_write_rationale": "This workflow is executed operator-by-hand inside the isolated /tmp/striatum-rfc-0123-implementation worktree for RFC 0123; no autonomous lane writes the primary checkout.",
+      "worktree_isolation": "off"
+    }
+  },
+  "name": "rfc-0123-artifact-placement-design",
+  "parallelism": {
+    "max_active_jobs": 3,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "roles": {
+    "arbitrator": {
+      "definition_path": "roles/arbitrator.md"
+    },
+    "dissent_reviewer": {
+      "definition_path": "roles/dissent_reviewer.md"
+    },
+    "principal_decider": {
+      "definition_path": "roles/principal_decider.md"
+    },
+    "problem_framer": {
+      "definition_path": "roles/problem_framer.md"
+    },
+    "proposer_a": {
+      "definition_path": "roles/proposer_a.md"
+    },
+    "proposer_b": {
+      "definition_path": "roles/proposer_b.md"
+    },
+    "proposer_c": {
+      "definition_path": "roles/proposer_c.md"
+    },
+    "scorekeeper": {
+      "definition_path": "roles/scorekeeper.md"
+    },
+    "tradeoff_ledger": {
+      "definition_path": "roles/tradeoff_ledger.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "rfc-0123-artifact-placement-design",
+  "workflow_version": "2026-06-13",
+  "operator_content_neutrality_override_rationale": "RFC 0123 design scaffold uses the local fixture lane inside an isolated implementation worktree; model-family independence is supplied by the operator guard passes and repository tests for this autonomous execution.",
+  "allow_same_model_review_pairing": true
+}
