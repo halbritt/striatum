@@ -40,7 +40,9 @@ striatum --repo <path> workflow validate --allow-same-model-pairing \
   striatum/workflows/refactoring-campaign-<slug>/stage-N-*/workflow.json
 striatum --repo <path> run prepare --workflow <that path>   # + branch confirm
 striatum --repo <path> run start --run-id <id>
-# supervise lanes per striatum-supervise, then block until terminal:
+# run start auto-drives the run (#212): it registers + supervises a lane per
+# role/lane as the DAG unblocks, no operator process in the loop. Just wait for
+# terminal (pass --no-drive on run start if you want to drive it yourself):
 scripts/wait-run.sh <run-id> 60 <path>
 ```
 

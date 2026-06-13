@@ -40,11 +40,15 @@ For each stage, in order:
 1. `striatum --repo <target> workflow validate --allow-same-model-pairing <workflow.json>`
 2. `striatum --repo <target> run prepare --workflow <workflow.json>` and
    confirm the branch (`branch.mode: confirm` — `striatum branch confirm`).
-3. `striatum --repo <target> run start --run-id <id>`
+3. `striatum --repo <target> run start --run-id <id>` — auto-drives the run by
+   default (#212), so steps 4 below normally happen on their own; just wait for
+   terminal (`scripts/wait-run.sh`). Pass `--no-drive` to own driving yourself.
 4. `striatum --repo <target> run drive --run-id <id>` blocks until the run is
    terminal, registering/supervising one fresh session per role/lane as the DAG
    unblocks and closing terminal or superseded launched lanes before fresh
-   reviewers.
+   reviewers. With auto-drive on, this explicit driver is **optional** — it is
+   idempotent, so it composes safely with the background driver (it then just
+   serves as a foreground terminal-state waiter).
    Use `--json` for machine-readable progress or `--once` when an external
    harness owns the polling. A `needs_revision` verdict still auto-spawns the
    next attempt through daemon state; do not fight it with manual session loops.

@@ -1,4 +1,4 @@
-# How-to: Daemonize `run drive` to take orchestration off the operator-model loop
+# How-to: Auto-drive runs off the operator-model loop
 
 `striatum run drive` is a deterministic Go reconcile loop over existing daemon
 RPC methods (RFC 0116 / D175). It registers a session and supervises a lane for
@@ -8,131 +8,109 @@ and blocks until the run reaches a terminal state — escalating loud on refusal
 "spawn the next lane" work that an AI operator would otherwise hand-drive is
 done by the binary, not by a frontier model.
 
-Running it under systemd makes that token relief *standing* instead of
-something the operator model has to babysit in-session. This is the recommended
-way to drive long runs when the operator is an expensive model. It is also the
-exact operational evidence that issue #212 (`supervision.auto_spawn`) names as
-its first revisit trigger — "operators routinely run `run drive` as a
-daemonized background process anyway."
+**You do not have to launch it by hand.** As of the #212 auto-drive wiring,
+`striatum run start` launches a detached driver for the run it just started, so
+the run reconciles itself to a terminal state with **no operator process — and
+no operator-model tokens — in the loop.** This is on by default; the rest of
+this page is just how to observe, stop, or opt out of it.
 
-> This how-to introduces no product-boundary change. Every spawn is still a
+> Auto-drive introduces no product-boundary change. Every spawn is still a
 > capability-authenticated `supervise.start` RPC carrying the operator
-> principal — the service just owns the loop instead of an interactive
-> operator session. The residual it does *not* remove (a standing process
-> holding the operator's capability for the run's lifetime) is precisely what
-> [RFC 0122](../rfcs/0122-scheduler-principal-auto-spawn.md) would close.
+> principal — the detached driver just owns the loop instead of an interactive
+> operator session. The residual it does *not* remove (a process holding the
+> operator's capability for the run's lifetime) is precisely what
+> [RFC 0122](../rfcs/0122-scheduler-principal-auto-spawn.md) (accepted, D189)
+> closes by moving spawn authority into the daemon.
 
-## Prerequisites
-
-- The daemon is running (`systemctl --user status striatumd`).
-- The target repository is registered and a run is prepared and started
-  (`striatum --repo <target> run prepare …` → `run start --run-id <id>`).
-- A runtime client-token exists for the daemon (minted on daemon start under
-  `$XDG_RUNTIME_DIR/striatum/client-token`); `run drive` discovers it the same
-  way every other CLI verb does.
-- Provider auth (if any lane needs it) is satisfied, or you pass an explicit
-  `--provider-auth-gate` mode (RFC 0121).
-
-## The unit (user service, one instance per run)
-
-`run drive` is per-run (`--run-id` is required; there is no `--all`), so model
-it as a systemd *template* instanced by run id. Install as a **user** unit so it
-shares the operator's `XDG_RUNTIME_DIR` (where the client-token lives) and runs
-as the operator OS user — the same principal an interactive `supervise start`
-would carry.
-
-`~/.config/systemd/user/striatum-run-drive@.service`:
-
-```ini
-[Unit]
-Description=striatum run drive for run %i
-# Driver is a client of the daemon; it should come up after it and stop trying
-# if the daemon is gone (the loop will escalate loud rather than spin silently).
-After=striatumd.service
-Wants=striatumd.service
-
-[Service]
-Type=simple
-# Resolve the target repository and the run from a per-run env file you write
-# once at run-start time (see below). Keeps the unit generic across repos/runs.
-EnvironmentFile=%h/.config/striatum/run-drive/%i.env
-# ~/.local/bin holds the striatum CLI; daemon-spawned lanes only get this on
-# PATH, so be explicit here too.
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-WorkingDirectory=%h
-ExecStart=%h/.local/bin/striatum --repo ${STRIATUM_TARGET_REPO} run drive \
-  --run-id %i \
-  --interval ${STRIATUM_DRIVE_INTERVAL} \
-  --provider-auth-gate ${STRIATUM_DRIVE_AUTH_GATE} \
-  --json
-# run drive exits 0 when the run reaches a terminal state and non-zero on a
-# loud refusal it could not resolve with normal lifecycle verbs. Do NOT restart
-# on terminal success; do surface a refusal in the journal rather than masking
-# it behind a respawn loop.
-Restart=no
-
-[Install]
-WantedBy=default.target
-```
-
-Per-run env file `~/.config/striatum/run-drive/<run-id>.env`:
+## What happens on `run start`
 
 ```sh
-STRIATUM_TARGET_REPO=/abs/path/to/target/repo
-STRIATUM_DRIVE_INTERVAL=15s
-STRIATUM_DRIVE_AUTH_GATE=auto
+striatum --repo /path/to/target run start --run-id run_abc123
+# run start: auto-driving run_abc123 in background
+#   (logs: journalctl --user -u striatum-drive-run_abc123 -f;
+#    stop:  systemctl --user stop striatum-drive-run_abc123)
 ```
 
-## Drive a run
+`run start` runs the start verbatim, then launches the driver in a **transient
+systemd user unit** named `striatum-drive-<run-id>`. The unit:
+
+- runs as the operator OS user, in the operator's systemd user session — the
+  same session the daemon runs in (`systemctl --user status striatumd`), so it
+  inherits `XDG_RUNTIME_DIR` and discovers the runtime client-token exactly as
+  any other CLI verb does;
+- survives the `run start` process exiting;
+- is **idempotent** — a second `run start` (or a manual `run drive`) for the
+  same run is safe: the driver re-derives state from daemon reads and checks for
+  a live session before spawning, so it never double-spawns a lane;
+- garbage-collects itself (`--collect`) once the run reaches a terminal state.
+
+Auto-drive is **best-effort**: if `systemd-run` is unavailable (e.g. a container
+with no user systemd session) the start still succeeds and prints a one-line
+hint with the manual `run drive` command. It never changes the start's exit
+code, and its notices go to stderr only, so `--json` consumers are unaffected.
+
+## Observe a driving run
 
 ```sh
-RUN=run_abcd1234
-mkdir -p ~/.config/striatum/run-drive
-cat > ~/.config/striatum/run-drive/$RUN.env <<EOF
-STRIATUM_TARGET_REPO=$HOME/git/your-target-repo
-STRIATUM_DRIVE_INTERVAL=15s
-STRIATUM_DRIVE_AUTH_GATE=auto
-EOF
-
-systemctl --user daemon-reload
-systemctl --user start striatum-run-drive@$RUN.service   # detached; no model in the loop
-journalctl --user -u striatum-run-drive@$RUN.service -f   # watch reconcile actions / loud escalations
+RUN=run_abc123
+journalctl --user -u striatum-drive-$RUN -f        # reconcile actions / loud escalations
+systemctl --user status striatum-drive-$RUN        # is it still driving?
+striatum dashboard --run-id $RUN                    # the human view of the run itself
 ```
 
-Because `run drive` is idempotent and holds no durable state of its own, a
-restart of the service simply re-reconciles from daemon reads — it will not
-double-spawn lanes that already have live sessions. Stopping the service mid-run
-is safe; restart it to resume driving.
+When the run reaches a terminal state the driver exits and the transient unit is
+collected. A non-zero driver exit means it hit a refusal it surfaced loudly
+(RFC 0105) — read the journal and resolve the underlying job, then re-`run start`
+(idempotent) or `striatum run drive --run-id $RUN` to resume driving.
+
+## Stop or opt out
 
 ```sh
-systemctl --user stop striatum-run-drive@$RUN.service     # safe to stop; re-drive resumes
+systemctl --user stop striatum-drive-$RUN          # stop driving this run (safe; re-drive resumes)
 ```
 
-When the run reaches a terminal state the loop exits and the unit goes
-`inactive (dead)` with success — that is the expected end state, not a failure.
-A non-zero exit means `run drive` hit a refusal it surfaced loudly (RFC 0105);
-read the journal and resolve the underlying job, then restart the service to
-re-drive.
+Per-invocation opt-out:
+
+```sh
+striatum --repo <target> run start --run-id <id> --no-drive
+```
+
+Global opt-out (e.g. in CI, or when you drive runs yourself):
+
+```sh
+export STRIATUM_RUN_DRIVE_AUTO=0     # also accepts false / no / off
+```
+
+## Composition with explicit `run drive` and the refactoring-campaign skill
+
+Because the driver is idempotent, auto-drive composes safely with anything that
+also calls `run drive`:
+
+- The **refactoring-campaign skill** (`run prepare` → `run start` → `run drive`)
+  still works unchanged. With auto-drive on, the explicit foreground `run drive`
+  is now *optional* — it remains useful purely as a terminal-state **waiter** for
+  stage sequencing (or use the passive `wait-run.sh`); the background driver and
+  a foreground driver reconcile the same run harmlessly.
+- `run drive --once` and `dashboard --once` are unchanged single-shot frames.
 
 ## What this does and does not buy you
 
 - **Token burn:** removed for the mechanical spawn/supervise/stop loop — the
   operator model only re-engages for genuine judgment or escalation, never to
   advance a ready job.
-- **Latency:** `run drive` already blocks on the RFC 0120 wake bus rather than a
-  fixed sleep where available, so the `--interval` is a fallback ceiling, not
-  the steady-state reaction time.
-- **Control surface (partial):** the operator model no longer needs to *exercise*
-  register-session / supervise-start to advance the DAG, but the unit still
-  holds the operator's capability token for the run's lifetime. Fully removing
-  the standing operator credential (so the *daemon* owns spawn authority and the
-  operator model needs no spawn capability at all) is the subject of
-  [RFC 0122](../rfcs/0122-scheduler-principal-auto-spawn.md).
+- **Latency:** `run drive` blocks on the RFC 0120 wake bus rather than a fixed
+  sleep where available, so the poll interval is a fallback ceiling, not the
+  steady-state reaction time.
+- **Control surface (partial):** the operator model no longer has to *exercise*
+  register-session / supervise-start to advance the DAG, but the transient unit
+  still holds the operator's capability token for the run's lifetime. Fully
+  removing the standing operator credential — so the *daemon* owns spawn
+  authority and the operator model needs no spawn capability at all — is
+  [RFC 0122](../rfcs/0122-scheduler-principal-auto-spawn.md) (`supervision.auto_spawn`).
 
 ## Related
 
-- [RFC 0116](../rfcs/0116-zero-operator-touch-dag.md) — `run drive` design and
-  the `supervision.auto_spawn` deferral.
+- [RFC 0116](../rfcs/0116-zero-operator-touch-dag.md) — `run drive` design.
 - [RFC 0122](../rfcs/0122-scheduler-principal-auto-spawn.md) — scheduler
-  principal model that would let the daemon spawn directly.
+  principal that lets the daemon spawn directly (the next step beyond auto-drive).
 - [Daemon runbook](daemon-runbook.md) — daemon lifecycle and token minting.

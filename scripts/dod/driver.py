@@ -76,7 +76,10 @@ def main():
         run_id = prep.get("run_id") if isinstance(prep, dict) else None
         if not run_id:
             print(f"  prepare failed: {prep}", flush=True); break
-        start = cli("run", "start", "--run-id", run_id, check=False)
+        # --no-drive: this harness drives the run itself (drive_run below), so it
+        # opts out of run start's default background auto-drive (#212) to avoid two
+        # drivers racing the same run.
+        start = cli("run", "start", "--run-id", run_id, "--no-drive", check=False)
         print(f"  run {run_id} start={start.get('state') if isinstance(start,dict) else start}", flush=True)
         ok, reason = drive_run(run_id)
         print(f"  run {i} -> {'PASS' if ok else 'FAIL'} ({reason}) [{run_id}]", flush=True)

@@ -66,6 +66,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		return runRunDrive(driveArgs, stdout, stderr, globals)
 	}
+	// `run start` runs the start verbatim through the daemon route, then auto-drives
+	// the started run in a detached driver so the run reconciles to terminal with no
+	// operator (or operator-model) in the loop (#212). Opt out with `--no-drive` or
+	// STRIATUM_RUN_DRIVE_AUTO=0.
+	if len(globals.CommandArgs) > 1 && globals.CommandArgs[0] == "run" && globals.CommandArgs[1] == "start" {
+		return runRunStart(args, stdout, stderr, globals)
+	}
 	if len(globals.CommandArgs) > 0 && globals.CommandArgs[0] == "operator" {
 		operatorArgs := append([]string(nil), globals.CommandArgs[1:]...)
 		if globals.JSONOutput && !containsFlag(operatorArgs, "--json") {

@@ -1,6 +1,6 @@
 # RFC 0123: Blob-routed lane exhaust and git publication specs
 
-Status: proposed
+Status: accepted (D190; implemented)
 Date: 2026-06-13
 author: proposer-codex-gpt-5-001
 Context: [RFC 0072](0072-blob-backed-artifact-storage.md) (blob-backed
