@@ -1,0 +1,446 @@
+{
+  "branch": {
+    "allow_dirty": false,
+    "mode": "confirm",
+    "suggested_name": "striatum/di-run2"
+  },
+  "context_docs": [],
+  "coordinator": {
+    "lane_id": "claude",
+    "role_id": "problem_framer"
+  },
+  "cycles": [],
+  "edges": [
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_1_naive_ten_year_old"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_2_liability_chain_auditor"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_3_logistics"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_4_liquidity_provider"
+    },
+    {
+      "from": "branch_1_naive_ten_year_old",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_2_liability_chain_auditor",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_3_logistics",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_4_liquidity_provider",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "converge",
+      "on": "completed",
+      "to": "deepen_1"
+    },
+    {
+      "from": "converge",
+      "on": "completed",
+      "to": "deepen_2"
+    },
+    {
+      "from": "deepen_1",
+      "on": "completed",
+      "to": "final_synthesis"
+    },
+    {
+      "from": "deepen_2",
+      "on": "completed",
+      "to": "final_synthesis"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "problem_brief",
+          "path": "striatum/di-run2/artifacts/PROBLEM_BRIEF.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "frame_problem",
+      "lane_id": "claude",
+      "objective": "Publish a concise problem brief — the open-ended question to ideate on, plus constraints, goals, non-goals, and decision criteria. Do not propose solutions.",
+      "role_id": "problem_framer",
+      "task_prompt": {
+        "path": "prompts/frame_problem.md"
+      },
+      "title": "Frame problem",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_1_naive_ten_year_old",
+          "path": "striatum/di-run2/artifacts/branches/branch_1_naive_ten_year_old/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_1_naive_ten_year_old",
+      "lane_id": "claude",
+      "objective": "Vantage frame (naive_ten_year_old): You are a curious 10-year-old who has never seen software; describe naive but unencumbered approaches, ignore convention.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: naive_ten_year_old",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/branches/branch_1_naive_ten_year_old/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_2_liability_chain_auditor",
+          "path": "striatum/di-run2/artifacts/branches/branch_2_liability_chain_auditor/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_2_liability_chain_auditor",
+      "lane_id": "gemini",
+      "objective": "Vantage frame (liability_chain_auditor): Trace every decision to its last accountable owner; at which handoff does responsibility evaporate, and who is named when it fails?\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: liability_chain_auditor",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/branches/branch_2_liability_chain_auditor/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_3_logistics",
+          "path": "striatum/di-run2/artifacts/branches/branch_3_logistics/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_3_logistics",
+      "lane_id": "gpt",
+      "objective": "Vantage frame (logistics): Steal mechanisms from logistics: queues, batching, just-in-time, hub-and-spoke, returns, last-mile.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: logistics",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/branches/branch_3_logistics/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_4_liquidity_provider",
+          "path": "striatum/di-run2/artifacts/branches/branch_4_liquidity_provider/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_4_liquidity_provider",
+      "lane_id": "claude",
+      "objective": "Vantage frame (liquidity_provider): Who silently bears the volatility and what do they implicitly charge; which hidden subsidy makes the system look cheaper than it is?\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: liquidity_provider",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/branches/branch_4_liquidity_provider/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "findings_ledger",
+          "logical_name": "convergence_ledger",
+          "path": "striatum/di-run2/artifacts/CONVERGENCE.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "converge",
+      "lane_id": "gpt",
+      "objective": "You are the CRITIC. Read every branch's ideas (each branch ran a different frame, and branches may have run on different models). Score every idea on novelty, viability, and fit (0-10 each; weighted novelty 0.35 / viability 0.40 / fit 0.25 for ranking). Cluster the ideas by their underlying angle, not surface keywords. Flag traps — ideas that look attractive but are a hidden cost, false economy, or won't scale — each with a one-line reason. Select the top 2 picks by weighted score, excluding traps. CROSS-MODEL SIGNAL: explicitly note any idea independently surfaced by branches running on DIFFERENT model families — convergence across families is a confidence boost; record it. Publish the scored, clustered ledger.",
+      "role_id": "convergence_critic",
+      "task_prompt": {
+        "path": "prompts/converge.md"
+      },
+      "title": "Converge: score, cluster, trap-detect",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "deepen_1",
+          "path": "striatum/di-run2/artifacts/deepened/deepen_1/DEEPENED.md",
+          "placement": "blob_exhaust",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "deepen_1",
+      "lane_id": "claude",
+      "objective": "Take the idea ranked #1 in the convergence ledger. Sketch how it would actually work in 4-8 sentences, name the load-bearing risk, name the first concrete step a builder would take, then generate 3-5 child ideas (variations, hybrids, unlocks).",
+      "parallel_group": "deepen",
+      "role_id": "deepener",
+      "task_prompt": {
+        "path": "prompts/deepen.md"
+      },
+      "title": "Deepen pick 1",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/deepened/deepen_1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "deepen_2",
+          "path": "striatum/di-run2/artifacts/deepened/deepen_2/DEEPENED.md",
+          "placement": "blob_exhaust",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "deepen_2",
+      "lane_id": "gemini",
+      "objective": "Take the idea ranked #2 in the convergence ledger. Sketch how it would actually work in 4-8 sentences, name the load-bearing risk, name the first concrete step a builder would take, then generate 3-5 child ideas (variations, hybrids, unlocks).",
+      "parallel_group": "deepen",
+      "role_id": "deepener",
+      "task_prompt": {
+        "path": "prompts/deepen.md"
+      },
+      "title": "Deepen pick 2",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/deepened/deepen_2/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "ideation_synthesis",
+          "path": "striatum/di-run2/artifacts/IDEATION_SYNTHESIS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "final_synthesis",
+      "lane_id": "gpt",
+      "objective": "Assemble the operator-facing result from the deepened picks and the convergence ledger: the shortlist (2-4 ideas) with why each is on it, the non-obvious-but-viable pick marked with a star, the trap list (each with its one-line reason), and one wildcard provocation that opens a new direction.",
+      "role_id": "final_synthesizer",
+      "task_prompt": {
+        "path": "prompts/final_synthesis.md"
+      },
+      "title": "Final synthesis",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "striatum/di-run2/artifacts/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "claude": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "claude",
+        "--dangerously-skip-permissions"
+      ],
+      "display_model": "Claude Opus 4.8",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "gemini": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "agy"
+      ],
+      "display_model": "Gemini",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "gpt": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "codex",
+        "--yolo"
+      ],
+      "display_model": "GPT-5.5",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    }
+  },
+  "name": "di-run2",
+  "parallelism": {
+    "max_active_jobs": 4,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "roles": {
+    "convergence_critic": {
+      "definition_path": "roles/convergence_critic.md"
+    },
+    "deepener": {
+      "definition_path": "roles/deepener.md"
+    },
+    "diverger": {
+      "definition_path": "roles/diverger.md"
+    },
+    "final_synthesizer": {
+      "definition_path": "roles/final_synthesizer.md"
+    },
+    "problem_framer": {
+      "definition_path": "roles/problem_framer.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "di-run2",
+  "workflow_version": "2026-06-14"
+}
