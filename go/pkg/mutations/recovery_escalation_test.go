@@ -3,6 +3,7 @@ package mutations
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,6 +141,73 @@ func TestSweepEscalatesBudgetExhaustedJobToNeedsOperator(t *testing.T) {
 	}
 	if row["set"] != true {
 		t.Fatalf("run_escalated_at not set after escalation")
+	}
+}
+
+// TestEscalationNamesOffendingJobAndLane is the #311 carve-out: the
+// recovery_exhausted escalation must NAME the single offending job + lane, not
+// just emit the bare "recovery_exhausted" reason. seedDeadLaneRepoWriteJob pins
+// lane_selector_json={"lane_id":"claude"} on the implement job, so the lane is
+// resolvable. Asserts the lane lands in (a) the escalation blocker/inbox
+// payload_json, (b) the blocker description, and (c) the run.needs_operator
+// event's structured stuck_jobs array (with the stable reason code preserved).
+func TestEscalationNamesOffendingJobAndLane(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_escalate_names_lane"
+	runID, jobID, _, _, _ := seedDeadLaneRepoWriteJob(t, ctx, runner, repoID)
+	preseedExhaustedBudget(t, ctx, runner, repoID, runID, jobID)
+
+	if _, err := SweepRun(ctx, runner, repoID, runID, ""); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got := runStateOf(t, ctx, runner, repoID, runID); got != "needs_operator" {
+		t.Fatalf("post-sweep run state = %q, want needs_operator", got)
+	}
+
+	const wantLane = "claude" // seedDeadLaneRepoWriteJob pins lane_id=claude.
+
+	// (a) The escalation payload names the lane.
+	_, payload := recoveryExhaustedEscalation(t, ctx, runner, repoID, runID)
+	if got := fmt.Sprint(payload["lane"]); got != wantLane {
+		t.Fatalf("escalation payload lane = %q, want %q", got, wantLane)
+	}
+
+	// (b) The blocker description mentions the lane.
+	descRow, err := oneRow(ctx, runner, `
+		SELECT description FROM striatumd.blockers
+		 WHERE repository_id = $1 AND run_id = $2 AND blocker_kind = 'recovery_exhausted'`, repoID, runID)
+	if err != nil {
+		t.Fatalf("read blocker description: %v", err)
+	}
+	desc := fmt.Sprint(descRow["description"])
+	if !strings.Contains(desc, "lane="+wantLane) {
+		t.Fatalf("blocker description %q does not mention lane=%s", desc, wantLane)
+	}
+
+	// (c) The run.needs_operator event keeps the stable reason AND carries a
+	// stuck_jobs entry naming the offending workflow_job_id + lane.
+	ev, err := oneRow(ctx, runner, `
+		SELECT payload_json FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND event_type = 'run.needs_operator'
+		 ORDER BY event_id DESC LIMIT 1`, repoID, runID)
+	if err != nil {
+		t.Fatalf("read run.needs_operator event: %v", err)
+	}
+	evPayload := asMap(ev["payload_json"])
+	if got := fmt.Sprint(evPayload["reason"]); got != "recovery_exhausted" {
+		t.Fatalf("event reason = %q, want recovery_exhausted (stable code must be preserved)", got)
+	}
+	stuckJobsRaw, ok := evPayload["stuck_jobs"].([]any)
+	if !ok || len(stuckJobsRaw) != 1 {
+		t.Fatalf("stuck_jobs = %#v, want exactly 1 entry", evPayload["stuck_jobs"])
+	}
+	stuck := asMap(stuckJobsRaw[0])
+	if got := fmt.Sprint(stuck["workflow_job_id"]); got != "implement" {
+		t.Fatalf("stuck_jobs[0].workflow_job_id = %q, want implement", got)
+	}
+	if got := fmt.Sprint(stuck["lane"]); got != wantLane {
+		t.Fatalf("stuck_jobs[0].lane = %q, want %q", got, wantLane)
 	}
 }
 

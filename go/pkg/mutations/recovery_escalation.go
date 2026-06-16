@@ -37,10 +37,16 @@ const recoveryExhaustedBlockerKind = "recovery_exhausted"
 // It is idempotent + convergent: a budget row whose run_escalated_at is already
 // set is skipped, so re-running raises no duplicate blocker/escalation rows.
 func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID string) ([]map[string]any, error) {
+	// The job's lane is read straight off jobs.lane_selector_json->>'lane_id'
+	// (the canonical lane-name source — same projection runreconcile,
+	// dashboard_all, and the recovery decision tree use). NULLIF coerces an
+	// empty / missing selector to SQL NULL so an unresolvable lane degrades to
+	// "" downstream rather than erroring (#311 carve-out).
 	rows, err := queryRows(ctx, tx, `
 		SELECT jrs.job_id, jrs.requeue_count, jrs.transfer_count, jrs.respawn_count,
 		       jrs.last_recovery_action, jrs.last_stall_class,
-		       j.workflow_job_id
+		       j.workflow_job_id,
+		       NULLIF(j.lane_selector_json->>'lane_id','') AS lane
 		  FROM striatumd.job_recovery_state jrs
 		  LEFT JOIN striatumd.jobs j
 		    ON j.repository_id = jrs.repository_id AND j.job_id = jrs.job_id
@@ -58,6 +64,12 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 	for _, row := range rows {
 		jobID := fmt.Sprint(row["job_id"])
 		workflowJobID := fmt.Sprint(nullable(row["workflow_job_id"]))
+		// lane may be unresolvable (NULL selector, job row missing) — degrade to
+		// "" and omit it everywhere rather than erroring (#311 carve-out).
+		lane := ""
+		if v := nullable(row["lane"]); v != nil {
+			lane = fmt.Sprint(v)
+		}
 		stallClass := fmt.Sprint(nullable(row["last_stall_class"]))
 		lastAction := fmt.Sprint(nullable(row["last_recovery_action"]))
 		requeueCount := intFromAny(row["requeue_count"], 0)
@@ -71,9 +83,13 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		}
 		now := nowString()
 
+		laneClause := ""
+		if lane != "" {
+			laneClause = fmt.Sprintf(" lane=%s", lane)
+		}
 		description := fmt.Sprintf(
-			"autonomous recovery exhausted for job %s (%s): stall_class=%s, last_recovery_action=%s, recovery_attempts=%d; operator action required",
-			workflowJobID, jobID, stallClass, lastAction, recoveryAttempts,
+			"autonomous recovery exhausted for job %s (%s):%s stall_class=%s, last_recovery_action=%s, recovery_attempts=%d; operator action required",
+			workflowJobID, jobID, laneClause, stallClass, lastAction, recoveryAttempts,
 		)
 
 		// The structured escalation payload IS the operator-actionable artifact
@@ -94,6 +110,11 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			"respawn_count":              respawnCount,
 			"recovery_attempts":          recoveryAttempts,
 			"suggested_operator_actions": suggestedOperatorActions(stallClass),
+		}
+		// Name the offending lane in the structured escalation when resolvable
+		// (#311 carve-out). Omitted entirely if the lane could not be resolved.
+		if lane != "" {
+			payload["lane"] = lane
 		}
 		payloadArg, err := db.JSONBArg(tx, payload)
 		if err != nil {
@@ -133,20 +154,25 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			return nil, err
 		}
 
-		if _, err := appendEvent(ctx, tx, repositoryID, runID, "run.escalated", nil, jobID, nil, nil, nil, map[string]any{
+		escalatedEvent := map[string]any{
 			"workflow_job_id":   workflowJobID,
 			"job_id":            jobID,
 			"blocker_id":        blockerID,
 			"blocker_kind":      recoveryExhaustedBlockerKind,
 			"stall_class":       stallClass,
 			"recovery_attempts": recoveryAttempts,
-		}); err != nil {
+		}
+		if lane != "" {
+			escalatedEvent["lane"] = lane
+		}
+		if _, err := appendEvent(ctx, tx, repositoryID, runID, "run.escalated", nil, jobID, nil, nil, nil, escalatedEvent); err != nil {
 			return nil, err
 		}
 
 		raised = append(raised, map[string]any{
 			"workflow_job_id":   workflowJobID,
 			"job_id":            jobID,
+			"lane":              lane,
 			"blocker_id":        blockerID,
 			"blocker_kind":      recoveryExhaustedBlockerKind,
 			"stall_class":       stallClass,
@@ -170,13 +196,34 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		return nil, err
 	}
 	if _, err := appendEvent(ctx, tx, repositoryID, runID, "run.needs_operator", nil, nil, nil, nil, nil, map[string]any{
+		// KEEP the stable "recovery_exhausted" reason code: existing consumers /
+		// tests match it. ADD a structured stuck_jobs array so the offending
+		// job + lane is legible in the durable event chain (#311 carve-out).
 		"reason":            "recovery_exhausted",
 		"escalated_job_ids": escalatedJobIDs(raised),
 		"escalation_count":  len(raised),
+		"stuck_jobs":        stuckJobs(raised),
 	}); err != nil {
 		return nil, err
 	}
 	return raised, nil
+}
+
+// stuckJobs projects the raised escalations into the run.needs_operator event's
+// structured legibility array — one {workflow_job_id, lane, stall_class} object
+// per escalated job, so the offending job + lane is named in the durable event
+// chain (not just the bare "recovery_exhausted" reason). lane is "" when it
+// could not be resolved (#311 carve-out).
+func stuckJobs(raised []map[string]any) []any {
+	out := make([]any, 0, len(raised))
+	for _, r := range raised {
+		out = append(out, map[string]any{
+			"workflow_job_id": r["workflow_job_id"],
+			"lane":            r["lane"],
+			"stall_class":     r["stall_class"],
+		})
+	}
+	return out
 }
 
 func escalatedJobIDs(raised []map[string]any) []any {

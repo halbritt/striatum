@@ -223,6 +223,18 @@
 
 ### Fixed
 
+- **Recovery-exhausted escalations now name the offending job + lane (#311 carve-out).**
+  An RFC 0101 Phase 4 `recovery_exhausted` escalation previously surfaced only the
+  bare `recovery_exhausted` reason, never the lane behind the stalled job. The
+  escalation now threads the offending job's lane
+  (`jobs.lane_selector_json->>'lane_id'`) into the structured escalation
+  `payload_json` (`lane`, when resolvable), the blocker `description`
+  (`lane=<lane>`), and the `run.needs_operator` event (a structured `stuck_jobs`
+  array of `{workflow_job_id, lane, stall_class}`); the stable `recovery_exhausted`
+  reason code is preserved for existing consumers. An unresolvable lane degrades to
+  empty rather than erroring. No schema/RPC change. The design-heavy parts of #311
+  (restart-churn cap, finalize-majority/isolate-stalled-job, non-`pty_helper`
+  liveness recomputation) remain ready-for-human.
 - **#290 parallel fan-in siblings are integrated into the run branch, not stranded
   (D206).** When N author jobs fanned in to a downstream job, only the first to
   complete fast-forwarded the run branch; each later sibling's worktree had forked
