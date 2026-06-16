@@ -57,6 +57,7 @@
     {"command": "recovery", "subcommand": "invalidate-job", "method": "recovery.invalidate_job", "params": "recovery_invalidate"},
     {"command": "recovery", "subcommand": "reseal", "method": "recovery.reseal", "params": "recovery_reseal"},
     {"command": "recovery", "subcommand": "complete-stalled", "method": "recovery.complete_stalled", "params": "recovery_complete_stalled"},
+    {"command": "recovery", "subcommand": "resolve-blocker", "method": "recovery.resolve_blocker", "params": "recovery_resolve_blocker"},
     {"command": "evidence", "subcommand": "export", "method": "evidence.export", "params": "evidence_export"},
     {"command": "corpus", "subcommand": "export", "method": "corpus.export", "params": "corpus_export"},
     {"command": "recall", "subcommand": "search", "method": "recall.search", "params": "recall_search"},
@@ -1171,6 +1172,15 @@
     },
     {
       "method": "recovery.complete_stalled",
+      "required_capability": "recovery",
+      "repository_scope_mode": "single_repo",
+      "params_schema_version": 1,
+      "audit_class": "metadata",
+      "min_envelope": 1,
+      "deprecated": false
+    },
+    {
+      "method": "recovery.resolve_blocker",
       "required_capability": "recovery",
       "repository_scope_mode": "single_repo",
       "params_schema_version": 1,

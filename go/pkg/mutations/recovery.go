@@ -1616,6 +1616,13 @@ func completeAutoRecoveredJob(ctx context.Context, runner any, repositoryID, job
 	}); err != nil {
 		return nil, err
 	}
+	// #304: a blocked-severity blocker raised on an earlier attempt of this job
+	// must not dangle once the auto-recovery path completes it. Resolve the
+	// completing job's open autonomous blockers exactly as the normal
+	// HandleCompleteWork path does.
+	if err := resolveAutonomousBlockersOnCompletion(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), jobID, sessionID, now); err != nil {
+		return nil, err
+	}
 	if err := markJobTerminal(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), jobID); err != nil {
 		return nil, err
 	}
@@ -2561,6 +2568,12 @@ func completeRecoveredJob(ctx context.Context, runner any, repositoryID, jobID, 
 		return nil, err
 	}
 	if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "job.completed", sessionID, jobID, messageID, nil, leaseID, map[string]any{"summary": summary}); err != nil {
+		return nil, err
+	}
+	// #304: resolve the completing job's open autonomous blockers (e.g. a
+	// blocked-severity write_scope conflict raised on a prior attempt) so a
+	// recovery.resume --complete does not leave them dangling open.
+	if err := resolveAutonomousBlockersOnCompletion(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), jobID, sessionID, now); err != nil {
 		return nil, err
 	}
 	if err := markJobTerminal(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), jobID); err != nil {

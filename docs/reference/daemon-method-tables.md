@@ -126,6 +126,7 @@
 | `recovery.invalidate_job` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.reseal` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.complete_stalled` | `recovery` | `single_repo` | 1 | 1 | no |
+| `recovery.resolve_blocker` | `recovery` | `single_repo` | 1 | 1 | no |
 | `apply.receipt.show` | `read` | `single_repo` | 1 | 1 | no |
 | `apply.receipt.verify` | `read` | `single_repo` | 1 | 1 | no |
 | `repo.add` | `admin` | `daemon_global` | 1 | 1 | no |
@@ -210,6 +211,7 @@
 | `recovery invalidate-job` | `recovery.invalidate_job` | `recovery` | `single_repo` |
 | `recovery reseal` | `recovery.reseal` | `recovery` | `single_repo` |
 | `recovery complete-stalled` | `recovery.complete_stalled` | `recovery` | `single_repo` |
+| `recovery resolve-blocker` | `recovery.resolve_blocker` | `recovery` | `single_repo` |
 | `evidence export` | `evidence.export` | `read` | `single_repo` |
 | `corpus export` | `corpus.export` | `read` | `single_repo` |
 | `recall search` | `recall.search` | `read` | `single_repo` |

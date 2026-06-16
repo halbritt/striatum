@@ -191,6 +191,11 @@ func positionalNames(group string) []string {
 		// `striatum recovery complete-stalled <run-id> <job-id>` finalizes a
 		// recovery-exhausted job from its already-durable published artifacts.
 		return []string{"run_id", "job_id"}
+	case "recovery_resolve_blocker":
+		// #304: recovery.resolve_blocker keys on blocker_id so
+		// `striatum recovery resolve-blocker <blocker-id>` closes a dangling
+		// non-escalation, non-checkpoint blocker that no completion path cleared.
+		return []string{"blocker_id"}
 	case "evidence_export", "corpus_export", "archive_create":
 		return []string{"run_id", "out"}
 	case "recall_search":

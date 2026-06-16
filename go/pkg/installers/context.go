@@ -49,6 +49,7 @@ var verbGroups = map[string][]verbEntry{
 		{"recovery process-reconcile", "Reconcile externally-killed processes."},
 		{"recovery resume", "Resolve remediated process-adapter blockers."},
 		{"recovery complete-stalled", "Finalize a dead lane's job from its durable artifacts instead of hand-capturing the worktree (D200)."},
+		{"recovery resolve-blocker", "Close a dangling non-escalation, non-checkpoint blocker that no completion path cleared (#304)."},
 		{"checkpoint resolve", "Resolve a `human_checkpoint` blocker."},
 		{"dashboard --once", "Render a single dashboard frame for scripts."},
 	},

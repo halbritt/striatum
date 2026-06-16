@@ -1334,8 +1334,22 @@ func HandleCompleteWork(ctx context.Context, runner db.Runner, envelope rpc.Enve
 // durable event chain, and any matching escalation_inbox row is resolved too so
 // status/dashboard stop presenting a completed run's stale blocker as an active
 // next action.
-func resolveAutonomousBlockersOnCompletion(ctx context.Context, tx db.TxRunner, repositoryID, runID, jobID, sessionID, now string) error {
-	openBlockers, err := queryRows(ctx, tx, `
+//
+// The runner is accepted as `any` (not db.TxRunner) so every job.completed
+// path can reuse it: HandleCompleteWork passes the live tx, while the recovery
+// completion paths (#304: completeAutoRecoveredJob, completeRecoveredJob,
+// completeAutoFinalizedJob) pass the same tx through their `runner any`
+// parameter. Without this, a blocked-severity blocker raised on an earlier
+// attempt that a recovery/retry path later completed stayed open forever with
+// no resolution event — the dangling-blocker bug in #304.
+func resolveAutonomousBlockersOnCompletion(ctx context.Context, runner any, repositoryID, runID, jobID, sessionID, now string) error {
+	tx, ok := runner.(interface {
+		Exec(context.Context, string, ...any) error
+	})
+	if !ok {
+		return fmt.Errorf("runner does not support exec")
+	}
+	openBlockers, err := queryRows(ctx, runner, `
 		SELECT blocker_id, severity, blocker_kind
 		  FROM striatumd.blockers
 		 WHERE repository_id = $1 AND job_id = $2 AND state = 'open'`, repositoryID, jobID)

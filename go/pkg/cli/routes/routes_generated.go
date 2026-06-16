@@ -59,6 +59,7 @@ var generatedRoutes = []Route{
 	{Command: "recovery", Subcommand: "invalidate-job", Method: "recovery.invalidate_job", ParamsGroup: "recovery_invalidate", RequiredCapability: "recovery", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "recovery", Subcommand: "reseal", Method: "recovery.reseal", ParamsGroup: "recovery_reseal", RequiredCapability: "recovery", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "recovery", Subcommand: "complete-stalled", Method: "recovery.complete_stalled", ParamsGroup: "recovery_complete_stalled", RequiredCapability: "recovery", RepositoryScopeMode: "single_repo", Deprecated: false},
+	{Command: "recovery", Subcommand: "resolve-blocker", Method: "recovery.resolve_blocker", ParamsGroup: "recovery_resolve_blocker", RequiredCapability: "recovery", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "evidence", Subcommand: "export", Method: "evidence.export", ParamsGroup: "evidence_export", RequiredCapability: "read", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "corpus", Subcommand: "export", Method: "corpus.export", ParamsGroup: "corpus_export", RequiredCapability: "read", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "recall", Subcommand: "search", Method: "recall.search", ParamsGroup: "recall_search", RequiredCapability: "read", RepositoryScopeMode: "single_repo", Deprecated: false},

@@ -249,6 +249,18 @@
   `-c mcp_servers.striatum.url=<live>` override wins over a pre-existing
   `[mcp_servers.striatum]` config.toml section (previously asserted, never
   tested). No schema/RPC change.
+- **#304 a `blocked`-severity blocker no longer dangles open after a
+  retry/recovery completion.** A non-escalation `work.block` blocker raised on
+  an earlier job attempt is now resolved on **every** `job.completed` path —
+  including the recovery/retry paths (`completeRecoveredJob`,
+  `completeAutoRecoveredJob`, `completeAutoFinalizedJob`), not only the normal
+  `work.complete` path — emitting `blocker.resolved_on_completion` and reusing
+  the existing #175/#207 resolution mechanism, so a completed run stops inflating
+  the `open_blockers` frontier. A new operator verb `recovery resolve-blocker
+  <blocker-id>` (RPC `recovery.resolve_blocker`) closes any already-dangling
+  non-escalation, non-checkpoint blocker by id; it refuses `human_checkpoint`
+  blockers (use `checkpoint resolve`) and escalation-class blockers (use
+  `escalation resolve`), and does not mutate run/job state.
 - **#291 hung supervised sessions no longer stall a run silently.** A
   `queued`/claimable job whose bound supervised session is hung used to sit
   indefinitely with `supervisor_stalls.stalled_count:0` and no blocker; the
