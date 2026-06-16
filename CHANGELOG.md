@@ -238,6 +238,18 @@
   Tests/migrations/secondary modules an agent wrote but did not declare as
   `expected_artifacts` are now reported loudly at `work.complete` instead of
   being dropped untracked. (D203)
+- **#301 `workflow generate` multi-lane sets now emit `worktree_isolation:
+  "per_job"` on every autonomous repo-write lane, not just the first.** The
+  generator derived the repo-write lane set from a lane-name heuristic (every
+  lane not named `*reviewer*`), so a fan-out shape like `divergent_ideation` that
+  round-robins repo-write diverge/deepen jobs onto a lane named `reviewer` left
+  that lane without per-job isolation. `workflow validate` / `run prepare` then
+  rejected the generator's own output. Isolation is now reconciled against the
+  actual repo-write job→lane assignments in the compiled job graph (the same
+  per-job `repo_write` signal `RefuseAutonomousSharedCheckoutRepoWrite` enforces),
+  so generate and validate cannot disagree and a bare `author_reviewer` /
+  `multi_review` scaffold passes validate without a hand-edit or a manual
+  `--lane-modifier worktree_isolated`.
 - **#307 `divergent_ideation` deepen artifacts now carry uniform front matter
   across lanes.** The `deepener` role stub and `deepen` prompt stub now instruct
   every deepen lane to emit an `author:` byline and a complete `inputs:` list

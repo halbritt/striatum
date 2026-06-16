@@ -346,6 +346,17 @@ func Generate(spec Spec) (Generated, error) {
 	if phases == nil {
 		phases = []map[string]any{}
 	}
+	// #301: reconcile lane worktree isolation against the jobs that were actually
+	// compiled. compileLanes applies the #242 per-job isolation default using a
+	// lane-name heuristic (every non-`*reviewer*` lane is repo-write), but in
+	// shapes like divergent_ideation the lane ring round-robins repo-write
+	// diverge/deepen jobs onto every lane — including a lane named `reviewer`.
+	// That lane then carries an autonomous repo-write job but no
+	// worktree_isolation, so `workflow validate` / `run prepare` reject the
+	// generator's own output. Deriving the repo-write lane set from the job graph
+	// (the same source of truth the validator uses) keeps generate and validate
+	// from disagreeing.
+	applyRepoWriteWorktreeIsolation(lanes, jobs)
 	if spec.Shape == "implementation_panel" {
 		warnings = append(warnings, "implementation_panel generates a high-artifact workflow; review proposal_count, score_dimensions, and lane costs before running.")
 	}
@@ -1069,6 +1080,51 @@ func applyLaneModifiers(spec Spec, lanes map[string]any, repoWrite map[string]st
 		}
 	}
 	return result, nil
+}
+
+// applyRepoWriteWorktreeIsolation guarantees that every lane carrying an
+// autonomous/supervised repo-write job gets worktree_isolation: per_job (#301).
+// It mutates the shared `lanes` map in place. The repo-write lane set is derived
+// from the compiled jobs (write_scope.repo_write / mode == "repo_write") rather
+// than a lane-name heuristic, so it covers every lane the job graph actually
+// assigns repo-write work to — including a lane named `reviewer` that a fan-out
+// shape (e.g. divergent_ideation) round-robins diverge/deepen jobs onto. This is
+// the same per-job repo-write signal workflowauthoring.RefuseAutonomousShared-
+// CheckoutRepoWrite enforces at validate/prepare, so generate cannot emit output
+// that its own validator rejects.
+func applyRepoWriteWorktreeIsolation(lanes map[string]any, jobs []map[string]any) {
+	for _, job := range jobs {
+		if !jobDeclaresRepoWrite(job) {
+			continue
+		}
+		laneID, ok := job["lane_id"].(string)
+		if !ok || laneID == "" {
+			continue
+		}
+		raw, ok := lanes[laneID]
+		if !ok {
+			continue
+		}
+		lane := mapFrom(raw)
+		if workflowauthoring.LaneRequiresWorktreeIsolationForAutonomousRepoWrite(lane) {
+			lane["worktree_isolation"] = "per_job"
+			lanes[laneID] = lane
+		}
+	}
+}
+
+// jobDeclaresRepoWrite mirrors workflowauthoring.jobIsRepoWrite: a job is
+// repo-write when its write_scope sets repo_write=true or mode == "repo_write".
+func jobDeclaresRepoWrite(job map[string]any) bool {
+	scope, ok := job["write_scope"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if scope["repo_write"] == true {
+		return true
+	}
+	mode, _ := scope["mode"].(string)
+	return mode == "repo_write"
 }
 
 func harnessProfiles(spec Spec) (map[string]any, error) {

@@ -531,8 +531,10 @@ edges, like the implementation panel), adds no daemon method, and makes no model
 call in any state transition. Generate it with `workflow generate --shape
 divergent_ideation`; options: `branch_count` (2–8), `deepen_count` (1–5),
 `ideas_per_branch`, `problem_shape` (`low`/`medium`/`high`), `convergence_lane_id`.
-For a real multi-model run add `--lane-modifier worktree_isolated` (autonomous
-repo-write lanes need per-job worktrees). The starter fixture lives at
+A multi-lane set already emits `worktree_isolation: "per_job"` on every
+autonomous repo-write lane the fan-out round-robins jobs onto — including a lane
+named `reviewer` — so the generated workflow passes `workflow validate` without a
+manual `--lane-modifier worktree_isolated`. The starter fixture lives at
 `examples/divergent-ideation-flow/`. It is `supported` (graduated D199 per
 RFC 0106) on a green RFC 0105 unattended-reliability fixture
 (`divergent_ideation_test.go`) proving its double fan-out/join drives to
