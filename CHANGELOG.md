@@ -273,6 +273,33 @@
   non-escalation, non-checkpoint blocker by id; it refuses `human_checkpoint`
   blockers (use `checkpoint resolve`) and escalation-class blockers (use
   `escalation resolve`), and does not mutate run/job state.
+- **#308 auto-driven runs self-heal a final job killed in the publish→complete
+  window.** When a lane published its required artifact and then died before
+  `work.complete` (`agent_exited_unsealed`), the recovery sweep's only budgeted
+  action was `requeue_same_attempt` → escalate, wedging the whole run at
+  `needs_operator` even though the deliverable was durable. The decision tree now
+  auto-finalizes such a job from its already-published, body-reconstructable
+  required artifacts (reusing the D200 finalize-from-durable-artifact path and all
+  its safety gates: verdict-capable refusal, artifact-row presence, RFC 0125 P0-3
+  reconstructability) instead of requeueing it. It fires only when the work is
+  genuinely complete-but-unsealed; a dead lane with no durable artifact still
+  requeues.
+- **#309 `recovery complete-stalled` no longer waits out a fictional live lease.**
+  The finalize liveness guard keyed on the lease *time* deadline, so a recovery
+  `requeue_same_attempt` that renewed a confirmed-dead lane's lease made it read
+  as alive and refused (`job still holds a live active lease`) for as long as the
+  renewed deadline lasted (~31 min observed). The guard now keys on *session*
+  liveness — a lease whose owning session is `stopped`/`closed`/absent is
+  finalizable immediately regardless of the lease deadline — while still refusing
+  a genuinely live lane (active lease AND active owning session).
+- **#302 dead-pane active-session queued jobs are recoverable; coverage locked
+  in.** Investigation confirmed the #291 decision-tree path already recovers a
+  dead `tmux` pane whose session stays `active` and job `queued` whenever there is
+  an unforgeable dead signal (dead-pane probe, terminal pointer, dead PID),
+  including the previously-untested shape of a released prior-claim lease; a
+  regression test pins it. The cases that remain operator-only are precisely those
+  with no unforgeable dead signal (probe unavailable / no recorded pointer), where
+  acting would re-introduce the #145/#147 false-requeue class.
 - **#291 hung supervised sessions no longer stall a run silently.** A
   `queued`/claimable job whose bound supervised session is hung used to sit
   indefinitely with `supervisor_stalls.stalled_count:0` and no blocker; the
