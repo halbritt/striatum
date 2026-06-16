@@ -1721,7 +1721,9 @@ func HandleAwaitPacket(ctx context.Context, runner db.Runner, envelope rpc.Envel
 			if v, ok := res["hint"]; ok {
 				env["hint"] = v
 			}
-			return env, nil
+			// The session can never claim the remaining work; the lane exits. Stamp
+			// the durable clean-exit signal so the sweep can reclaim it later (#302).
+			return idleExitEnvelope(ctx, runner, repositoryID, sessionID, env), nil
 		}
 
 		isRunning, err := isRunRunning(ctx, runner, repositoryID, sessionID)
@@ -1729,13 +1731,22 @@ func HandleAwaitPacket(ctx context.Context, runner db.Runner, envelope rpc.Envel
 			return nil, err
 		}
 		if !isRunning {
-			return awaitNoneEnvelope(), nil
+			// The run is finished and this lane is exiting (the #302 post-publish
+			// shape): record the durable terminal pointer state so a falsely-active
+			// session is still reclaimable after the pane/helper tears down.
+			return idleExitEnvelope(ctx, runner, repositoryID, sessionID, awaitNoneEnvelope()), nil
 		}
 
 		if time.Now().After(deadline) {
 			env := awaitNoneEnvelope()
 			if sawTransientLoad {
 				env["reason"] = "transient_daemon_load"
+			}
+			// No work is available for this session and the await deadline elapsed:
+			// the lane exits per the idle-exit contract. A transient-load deadline is
+			// NOT a clean exit, so only the genuine no-work idle records the signal.
+			if !sawTransientLoad {
+				return idleExitEnvelope(ctx, runner, repositoryID, sessionID, env), nil
 			}
 			return env, nil
 		}
@@ -1858,6 +1869,102 @@ func awaitTerminalSessionEnvelope(state string) map[string]any {
 		"next_action":   "register_fresh_session",
 		"hint":          fmt.Sprintf("this session is %s; stop this lane and let run drive register and start a fresh session for remaining work", state),
 	}
+}
+
+// idleExitEnvelope records the durable clean-lane-exit signal for sessionID and
+// returns env unchanged. It is the chokepoint for every work.await_packet result
+// that carries the idle_behavior=exit_session contract: by returning that
+// envelope the daemon has TOLD this lane to stop, so the lane is contractually
+// about to exit (the agent-loop receiver SIGTERMs the agent and returns; codex's
+// own loop stops). recordCleanLaneExitSignal stamps the lane's supervisor pointer
+// terminal BEFORE the pane/helper tears down, so the recovery sweep can still
+// reclaim a falsely-active session even after a live tmux/PID probe is no longer
+// possible (#302 residual). A best-effort recording failure must never turn a
+// no_work answer into an RPC error (that would leave the receiver error-looping
+// against a finished session), so the error is swallowed; an unrecorded signal
+// only loses the durability optimization, it never wedges the lane more than the
+// pre-existing behavior did.
+func idleExitEnvelope(ctx context.Context, runner db.Runner, repositoryID, sessionID string, env map[string]any) map[string]any {
+	_ = recordCleanLaneExitSignal(ctx, runner, repositoryID, sessionID)
+	return env
+}
+
+// recordCleanLaneExitSignal stamps a DURABLE terminal dead-signal for a lane that
+// the daemon has just told to idle-exit (work.await_packet -> no_work /
+// exit_session, RFC 0120 Phase 1). It flips the session's most-recent
+// non-terminal supervisor pointer to state='stopped' so that, once the lane
+// exits and the tmux pane dies / the helper is torn down, the recovery sweep's
+// supervisedAgentConfirmedDead reads a conclusive 'stopped' pointer (an
+// unforgeable recorded-exit fact) instead of an ambiguous live probe —
+// reclaiming the session + requeuing any still-queued job (#302) even when no
+// live probe is possible.
+//
+// This is recorded ONLY when the daemon itself issued the exit contract; it is
+// NOT inferred from an ambiguous/unavailable probe, so the #145/#147
+// false-requeue guard is untouched: a session with an unreadable probe and NO
+// recorded terminal pointer is still treated as possibly-live and left alone.
+//
+// Safety properties:
+//   - The SESSION row is left state='active'. Only the supervisor POINTER is
+//     marked terminal. The sweep's #291 queued-scan acts solely on an active
+//     bound session; marking the session itself stopped here would make the
+//     sweep skip it and strand the queued job. The sweep is the component that
+//     closes the session, exactly as the existing #302 dead-pane test asserts.
+//   - The pointer update is guarded to flip only a CURRENTLY non-terminal
+//     pointer in {'attached','detached'}. A 'starting' supervisor that has not
+//     attached yet is left alone (its lane never ran), and an already
+//     'stopped'/'lost' pointer is untouched, so the write is idempotent.
+//   - The write runs in its own short transaction so it cannot poison the
+//     long-poll await loop.
+func recordCleanLaneExitSignal(ctx context.Context, runner db.Runner, repositoryID, sessionID string) error {
+	if repositoryID == "" || sessionID == "" {
+		return nil
+	}
+	_, err := withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
+		now := nowString()
+		// Resolve the lane's most-recent non-terminal supervisor pointer for an
+		// event/audit trail; absent any such pointer there is nothing durable to
+		// stamp (a never-supervised session leaves no recoverable lane signal).
+		row, err := oneRow(ctx, tx, `
+			SELECT supervisor_id, run_id
+			  FROM striatumd.process_supervisor_pointers
+			 WHERE repository_id = $1
+			   AND session_id = $2
+			   AND state IN ('attached','detached')
+			 ORDER BY updated_at DESC, supervisor_id DESC
+			 LIMIT 1`, repositoryID, sessionID)
+		if err != nil {
+			if isNoRows(err) {
+				return map[string]any{}, nil
+			}
+			return nil, err
+		}
+		supervisorID := fmt.Sprint(row["supervisor_id"])
+		if supervisorID == "" || supervisorID == "<nil>" {
+			return map[string]any{}, nil
+		}
+		runID := nullable(row["run_id"])
+		if err := tx.Exec(ctx, `
+			UPDATE striatumd.process_supervisor_pointers
+			   SET state = 'stopped',
+			       updated_at = $1
+			 WHERE repository_id = $2
+			   AND supervisor_id = $3
+			   AND state IN ('attached','detached')`,
+			now, repositoryID, supervisorID); err != nil {
+			return nil, err
+		}
+		if _, err := appendEvent(ctx, tx, repositoryID, runID, "supervisor.lane_exited", sessionID, nil, nil, nil, nil, map[string]any{
+			"session_id":    sessionID,
+			"supervisor_id": supervisorID,
+			"reason":        "idle_exit_no_work",
+			"source":        "await_packet",
+		}); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+	})
+	return err
 }
 
 // deliverPendingInterrogationQuestion returns the oldest pending interrogation

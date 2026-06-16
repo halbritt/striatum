@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Fixed
+
+- **#302 residual — a clean lane exit now records a durable dead-signal so the
+  recovery sweep can reclaim a falsely-active session even when no live probe is
+  possible.** PR #318 established that the sweep already recovers a dead-pane /
+  queued lane whenever there is an *unforgeable* dead signal (a `tmux_pane_dead`
+  probe, a `lost`/`stopped` supervisor pointer, or a dead PID — see
+  `supervisedAgentConfirmedDead`). The deferred residual was the case with **no**
+  unforgeable signal: the supervisor probe returns `tmux_unavailable` /
+  `pid_identity_unavailable` (or the helper was torn down, leaving no recorded
+  pointer), so the `active` session reads as possibly-live and the queued job is
+  never reclaimed — the run wedged until a manual `session close --requeue-job`.
+  Forcing a close on an *ambiguous* probe would re-introduce the #145/#147
+  false-requeue class. The fix records a **durable** dead-signal at the
+  daemon-issued idle-exit contract instead: when `work.await_packet` returns the
+  `no_work` / `idle_behavior=exit_session` envelope (RFC 0120 Phase 1) — i.e. the
+  daemon has TOLD the lane to stop — the handler stamps the lane's most-recent
+  non-terminal supervisor pointer `stopped` (`recordCleanLaneExitSignal`,
+  `go/pkg/mutations/claim.go`) BEFORE the pane/helper tears down. The existing
+  sweep then reads that recorded `stopped` pointer as conclusive and reclaims the
+  session + leaves the queued job claimable, even with no readable live probe.
+  Crucially only the **recorded** terminal exit counts: the SESSION row is left
+  `active` (the sweep, not the await handler, closes it, so the #291/#302
+  queued-scan still applies), the pointer write is guarded to flip only an
+  `attached`/`detached` pointer (a `starting` supervisor that never ran is left
+  alone, and the write is idempotent), and a recording failure is swallowed so a
+  no_work answer can never become an RPC error. An ambiguous/unavailable probe
+  with NO recorded terminal exit is STILL treated as possibly-live and left
+  untouched — the #145/#147 guard is preserved verbatim. No schema/migration, no
+  new RPC, no client/route surface change. Tests:
+  `TestAwaitPacketRecordsDurableCleanExitSignalOnIdleExit` (failing-then-green:
+  the pointer stayed `attached` on `origin/main`),
+  `TestSweep302NoSignalResidualUnrecoveredThenRecoveredByDurableSignal`
+  (residual unrecovered on an unavailable probe alone, recovered by the durable
+  `stopped` pointer), and `TestSweep302DoesNotReclaimAmbiguousProbeWithoutTerminalSignal`
+  (safety: `pid_identity_unavailable` + no recorded exit is left alone). Closes #302.
+
 ## v2.33.0 — 2026-06-16
 
 ### Decisions
