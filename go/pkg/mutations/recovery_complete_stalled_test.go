@@ -354,6 +354,108 @@ func TestRecoveryCompleteStalledRefusesLiveLease(t *testing.T) {
 	}
 }
 
+// TestRecoveryCompleteStalledFinalizesRequeueRenewedDeadLease is the GH #309
+// regression: a confirmed-dead lane (session state='closed', no pid) whose lease
+// a recovery requeue RENEWED (so it is 'active' and not yet past its time
+// deadline) must still be finalizable. Before the fix the liveness guard keyed on
+// the lease TIME deadline ("lane is alive"), so the requeue-renewed lease read as
+// live and the operator had to wait out a fiction (~31 min observed). The fix
+// makes the guard key on SESSION liveness: a stopped/closed/dead-pid session is
+// not alive regardless of how recently a requeue renewed its lease.
+func TestRecoveryCompleteStalledFinalizesRequeueRenewedDeadLease(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "cs_renewed_dead", true)
+
+	payload := []byte("durable synthesis deliverable\n")
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/out.txt", string(payload))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifact(t, ctx, runner, ids, "art_cs_renewed_dead", "out", "docs/out.txt", payload, nil)
+	seedCompleteStalledDeadEnd(t, ctx, runner, ids)
+
+	// The #309 trap: a recovery requeue RENEWED the dead lane's lease, so it is
+	// 'active' with a future expiry (+1h) even though the bound session is
+	// confirmed dead (seedCompleteStalledDeadEnd closed the session). Without the
+	// fix the time-keyed liveness guard reads this as a live lane and refuses.
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.leases
+		   SET state = 'active', expires_at = $1, released_at = NULL, release_reason = NULL
+		 WHERE repository_id = $2 AND lease_id = $3`,
+		time.Now().UTC().Add(time.Hour), ids.repoID, ids.leaseID); err != nil {
+		t.Fatalf("renew lease via requeue: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET current_lease_id = $1
+		 WHERE repository_id = $2 AND job_id = $3`, ids.leaseID, ids.repoID, ids.jobID); err != nil {
+		t.Fatalf("re-pin renewed lease to job: %v", err)
+	}
+
+	result, err := HandleRecoveryCompleteStalled(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"run_id": ids.runID,
+		"job_id": ids.jobID,
+	}))
+	if err != nil {
+		t.Fatalf("complete-stalled refused a confirmed-dead lane behind a requeue-renewed lease (the #309 defect): %v", err)
+	}
+	if result["status"] != "completed" {
+		t.Fatalf("status = %#v, want completed", result["status"])
+	}
+	if got := scalarStr(t, ctx, runner, `
+		SELECT state FROM striatumd.jobs WHERE repository_id = $1 AND job_id = $2`, ids.repoID, ids.jobID); got != "completed" {
+		t.Fatalf("job state = %q, want completed", got)
+	}
+	// The renewed lease is released by the finalize.
+	if got := scalarStr(t, ctx, runner, `
+		SELECT state FROM striatumd.leases WHERE repository_id = $1 AND lease_id = $2`, ids.repoID, ids.leaseID); got != "released" {
+		t.Fatalf("lease state = %q, want released after finalize", got)
+	}
+}
+
+// TestRecoveryCompleteStalledStillRefusesLiveActiveLeaseAndSession is the #309
+// SAFETY guard: the live-lane invariant (D200 — "finalizes a dead lane only")
+// must survive the fix. When the bound session is STILL active AND the lease is
+// active+unexpired, complete-stalled must still refuse, because the lane really is
+// alive. (The fix only relaxes the guard when the session is confirmed dead.)
+func TestRecoveryCompleteStalledStillRefusesLiveActiveLeaseAndSession(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "cs_live_session", true)
+
+	payload := []byte("durable deliverable, live session\n")
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/out.txt", string(payload))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifact(t, ctx, runner, ids, "art_cs_live_session", "out", "docs/out.txt", payload, nil)
+	// The fixture seeds an ACTIVE session + ACTIVE lease (+1h). Do NOT close the
+	// session: the lane is genuinely alive. --force must still refuse.
+	_, err := HandleRecoveryCompleteStalled(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"run_id": ids.runID,
+		"job_id": ids.jobID,
+		"force":  true,
+	}))
+	if err == nil {
+		t.Fatalf("complete-stalled --force finalized a live-session+live-lease job; want refusal")
+	}
+	rpcErr, ok := err.(*rpc.Error)
+	if !ok || rpcErr.Code != "invalid_transition" {
+		t.Fatalf("error = %T %v, want *rpc.Error invalid_transition", err, err)
+	}
+	if !strings.Contains(rpcErr.Message, "live") {
+		t.Fatalf("refusal message = %q, want it to cite the live lane", rpcErr.Message)
+	}
+	if got := scalarStr(t, ctx, runner, `
+		SELECT state FROM striatumd.jobs WHERE repository_id = $1 AND job_id = $2`, ids.repoID, ids.jobID); got != "running" {
+		t.Fatalf("job state = %q after live-session refusal, want running", got)
+	}
+}
+
 func scalarStr(t *testing.T, ctx context.Context, runner db.Runner, query string, args ...any) string {
 	t.Helper()
 	row, err := oneRow(ctx, runner, query, args...)

@@ -111,22 +111,36 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 		}
 
 		// Liveness guard: complete-stalled finalizes a DEAD lane. If the job still
-		// holds a live (active, unexpired) lease, the lane is alive — yanking the
-		// job out from under it would corrupt provenance. Refuse in both the
-		// default and --force paths; the operator closes/expires the session first
-		// (or the live lane completes via the normal work.complete path).
+		// holds a live (active, unexpired) lease whose OWNING SESSION is also still
+		// active, the lane is alive — yanking the job out from under it would corrupt
+		// provenance. Refuse in both the default and --force paths; the live lane
+		// completes via the normal work.complete path.
+		//
+		// #309: the live test is SESSION liveness, not the lease TIME deadline alone.
+		// A recovery `requeue_same_attempt` renews the lease's expires_at on a lane
+		// that is already gone, so a time-only guard read a confirmed-dead session's
+		// renewed lease as "alive" and forced the operator to wait out a fiction
+		// (~31 min observed). A lease whose owning session is stopped/closed/absent is
+		// NOT live regardless of how recently a requeue pushed its deadline forward,
+		// so it is finalizable immediately. The guard still refuses a genuinely live
+		// lane (active lease AND active owning session).
 		if leaseID := nullable(job["current_lease_id"]); leaseID != nil {
 			live, err := existsRow(ctx, tx, `
-				SELECT 1 FROM striatumd.leases
-				 WHERE repository_id = $1 AND lease_id = $2
-				   AND state = 'active' AND expires_at > $3::timestamptz
+				SELECT 1
+				  FROM striatumd.leases l
+				  JOIN striatumd.sessions s
+				    ON s.repository_id = l.repository_id
+				   AND s.session_id = l.owner_session_id
+				 WHERE l.repository_id = $1 AND l.lease_id = $2
+				   AND l.state = 'active' AND l.expires_at > $3::timestamptz
+				   AND s.state = 'active'
 				 LIMIT 1`, repositoryID, leaseID, nowString())
 			if err != nil {
 				return nil, err
 			}
 			if live {
 				return nil, rpc.NewError("invalid_transition",
-					"job still holds a live active lease (the lane is alive); complete-stalled finalizes a dead lane — close/expire the session first, or let the lane complete via work.complete", nil)
+					"job still holds a live active lease whose owning session is still active (the lane is alive); complete-stalled finalizes a dead lane — close/expire the session first, or let the lane complete via work.complete", nil)
 			}
 		}
 
