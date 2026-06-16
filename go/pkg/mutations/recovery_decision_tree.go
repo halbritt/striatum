@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
+	"github.com/halbritt/striatum/go/pkg/rpc"
 	"github.com/halbritt/striatum/go/pkg/sessionliveness"
 	gosupervisor "github.com/halbritt/striatum/go/pkg/supervisor"
 	"github.com/jackc/pgx/v5"
@@ -417,6 +418,48 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 			return deadResult
 		}
 
+		// #308(A): before choosing a requeue, an agent that engaged the work protocol
+		// and emitted output but never sealed (deadAgentExitedUnsealed) — whose lane
+		// is now confirmed dead OR dead-by-session-state — should be AUTO-FINALIZED
+		// from its already-published, body-reconstructable required artifacts instead
+		// of requeued. The deliverable is durable; re-running a (often max_attempts=1)
+		// final job both wastes a model invocation and cannot succeed once the
+		// requeue budget is spent, wedging the run at needs_operator. This reuses the
+		// proven D200 finalize-from-durable-artifact path (finalizeStalledJob) and all
+		// its safety gates (verdict-capable refusal, presence + reconstructability),
+		// so it only fires when the work is genuinely complete-but-unsealed. A dead
+		// lane with NO durable artifact still falls through to the requeue path below.
+		deadLaneUnsealed := (sessionDead && leaseClearedOrGone && !leaseStaleActive(row)) ||
+			(confirmedDead() && deadAgentExitedUnsealed(activity))
+		if deadLaneUnsealed && deadAgentExitedUnsealed(activity) {
+			finalized, ferr := tryFinalizeUnsealedFromDurableArtifact(ctx, tx, repositoryID, jobID)
+			if ferr != nil {
+				return nil, ferr
+			}
+			if finalized {
+				// Close the (possibly still-active) owning session so it cannot wake to
+				// double-work the job that is now terminally completed. Idempotent.
+				ownerClosed := false
+				if !sessionAbsent {
+					closed, cerr := closeStalledOwningSession(ctx, tx, repositoryID, runID, jobID, sessionID, stallClassAgentExitedUnsealed)
+					if cerr != nil {
+						return nil, cerr
+					}
+					ownerClosed = closed
+				}
+				actions = append(actions, map[string]any{
+					"workflow_job_id":       workflowJobID,
+					"job_id":                jobID,
+					"action":                "auto_finalize_unsealed",
+					"stall_class":           stallClassAgentExitedUnsealed,
+					"acted":                 true,
+					"stalled_owner_closed":  ownerClosed,
+					"stalled_owner_session": nullable(sessionID),
+				})
+				continue
+			}
+		}
+
 		// Decide the operational recovery action.
 		var action, counterColumn string
 		var forceExpire bool
@@ -694,6 +737,79 @@ func closeLeakedInterrogationWindow(ctx context.Context, tx db.TxRunner, reposit
 		return false, nil
 	}
 	return maybeCloseInterrogationTarget(ctx, tx, repositoryID, runID, sessionID)
+}
+
+// tryFinalizeUnsealedFromDurableArtifact is the #308(A) autonomous finalize: for
+// a dead-lane job that engaged the work protocol but never sealed (the caller has
+// already established deadAgentExitedUnsealed), it auto-finalizes the job from its
+// already-published, body-reconstructable required artifacts — the same D200
+// finalize-from-durable-artifact path the manual `recovery complete-stalled` verb
+// runs — INSTEAD of requeueing it. It returns finalized=false (and leaves the job
+// untouched, so the caller falls through to the requeue path) whenever the
+// deliverable is NOT safely finalizable:
+//
+//   - verdict-capable jobs (review / phase_synthesis) complete via a recorded,
+//     attested verdict; finalizing from an artifact would bypass RFC 0118
+//     verdict attestation, so they are never auto-finalized here.
+//   - a job with NO required expected_artifact has no durable deliverable to
+//     finalize from — re-running it is the correct recovery, so this returns false.
+//   - if any required artifact ROW is missing (publish never happened) or its
+//     BODY is not reconstructable from its declared placement (RFC 0125 P0-3,
+//     worktree-independent), the work is not actually durable, so this returns
+//     false and the requeue path handles it.
+//
+// Reusing finalizeStalledJob keeps a single completion code path (job → completed,
+// lease released, autonomous-blocker resolution, downstream enqueue, run
+// completion) so the autonomous finalize and the operator verb cannot drift.
+func tryFinalizeUnsealedFromDurableArtifact(ctx context.Context, tx db.TxRunner, repositoryID, jobID string) (bool, error) {
+	job, err := rowByID(ctx, tx, repositoryID, "jobs", "job_id", jobID, true)
+	if err != nil {
+		return false, err
+	}
+	// Verdict-capable jobs must complete via attested verdict (RFC 0118): never
+	// auto-finalize them from an artifact here.
+	if isVerdictCapableJobType(fmt.Sprint(job["job_type"])) {
+		return false, nil
+	}
+	// Require at least one REQUIRED expected_artifact: a job with no durable
+	// deliverable to finalize from must be re-run, not silently completed.
+	attempt := jobAttemptValue(job["attempt"])
+	expected := resolveExpectedArtifactCycles(asList(job["expected_artifacts_json"]), attempt)
+	hasRequired := false
+	for _, item := range expected {
+		if asMap(item)["required"] == true {
+			hasRequired = true
+			break
+		}
+	}
+	if !hasRequired {
+		return false, nil
+	}
+	// Gate 1: every required artifact ROW exists (publish happened). A missing row
+	// returns an rpc invalid_transition error from verifyRequiredArtifacts; treat
+	// it as "not finalizable" (fall through to requeue), not a sweep failure.
+	if err := verifyRequiredArtifacts(ctx, tx, repositoryID, jobID); err != nil {
+		if _, ok := err.(*rpc.Error); ok {
+			return false, nil
+		}
+		return false, err
+	}
+	// Gate 2: every required artifact BODY is reconstructable from its declared
+	// placement (RFC 0125 P0-3) — worktree-independent, so it holds even after the
+	// per-job worktree was torn down, as long as the body is on the run branch /
+	// blob store. Any positive-failure reconstruction means the deliverable is not
+	// durable -> do not finalize.
+	recon, err := verifyRequiredArtifactReconstructable(ctx, tx, repositoryID, job)
+	if err != nil {
+		return false, err
+	}
+	if len(failedReconstructions(recon)) > 0 {
+		return false, nil
+	}
+	if _, err := finalizeStalledJob(ctx, tx, repositoryID, job, "autonomous recovery: auto-finalized published-but-unsealed job from durable artifact (#308)"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // deadAgentExitedUnsealed reports whether a confirmed-dead supervised agent had
