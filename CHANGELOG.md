@@ -238,6 +238,13 @@
   Tests/migrations/secondary modules an agent wrote but did not declare as
   `expected_artifacts` are now reported loudly at `work.complete` instead of
   being dropped untracked. (D203)
+- **#307 `divergent_ideation` deepen artifacts now carry uniform front matter
+  across lanes.** The `deepener` role stub and `deepen` prompt stub now instruct
+  every deepen lane to emit an `author:` byline and a complete `inputs:` list
+  naming both the convergence ledger (`CONVERGENCE.md`) and the problem brief
+  (`PROBLEM_BRIEF.md`) in its `synthesis.v1` front matter, so deepen artifacts
+  stay machine-comparable regardless of which model ran the lane (one lane used
+  to omit `author:` from front matter and list only the convergence ledger).
 - `run.retry_job` refuses to bump a job past its `max_attempts` during recovery,
   points the operator at `recovery reseal` (the same-attempt path), and records a
   deliberate override as an audited `attempt_budget_override`; revision-cycle

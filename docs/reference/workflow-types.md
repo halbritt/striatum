@@ -510,6 +510,11 @@ provider-portable port of the ADHD method (`UditAkhourii/adhd`, MIT, RFC 0087):
 - **Deepen + synthesize.** K deepen jobs (default 3) expand the survivors
   (sketch, load-bearing risk, first step, child ideas); `final_synthesis`
   assembles the shortlist, the ★ non-obvious pick, the trap list, and a wildcard.
+  Each deepen job publishes a `striatum.synthesis.v1` artifact with **uniform
+  front matter** across every model lane — an `author:` byline plus a complete
+  `inputs:` list naming both the convergence ledger (`CONVERGENCE.md`) and the
+  problem brief (`PROBLEM_BRIEF.md`) — so the deepen artifacts stay
+  machine-comparable regardless of which model ran the lane.
 
 Frames are a curated, **distortion-axis-tagged** authoring library (RFC 0129):
 ADHD's personas plus three categories the method's own multi-model run surfaced
