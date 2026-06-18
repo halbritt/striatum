@@ -744,6 +744,120 @@ func TestSuperviseStartLabelsNonAgentLoopLaneAsPush(t *testing.T) {
 	}
 }
 
+// TestSuperviseStartAutoPromotesBareAgentCLILaneToSelfDriving guards #431 (the
+// self-hosting crux): a lane whose command is a bare interactive agent CLI
+// (claude/codex/agy) but which does NOT declare agent_loop must be auto-promoted
+// to the self-driving agent loop. Such a command cannot consume stdin-FIFO push
+// packets — launched in supervised_push mode it reads the pushed packet as
+// conversational input, never drives work.await_packet/heartbeat/complete, and
+// dies at the liveness deadline with no artifact. The daemon promotes it
+// (mirroring workflowgenerate.defaultAgentLoopLane), wraps it in
+// `striatumd -agent-loop`, defaults the transport to pty_helper, and surfaces the
+// promotion legibly. This covers hand-edited / copied / pre-generate snapshots
+// that the authoring-time default never touched.
+func TestSuperviseStartAutoPromotesBareAgentCLILaneToSelfDriving(t *testing.T) {
+	origMkfifo := supervisionMkfifo
+	origLaunch := supervisionLaunch
+	defer func() {
+		supervisionMkfifo = origMkfifo
+		supervisionLaunch = origLaunch
+	}()
+	t.Setenv("STRIATUM_AGENT_LOOP_BINARY", "/bin/striatumd")
+	supervisionMkfifo = func(path string) error {
+		return os.WriteFile(path, nil, 0o600)
+	}
+	var launchedConfig supervisionStartConfig
+	supervisionLaunch = func(_ context.Context, config supervisionStartConfig, _ string, _ string, _ string, _ string) (supervisionLaunchResult, error) {
+		launchedConfig = config
+		return supervisionLaunchResult{PID: os.Getpid(), PIDStartTime: "start-token"}, nil
+	}
+
+	runner := &superviseControlFakeRunner{
+		repoRoot: t.TempDir(),
+		workflowLane: map[string]any{
+			// A real agent command pasted over a fixture, WITHOUT agent_loop — the
+			// exact #431 misconfiguration. Absolute path so PATH resolution is a no-op
+			// and the wrapped-command assertion stays stable.
+			"command": []any{"/bin/claude", "--model", "claude-opus-4-8", "--permission-mode", "bypassPermissions"},
+		},
+		txs: []*superviseControlFakeTx{{}, {}},
+	}
+	result, err := HandleSuperviseStart(context.Background(), runner, rpc.Envelope{
+		SchemaVersion: rpc.SupportedEnvelopeVersion,
+		RequestID:     "req_start_autopromote",
+		Method:        "supervise.start",
+		Params: map[string]any{
+			"repository_id": "repo_1",
+			"session_id":    "sess_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleSuperviseStart: %v", err)
+	}
+	want := []string{"/bin/striatumd", "-agent-loop", "--", "/bin/claude", "--model", "claude-opus-4-8", "--permission-mode", "bypassPermissions"}
+	if strings.Join(launchedConfig.Command, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("auto-promoted command = %#v, want %#v", launchedConfig.Command, want)
+	}
+	if launchedConfig.AgentLoopMode != agentLoopModeSelfDriving || result["agent_loop_mode"] != agentLoopModeSelfDriving {
+		t.Fatalf("auto-promoted lane mode = config:%q result:%#v, want %q (self_driving)",
+			launchedConfig.AgentLoopMode, result["agent_loop_mode"], agentLoopModeSelfDriving)
+	}
+	if !launchedConfig.AgentLoopAutoPromoted || result["agent_loop_auto_promoted"] != true {
+		t.Fatalf("auto-promotion not surfaced: config=%v result=%#v",
+			launchedConfig.AgentLoopAutoPromoted, result["agent_loop_auto_promoted"])
+	}
+	if launchedConfig.Transport != supervisionTransportPTYHelper || result["transport"] != supervisionTransportPTYHelper {
+		t.Fatalf("auto-promoted lane transport = config:%q result:%#v, want pty_helper",
+			launchedConfig.Transport, result["transport"])
+	}
+}
+
+// TestSuperviseStartRefusesExplicitlyDisabledAgentLoopOnAgentCLI guards #431: a
+// bare interactive agent CLI with agent_loop EXPLICITLY false cannot run in push
+// mode (it never drives work.*), so supervise start refuses it loudly BEFORE
+// inserting any supervisor row instead of launching a lane that silently misses
+// the liveness deadline (RFC 0111 legibility).
+func TestSuperviseStartRefusesExplicitlyDisabledAgentLoopOnAgentCLI(t *testing.T) {
+	origMkfifo := supervisionMkfifo
+	origLaunch := supervisionLaunch
+	defer func() {
+		supervisionMkfifo = origMkfifo
+		supervisionLaunch = origLaunch
+	}()
+	supervisionMkfifo = func(path string) error {
+		return os.WriteFile(path, nil, 0o600)
+	}
+	supervisionLaunch = func(_ context.Context, _ supervisionStartConfig, _ string, _ string, _ string, _ string) (supervisionLaunchResult, error) {
+		t.Fatal("lane must not launch when agent_loop is explicitly disabled on an interactive agent CLI")
+		return supervisionLaunchResult{}, nil
+	}
+
+	runner := &superviseControlFakeRunner{
+		repoRoot: t.TempDir(),
+		workflowLane: map[string]any{
+			"adapter_capabilities": map[string]any{"agent_loop": false},
+			"command":              []any{"/bin/claude", "--permission-mode", "bypassPermissions"},
+		},
+		txs: []*superviseControlFakeTx{{}, {}},
+	}
+	_, err := HandleSuperviseStart(context.Background(), runner, rpc.Envelope{
+		SchemaVersion: rpc.SupportedEnvelopeVersion,
+		RequestID:     "req_start_refuse_pushagentcli",
+		Method:        "supervise.start",
+		Params: map[string]any{
+			"repository_id": "repo_1",
+			"session_id":    "sess_1",
+		},
+	})
+	rpcErr, ok := err.(*rpc.Error)
+	if !ok || rpcErr.Code != "invalid_transition" {
+		t.Fatalf("expected invalid_transition rpc error, got %#v", err)
+	}
+	if !strings.Contains(rpcErr.Message, "agent_loop") {
+		t.Fatalf("refusal message should name agent_loop, got %q", rpcErr.Message)
+	}
+}
+
 func TestSuperviseStartAutoDispatchesPushLane(t *testing.T) {
 	origMkfifo := supervisionMkfifo
 	origLaunch := supervisionLaunch

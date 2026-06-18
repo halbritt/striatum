@@ -26,10 +26,16 @@ type supervisionStartConfig struct {
 	Command            []string
 	OriginalCommand    []string
 	AgentLoopMode      string
-	Transport          string
-	StdinDelivery      string
-	RequireTmux        bool
-	RunAsUser          string
+	// AgentLoopAutoPromoted records that the daemon flipped this lane from the
+	// default push mode to self-driving because its command is a bare interactive
+	// agent CLI that cannot consume stdin-FIFO push packets (#431). Surfaced in the
+	// supervisor.starting event + start result so the promotion is legible rather
+	// than silent.
+	AgentLoopAutoPromoted bool
+	Transport             string
+	StdinDelivery         string
+	RequireTmux           bool
+	RunAsUser             string
 	// CapabilityToken is the session-BOUND MCP capability token minted for this
 	// lane at supervise start (RFC 0096 V2 / #135). It is injected into the lane
 	// env as STRIATUM_MCP_TOKEN so the lane authenticates as its OWN session and
@@ -126,15 +132,50 @@ func loadSupervisionStartConfig(ctx context.Context, runner db.Runner, repositor
 	if err != nil {
 		return config, err
 	}
-	if laneUsesAgentLoop(lane) {
+	usesAgentLoop, explicit := laneAgentLoopSetting(lane)
+	if commandSelfDrivesViaArgv(command) {
+		// #431: a bare interactive agent CLI (claude/codex/agy) can ONLY self-drive.
+		// In supervised_push mode the daemon hands it a newline-delimited packet on
+		// its stdin FIFO and waits for it to ack/heartbeat/complete; but a bare
+		// interactive agent reads that packet as conversational input, has no MCP
+		// config and no bootstrap prompt, never calls work.await_packet/heartbeat/
+		// complete, and dies at the liveness deadline with no artifact. Push mode is
+		// only viable for an OS-level FIFO consumer (argv0 sh/bash/python/…, never a
+		// bare agent CLI).
+		switch {
+		case !explicit:
+			// agent_loop unset: an authoring slip — e.g. a real command pasted over
+			// the `local` parking fixture, or a hand-edited / copied / pre-generate
+			// snapshot that never passed through workflowgenerate.defaultAgentLoopLane.
+			// Promote it to the self-driving loop (which injects the lane MCP config +
+			// bootstrap prompt) — the only mode in which it drives work.*. Mirrors
+			// defaultAgentLoopLane so authoring (generate) and launch (supervise start)
+			// agree. Mutate the decoded snapshot lane (local to this call) so the
+			// downstream transport / stdin-delivery defaults follow the promoted mode
+			// (supervisionTransport defaults an agent-loop lane to pty_helper).
+			usesAgentLoop = true
+			config.AgentLoopAutoPromoted = true
+			lane["agent_loop"] = true
+		case !usesAgentLoop:
+			// agent_loop explicitly false on a command that cannot consume push
+			// packets: refuse loudly BEFORE inserting the supervisor row rather than
+			// launch a lane that will silently miss the liveness deadline. Symmetric
+			// with requireSupportedAgentLoopAdapter (RFC 0111 legibility).
+			return config, rpc.NewError("invalid_transition", fmt.Sprintf(
+				"supervise start refuses lane %q: command %q is an interactive agent CLI that cannot consume stdin-FIFO push packets, but agent_loop is set false. A bare agent CLI never drives work.await_packet/heartbeat/complete in push mode and will miss the liveness deadline with no artifact. Remove the agent_loop=false override so the lane self-drives, or wrap the command in an explicit stdin-FIFO consumer.",
+				config.LaneID, command[0]), nil)
+		}
+	}
+	if usesAgentLoop {
 		// #181: an agent-loop lane is driven by the self-driving bootstrap +
 		// PTY-submit wiring, which only knows how to deliver the initial prompt
-		// to codex, agy, and claude (agentloop.bootstrapDeliveryModeFor). Any
+		// to codex, agy, and claude (agentloop.BootstrapDeliveryModeFor). Any
 		// other argv0 would be wrapped by selfDrivingAgentLoopCommand and launched
 		// as a self-driver that can never receive its bootstrap, so the lane sits
 		// idle behind a healthy-looking supervisor. Refuse BEFORE inserting the
 		// supervisor row so the operator gets a legible error instead of a wedged
-		// lane (RFC 0111).
+		// lane (RFC 0111). (Auto-promoted lanes always pass: commandSelfDrivesViaArgv
+		// is exactly the admitted set.)
 		if err := requireSupportedAgentLoopAdapter(command); err != nil {
 			return config, err
 		}
@@ -241,14 +282,37 @@ func boolLaneValue(values map[string]any, key string) (bool, bool) {
 // `adapter_capabilities.agent_loop: true`; default false preserves the
 // raw-launch / one-shot-delivery behavior for existing lanes.
 func laneUsesAgentLoop(lane map[string]any) bool {
-	if value, ok := boolLaneValue(lane, "agent_loop"); ok {
-		return value
+	value, _ := laneAgentLoopSetting(lane)
+	return value
+}
+
+// laneAgentLoopSetting returns the lane's explicit agent-loop opt-in/out and
+// whether it was set at all. agent_loop may live at the top level or under
+// adapter_capabilities; the top level wins. When neither is present the lane has
+// expressed no intent (explicit=false), which lets the daemon apply the #431
+// bare-agent-CLI self-driving default in loadSupervisionStartConfig.
+func laneAgentLoopSetting(lane map[string]any) (value bool, explicit bool) {
+	if v, ok := boolLaneValue(lane, "agent_loop"); ok {
+		return v, true
 	}
 	capabilities := asMap(lane["adapter_capabilities"])
-	if value, ok := boolLaneValue(capabilities, "agent_loop"); ok {
-		return value
+	if v, ok := boolLaneValue(capabilities, "agent_loop"); ok {
+		return v, true
 	}
-	return false
+	return false, false
+}
+
+// commandSelfDrivesViaArgv reports whether the lane command is a bare interactive
+// agent CLI (claude / codex / agy) that the agent-loop bootstrap drives by passing
+// the prompt on argv. This is exactly the set requireSupportedAgentLoopAdapter
+// admits, so a lane promoted on this predicate is guaranteed to pass that guard.
+// Such a command cannot consume stdin-FIFO push packets, so it is only functional
+// in the self-driving agent loop; a shell/python wrapper (argv0 sh/bash/python/…)
+// or the `local` parking fixture (sh -c 'cat >/dev/null') falls through to false
+// and stays a push consumer. Codex one-shot (`codex exec`) lanes are refused
+// upstream by RefuseRetiredOneShotLane, so they never reach this predicate.
+func commandSelfDrivesViaArgv(command []string) bool {
+	return agentloop.BootstrapDeliveryModeFor(command) == agentloop.BootstrapDeliveryArgv
 }
 
 // requireSupportedAgentLoopAdapter refuses an agent-loop lane whose argv0 is not

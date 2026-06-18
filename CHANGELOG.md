@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Fixed
+
+- **runner: a bare interactive agent-CLI lane now drives `work.*` instead of
+  timing out (#431, D235) — the self-hosting crux.** A `process` lane whose
+  command is a bare `claude`/`codex`/`agy` (argv where
+  `agentloop.BootstrapDeliveryModeFor == argv`) with `agent_loop` unset is now
+  auto-promoted to the self-driving agent loop at `supervise start`
+  (`loadSupervisionStartConfig`, `go/pkg/mutations/supervision_lane_config.go`),
+  so it receives the agent-loop bootstrap prompt + injected MCP config and runs
+  the claim → heartbeat → `work.complete` loop. Before this, such a lane
+  defaulted to `supervised_push`, where the daemon pushed a packet to an
+  interactive agent that read it as conversational input, never called
+  `work.await_packet`/`work.heartbeat`/`work.complete`, and died at
+  `session.liveness_deadline_missed` with **zero `work.*` events and no sealed
+  artifact** — blocking every RFC → design → build dogfood. The promotion
+  mirrors `workflowgenerate.defaultAgentLoopLane` (authoring already set the
+  flag), so it also covers hand-edited / copied / pre-generate snapshots that
+  pasted a real agent command over the `local` parking fixture. An explicit
+  `agent_loop:false` on such a command is now refused with an actionable error
+  rather than launched into a guaranteed silent timeout (RFC 0111 legibility,
+  symmetric with `requireSupportedAgentLoopAdapter`). The promotion is surfaced
+  as `agent_loop_auto_promoted` on the `supervisor.starting`/`supervisor.started`
+  events and the `supervise start` result. Regression tests
+  `TestSuperviseStartAutoPromotesBareAgentCLILaneToSelfDriving` +
+  `TestSuperviseStartRefusesExplicitlyDisabledAgentLoopOnAgentCLI`;
+  live-verified end-to-end (a bare `claude` lane auto-promoted, drove
+  draft → publish → `work.complete`, and sealed an artifact; the run completed).
+  No schema, migration, or RPC change.
+
 ### Changed
 
 - **barrier: RFC 0135 FULL cutover — quorum (P4) and run.integrate (P6) sealed

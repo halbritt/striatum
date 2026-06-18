@@ -165,6 +165,12 @@ func HandleSuperviseStart(ctx context.Context, runner db.Runner, envelope rpc.En
 			"agent_loop_mode":      config.AgentLoopMode,
 			"stdin_pipe_path":      pipePath,
 		}
+		if config.AgentLoopAutoPromoted {
+			// #431: make the daemon's push→self-driving promotion legible in the run
+			// timeline so the operator can see WHY a bare agent-CLI lane is being
+			// driven as an agent loop (instead of a silent flip).
+			payload["agent_loop_auto_promoted"] = true
+		}
 		if config.Transport == supervisionTransportPTYHelper {
 			payload["helper_events_path"] = eventPath
 		}
@@ -250,6 +256,9 @@ func HandleSuperviseStart(ctx context.Context, runner db.Runner, envelope rpc.En
 			"agent_loop_mode":      config.AgentLoopMode,
 			"stdin_pipe_path":      pipePath,
 		}
+		if config.AgentLoopAutoPromoted {
+			payload["agent_loop_auto_promoted"] = true
+		}
 		if config.Transport == supervisionTransportPTYHelper {
 			payload["helper_pid"] = optionalPositiveInt(launch.HelperPID)
 			payload["helper_events_path"] = eventPath
@@ -283,6 +292,9 @@ func HandleSuperviseStart(ctx context.Context, runner db.Runner, envelope rpc.En
 		"lane_attestation":     laneAttestation(launch.PIDStartTime),
 		"lane_id":              config.LaneID,
 		"tmux":                 objectOrNil(launch.Metadata["tmux"]),
+	}
+	if config.AgentLoopAutoPromoted {
+		result["agent_loop_auto_promoted"] = true
 	}
 	if runAsUser := metadataString(launch.Metadata["run_as_user"]); runAsUser != "" {
 		result["run_as_user"] = runAsUser
