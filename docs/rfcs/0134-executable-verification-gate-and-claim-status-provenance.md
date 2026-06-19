@@ -1,6 +1,6 @@
 # RFC 0134: Executable verification gate and claim status-provenance
 
-Status: accepted-with-revisions (D227, closes #394) — see "Accepted form" below
+Status: accepted-with-revisions / implemented (D227 accept; verified-and-graduated D237; both build halves shipped, #394/#395 closed) — see "Accepted form" below
 Date: 2026-06-17
 author: proposer-claude-opus-4-8
 
@@ -83,6 +83,41 @@ feature is in the verifier LANE (`striatum verifier run`), off the gate path;
 the daemon validates sealed receipts and curates the executed bytes, exactly as
 D227 binds. The §2–§3 daemon-run-`checks[]` design below is the REJECTED form
 and is retained only as the problem statement the Accepted form supersedes.
+
+**Graduation status (D237 — verified-and-graduated).** Both build halves are on
+`main`, owner bundle 0016 is live (the owner DB carries `verify` in
+`jobs_job_type_check`), and every accepted-form path is exercised end-to-end:
+
+- *Live mint.* `striatum verifier run` against an operator-curated allowlist runs
+  the check under a strict bubblewrap envelope and mints a sealed `receipt.v1` —
+  a passing check classifies `verified_eligible` (strict + two-signal agreement +
+  exit-0), a deliberately-failing check classifies `asserted`.
+- *Connected mint→gate→decay proof.* The real sandboxed mint
+  (`verifier.ExecuteCheck`) flows through the real daemon-side gate read
+  (`evaluateRunClaimVerification`) in one regression
+  (`TestRunClaimVerificationEndToEndRealReceiptMint`): on a strict host the
+  two-signal receipt reads back VERIFIED (`two_signal_sealed_receipt`); re-minting
+  over a CHANGED worktree tree yields a different seal, so the claim still naming
+  the old seal auto-decays to ASSERTED (`receipt_seal_mismatch`) — and on a
+  degraded (non-strict) host the same path asserts the fail-safe (never VERIFIED).
+- *Validation half.* The provenance lint refuses a hand-authored VERIFIED without
+  a bound receipt / matching digest (publisher exit 6); the daemon writer is
+  monotonic (demotable, never self-promotable); the receipt round-trips its
+  schema and seal (tamper-evident).
+- *Operator legibility.* The verified-vs-asserted ledger the gate derives is
+  frozen on the `run_completion_record` (`run.summary` projects it) and rendered
+  as a deterministic `## Claim Verification` section in the evidence export.
+
+The accepted form is **non-blocking by design**, so there is no run-blocking
+behavior to dogfood; the executable lane mint + the daemon gate read are the
+whole 0134-specific surface, and both are proven above (a full supervised
+`verify`-job dogfood would only re-exercise the generic lane plumbing every other
+dogfood already covers). The interim [`examples/verification-gate-flow/`](../../examples/verification-gate-flow/)
+stays the **portable** today-primitives demonstration: a runnable real-`verify`
+example cannot be a committed fixture because the allowlist content-addresses
+exact binary bytes (host/distro-specific by design); a *generatable*
+`verification_gate` shape that scaffolds the workflow + a template allowlist is
+tracked as a follow-up (it does not block graduation).
 
 Context:
 - The **cam-analyzer dogfood** (`~/git/cam-analyzer`, a lane-produced product;

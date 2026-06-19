@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Changed
+
+- **RFC 0134 (executable verification gate + claim status-provenance) graduated to
+  `implemented` (D237).** Both build halves were already on `main` under D227's
+  validate-not-execute accepted form (the daemon NEVER executes a check; the
+  off-gate-path `striatum verifier run` lane mints a tamper-evident `receipt.v1`
+  under the strictest available sandbox, and the run-completion gate is a pure read
+  that degrades a missing/wedged verify to ASSERTED, never blocking on liveness).
+  This change confirms-and-graduates rather than rebuilds: owner bundle 0016 is
+  live (owner DB at bundle 18, `verify` in `jobs_job_type_check`); the live mint
+  classifies a passing check `verified_eligible` and a failing check `asserted`
+  under a strict bubblewrap envelope; and the RFC/index status + the (previously
+  stale, rejected-form) index description are corrected to the shipped form.
+  - **New connected regression** `TestRunClaimVerificationEndToEndRealReceiptMint`
+    (`go/pkg/mutations`) wires the REAL sandboxed mint (`verifier.ExecuteCheck`)
+    through the REAL daemon gate read (`evaluateRunClaimVerification`) in one flow,
+    no fabricated seal: a strict host reads VERIFIED (`two_signal_sealed_receipt`),
+    a re-mint over a changed worktree tree auto-decays to ASSERTED
+    (`receipt_seal_mismatch`), and a degraded host asserts the non-strict fail-safe.
+  - **Operator legibility:** the evidence export now renders a deterministic
+    `## Claim Verification` section (authored vs. effective claim status + degrade
+    basis) from the frozen `run_completion_record`; `TestEvidenceExportRendersProvenanceSections`
+    extended to assert it. No new RPC/route/schema/migration/owner-bundle — no
+    deploy required.
+
 ### Fixed
 
 - **Failure-mode audit remediation + open-issue triage wave (2026-06-19, D236).**

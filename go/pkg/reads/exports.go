@@ -375,6 +375,26 @@ func renderProvenanceSections(record map[string]any, overrides []map[string]any)
 		}
 		b.WriteString(line + "\n")
 	}
+	// RFC 0134 / D227: the executable-half claim-verification ledger frozen on the
+	// run_completion_record. Each row names the authored vs. EFFECTIVE claim status
+	// the daemon's pure-read gate derived from the sealed receipts (VERIFIED only
+	// for a two-signal strict-sandbox receipt bound to the claim's inputs; ASSERTED
+	// otherwise, with the degrade basis). Only identifiers and status/basis tokens
+	// are rendered — no prose — so no redaction pass is required.
+	b.WriteString("\n## Claim Verification\n\n")
+	claims, _ := record["claim_verification"].([]any)
+	if len(claims) == 0 {
+		b.WriteString("- no frozen claim ledger (run published no claim_ledger, or pre-RFC-0134 terminal run)\n")
+	}
+	for _, item := range claims {
+		claim, _ := item.(map[string]any)
+		line := fmt.Sprintf("- claim `%s` authored=`%s` effective=`%s`",
+			fmt.Sprint(claim["claim_id"]), fmt.Sprint(claim["authored_status"]), fmt.Sprint(claim["effective_status"]))
+		if basis := claim["verification_basis"]; basis != nil {
+			line += fmt.Sprintf(" basis=`%s`", fmt.Sprint(basis))
+		}
+		b.WriteString(line + "\n")
+	}
 	return b.String()
 }
 
