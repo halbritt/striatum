@@ -1273,8 +1273,8 @@ V1 schemas:
   `schema_version`, `artifact_kind: collaboration_ledger`, `shape` (one of
   `falsification_gate`, `cross_examination`, `fog_of_war_review`,
   `synaptic_prune`, `adjudicated_constraint_extraction`), `topic`,
-  `participants` (non-empty list), `entries` (list of objects with `kind`,
-  `by`, `refs`, and `text`), `verdict` (one of `accept`,
+  `participants` (non-empty list), `entries` (list of objects with required
+  `kind`, `by`, `refs`, and `text`), `verdict` (one of `accept`,
   `accept_with_findings`, `needs_revision`, `reject`), and `rationale`. Entry
   kinds are `claim`, `challenge`, `rebuttal`, `constraint`, or `nomination`;
   `by` must name a participant; every ref must be a `dialogue:<sequence>` turn
@@ -1283,13 +1283,39 @@ V1 schemas:
   `collaboration_ledger` artifact when the submitted verdict differs from the
   ledger front-matter verdict.
   `v1.1` is additive. Optional fields are `cycle` (non-negative integer),
-  `findings[]`, `constraints[]`, and `branches{}`. `shape:
-  adjudicated_constraint_extraction` requires `schema_version:
+  `findings[]`, `constraints[]`, `branches{}`, and the RFC 0094 §5
+  adjudicator-reliability extras `adjudicators[]` and `adjudication_mode`
+  (below). `shape: adjudicated_constraint_extraction` requires `schema_version:
   striatum.collaboration_ledger.v1.1`; if that shape publishes `verdict:
   needs_revision`, `constraints[]` must include at least one productive row
   (`binding: true` or `kind: unresolved_question`). The refined RFC 0098
   states `blocked_pending_answer` and `defer_with_successor` are valid
   `branches{}` dispositions, not valid `verdict` values.
+
+  RFC 0094 §5 adjudicator-reliability extras raise the anti-theater bar from
+  structural presence to semantic correspondence (additive `v1.1`; V1 ledgers
+  stay valid):
+
+  - **Check-B** is the semantic challenge↔rebuttal rubric. Each `challenge`
+    entry may carry an optional `correspondence` judgment, one of
+    `landed_and_rebutted` (the rebuttal materially addressed the specific gap),
+    `landed_unrebutted` (a confident non-rebuttal that did not), or
+    `not_material`. `correspondence` is only valid on a `challenge` entry. Once
+    any entry records a `correspondence` (Check-B engaged), a clearing verdict
+    (`accept` / `accept_with_findings`) requires at least one
+    `landed_and_rebutted` and **no** `landed_unrebutted`; otherwise the publisher
+    refuses with exit code 6. Ledgers that record no `correspondence` keep the
+    pre-existing structural-presence clearing rule.
+  - For `fog_of_war_review`, a `constraint`/scoring entry may carry an optional
+    `coverage`, one of `reconstructed`, `hallucinated`, or `missed` (the judge's
+    ground-truth score of a reconstructed constraint).
+  - `adjudicators[]` (optional non-empty list of session ids) records the
+    adjudicator(s) behind the verdict; `adjudication_mode` (optional, one of
+    `single` or `second_on_disagreement`) selects the gate. Under
+    `second_on_disagreement` a **clearing** verdict must be backed by at least
+    two **distinct** adjudicators (RFC 0064 diversity); a contested clear is
+    conservatively recorded as `needs_revision` (which does not require the
+    second adjudicator). `single` (or an absent mode) is unchanged.
 
   `findings[]` rows require `id`, `severity` (`low`, `medium`, `high`,
   `critical`), `posture` (non-empty string), `status` (`open`, `answered`,
@@ -1387,6 +1413,38 @@ V1 schemas:
   rationale: "The challenge was answered on the record."
   branches:
     implementation: cleared_with_constraints
+  ---
+  ```
+
+  Example Check-B + second-adjudicator clearing ledger (RFC 0094 §5): the
+  challenge carries a `correspondence` judgment and the high-stakes gate runs
+  under `second_on_disagreement` with two distinct adjudicators:
+
+  ```yaml
+  ---
+  schema_version: "striatum.collaboration_ledger.v1.1"
+  artifact_kind: "collaboration_ledger"
+  shape: "falsification_gate"
+  topic: "ship gate"
+  participants: ["sess_holder", "sess_falsifier", "sess_adj_a", "sess_adj_b"]
+  entries:
+    - kind: claim
+      by: sess_holder
+      refs: ["dialogue:1"]
+      text: "The proposal is ready to ship."
+    - kind: challenge
+      by: sess_falsifier
+      refs: ["dialogue:2"]
+      text: "The migration path is unproven."
+      correspondence: landed_and_rebutted
+    - kind: rebuttal
+      by: sess_holder
+      refs: ["dialogue:3"]
+      text: "The migration is proven by the linked dry-run fixture."
+  adjudication_mode: second_on_disagreement
+  adjudicators: ["sess_adj_a", "sess_adj_b"]
+  verdict: "accept"
+  rationale: "The only landed challenge was materially rebutted; both adjudicators agreed."
   ---
   ```
 

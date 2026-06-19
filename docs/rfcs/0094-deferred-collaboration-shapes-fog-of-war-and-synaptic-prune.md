@@ -1,8 +1,11 @@
 # RFC 0094: Deferred Collaboration Shapes — Fog-of-War Review, Synaptic Prune, and Adjudicator Reliability
 
-Status: partially implemented (slices 1 & 3 landed — `post_dialog_hook`, work-packet
-type sequencing, and the `fog_of_war_review` / `synaptic_prune` shapes; Check-B +
-ledger `v1.1` + second-adjudicator remain deferred)
+Status: partially implemented (slices 1, 2 & 3 landed — `post_dialog_hook`,
+work-packet type sequencing, the `fog_of_war_review` / `synaptic_prune` shapes,
+and the §5 adjudicator-reliability extras: the Check-B `correspondence` rubric,
+the ledger `v1.1` per-entry `correspondence`/`coverage` fields + top-level
+`adjudicators`/`adjudication_mode`, and the second-adjudicator-on-disagreement
+gate; the §5 anti-theater regression corpus + live-fixture dogfood remain)
 Date: 2026-05-30
 author: proposer-claude-opus-4-8-001
 
@@ -21,13 +24,26 @@ so close emits the prune fan-out before participant teardown. Both publish the
 existing `collaboration_ledger.v1.1` (which already carries the `fog_of_war_review`
 / `synaptic_prune` shape enum + `constraint`/`nomination` entry kinds), so no new
 artifact contract was required. Both ship at support-tier `experimental` (RFC 0106:
-no graduation without a green RFC 0105 unattended-reliability fixture). **Still
-deferred** (RFC's own slices 2 & 4): the Goal 5 adjudicator-reliability layer — the
-semantic **Check-B** challenge↔rebuttal rubric, the additive ledger `v1.1` fields
-(`correspondence` / `coverage` / `adjudicators` / `adjudication_mode`), and the
-opt-in **second-adjudicator-on-disagreement** gate — and the anti-theater
-regression corpus (the shapes' coverage/prune scoring is currently the existing
-structural substance gate, not the semantic Check-B layer).
+no graduation without a green RFC 0105 unattended-reliability fixture).
+
+Implementation note (2026-06-19, #402, slices 2 & 4): the Goal 5
+adjudicator-reliability layer landed at the **contract layer** — the publisher's
+exit-6 front-matter guard (`go/pkg/artifactcontracts/collaboration_ledger.go`),
+which is the gate the whole collaboration-shape family already shares (it is what
+`review.submit` / `publish-artifact` enforce). The additive ledger `v1.1` fields
+are now validated: per-`challenge` `correspondence` (`landed_and_rebutted` /
+`landed_unrebutted` / `not_material`), per-entry `coverage` (`reconstructed` /
+`hallucinated` / `missed`), and the top-level `adjudicators[]` /
+`adjudication_mode`. The semantic **Check-B** clearing rule is enforced: once any
+`correspondence` is recorded, a clearing verdict requires ≥1 `landed_and_rebutted`
+and no `landed_unrebutted` (the confident-non-rebuttal anti-theater case). The
+opt-in **second-adjudicator-on-disagreement** gate is enforced: under
+`adjudication_mode: second_on_disagreement` a clearing verdict requires ≥2
+**distinct** adjudicators (RFC 0064 diversity), while a contested clear is
+conservatively recorded as `needs_revision`. Every RFC 0093 V1 ledger stays valid
+(additive only). **Still deferred**: the §5 anti-theater regression CORPUS (a
+seeded transcript→expected-verdict fixture set) and the live 3-lane design→build
+dogfood that calibrates Check-B adjudicator cost (Open Question 6).
 
 Context:
 - [RFC 0093](0093-structured-live-collaboration-workflow-shapes.md) — the parent.

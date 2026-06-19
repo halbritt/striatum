@@ -256,6 +256,13 @@ var Schemas = map[string]Schema{
 			"constraints":    {false, isMapListValue},
 			"branches":       {false, isStringAnyMapValue},
 			"findings":       {false, isMapListValue},
+			// RFC 0094 §5 adjudicator-reliability extras (#402, additive v1.1):
+			// `adjudicators` records the adjudicator session id(s) behind the verdict
+			// (>=1; >=2 distinct when the second-adjudicator gate is engaged), and
+			// `adjudication_mode` selects single vs second-adjudicator-on-disagreement.
+			// Both optional so every RFC 0093 V1 ledger stays valid (additive only).
+			"adjudicators":      {false, isNonEmptyStringListValue},
+			"adjudication_mode": {false, oneOfValue("single", "second_on_disagreement")},
 		},
 	},
 	// join_manifest (RFC 0133 Slice 1 / RFC 0135 P0 — D213/D216): the provenance
@@ -435,8 +442,9 @@ func standardMetadataNames() []string {
 // kind's schema oneOfValue check is the validator — keep the two in sync.
 var enumFieldValues = map[string]map[string][]string{
 	"collaboration_ledger": {
-		"verdict": {"accept", "accept_with_findings", "needs_revision", "reject"},
-		"shape":   {"falsification_gate", "cross_examination", "fog_of_war_review", "synaptic_prune", "adjudicated_constraint_extraction"},
+		"verdict":           {"accept", "accept_with_findings", "needs_revision", "reject"},
+		"shape":             {"falsification_gate", "cross_examination", "fog_of_war_review", "synaptic_prune", "adjudicated_constraint_extraction"},
+		"adjudication_mode": {"single", "second_on_disagreement"},
 	},
 	// #126: `severity` was missing here, so `severity: blocker` was rejected with a
 	// bare "is invalid" that forced a lane to read Go source for the enum. Keep this
