@@ -720,6 +720,57 @@ func TestMigration37ResolvesTerminalRunBlockers(t *testing.T) {
 	}
 }
 
+// TestMigration38SupervisorBufferedPacketsIsOwnershipSafe (#456 / FMA-006): the
+// durable no-reader push-packet buffer creates ONE NEW runtime-owned table
+// (striatumd.supervisor_buffered_packets) and grants the runtime role full DML.
+// Like migrations 29/30 it must NOT ALTER/DROP any owner table (the future-runtime-
+// DDL guard forbids ALTER/DROP of striatumd.* for versions >= 27 outright) and must
+// declare NO foreign key to any owner-held table (repository_id / supervisor_id are
+// bare columns; the supervisor lifecycle owns its own teardown), so striatumd_rw can
+// both create and write it without a later runtime migration touching a
+// bootstrap-owned table (the #442 trap).
+func TestMigration38SupervisorBufferedPacketsIsOwnershipSafe(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var migration *Migration
+	for index := range migrations {
+		if migrations[index].Version == 38 {
+			migration = &migrations[index]
+			break
+		}
+	}
+	if migration == nil {
+		t.Fatal("migration 38 is missing")
+	}
+	sql := migration.SQL
+	for _, needle := range []string{
+		"CREATE TABLE IF NOT EXISTS striatumd.supervisor_buffered_packets",
+		"PRIMARY KEY (repository_id, supervisor_id, pipe_path, seq)",
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON striatumd.supervisor_buffered_packets TO striatumd_rw",
+	} {
+		if !strings.Contains(sql, needle) {
+			t.Fatalf("migration 38 missing %q", needle)
+		}
+	}
+	for _, forbidden := range []string{
+		"ALTER TABLE",
+		"DROP TABLE",
+		"REFERENCES striatumd.repositories",
+		"REFERENCES striatumd.runs",
+		"REFERENCES striatumd.jobs",
+		"FOREIGN KEY",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("migration 38 must not contain %q (owner-table dependency / future-runtime-DDL guard); integrity is enforced in Go", forbidden)
+		}
+	}
+	if violations := runtimeMigrationOwnerDDLViolations(*migration); len(violations) > 0 {
+		t.Fatalf("migration 38 must not carry owner DDL, found: %v", violations)
+	}
+}
+
 func TestApplyMigrationsRecordsVersion(t *testing.T) {
 	runner := &fakeRunner{scalars: map[string]string{}}
 	version, err := ApplyMigrations(context.Background(), runner, "test")
