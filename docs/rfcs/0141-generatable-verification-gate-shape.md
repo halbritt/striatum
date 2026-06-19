@@ -1,6 +1,6 @@
 # RFC 0141: Generatable verification_gate workflow shape
 
-Status: proposed
+Status: accepted (D238)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8
 
