@@ -23,6 +23,14 @@ import (
 type Client struct {
 	cfg *Config
 	mc  *minio.Client
+
+	// readObjectBytes fetches the full body of bucket/key. It is a field
+	// (not a direct c.mc.GetObject call) so the PutBytes post-upload
+	// content-readback verification can be exercised by unit tests with a
+	// stubbed store — including a deliberately truncated/corrupt readback
+	// — without a live S3/Garage endpoint. nil means "use the real minio
+	// GetObject path" (c.getObjectBytes).
+	readObjectBytes func(ctx context.Context, bucket, key string) ([]byte, error)
 }
 
 // New returns a new Client backed by minio-go. Returns an error if the
@@ -92,10 +100,26 @@ func (c *Client) CreateBucket(ctx context.Context, bucket string) error {
 	return c.mc.MakeBucket(ctx, bucket, minio.MakeBucketOptions{Region: c.cfg.Region})
 }
 
+// ErrContentReadbackMismatch is returned by PutBytes when the body read
+// back from the store after the upload does not hash to the sha256 of
+// the body that was uploaded. It signals a corrupt or truncated PUT that
+// happened to satisfy the size check — the blob on the store is not
+// byte-identical to its recorded content_sha256. Callers (artifact
+// publish) must treat this as a hard publish failure so the corruption is
+// rejected at publish time rather than caught late at the run-completion
+// reconstructability gate (FMA-004, issue #454).
+var ErrContentReadbackMismatch = errors.New("blob.PutBytes: stored content sha256 does not match uploaded body")
+
 // PutBytes uploads body to bucket at key with the given content type.
-// The sha256 of body is computed before upload and verified against
-// the post-upload object via a HEAD round-trip. Returns the sha256 hex
-// digest on success.
+// The sha256 of body is computed before upload, then verified against
+// the post-upload object: first the object SIZE via a HEAD round-trip,
+// then — and this is the integrity-critical step — the actual STORED
+// CONTENT is read back and re-hashed and compared to the recorded
+// sha256. A size-only check cannot catch a corrupt-but-same-length PUT;
+// the content readback can. On any mismatch PutBytes fails loudly
+// (ErrContentReadbackMismatch) so a corrupt blob is rejected at publish
+// time, not late at the run-completion reconstructability gate. Returns
+// the sha256 hex digest on success.
 //
 // PutBytes is the canonical publish path: callers (the daemon's
 // artifact.publish handler) pass the already-validated artifact body
@@ -122,7 +146,51 @@ func (c *Client) PutBytes(ctx context.Context, bucket, key string, body []byte, 
 	if stat.Size != int64(len(body)) {
 		return "", fmt.Errorf("blob.PutBytes: size mismatch: put=%d stat=%d", len(body), stat.Size)
 	}
+	// Content readback verification (FMA-004 / #454). Size equality is
+	// necessary but not sufficient: a truncated/corrupt PUT that lands at
+	// the same byte length stores a body whose readback hash differs from
+	// the recorded sha. Garage does not return a trustworthy strong
+	// content hash on the HEAD/PUT (the ETag is not a portable sha256, and
+	// is md5-shaped only for single-part PUTs), so the safe default is to
+	// read the stored object back and re-hash it. This is bounded: one
+	// extra GET per put, only on the publish path.
+	stored, err := c.readBack(ctx, bucket, key)
+	if err != nil {
+		return "", fmt.Errorf("blob.PutBytes: readback: %w", err)
+	}
+	storedSum := sha256.Sum256(stored)
+	if storedHex := hex.EncodeToString(storedSum[:]); storedHex != hexSum {
+		return "", fmt.Errorf("%w: bucket=%s key=%s expected=%s got=%s storedLen=%d", ErrContentReadbackMismatch, bucket, key, hexSum, storedHex, len(stored))
+	}
 	return hexSum, nil
+}
+
+// readBack reads the full stored body of bucket/key for post-upload
+// content verification. It dispatches to the injectable readObjectBytes
+// hook when set (unit tests stub a corrupt/truncated store there);
+// otherwise it goes to the real minio GetObject path.
+func (c *Client) readBack(ctx context.Context, bucket, key string) ([]byte, error) {
+	if c.readObjectBytes != nil {
+		return c.readObjectBytes(ctx, bucket, key)
+	}
+	return c.getObjectBytes(ctx, bucket, key)
+}
+
+// getObjectBytes fetches the full body of bucket/key from the live
+// S3/Garage endpoint. Unlike GetBytes it carries no expected-sha
+// contract; it is the raw readback used internally by PutBytes to verify
+// the just-uploaded object's stored content.
+func (c *Client) getObjectBytes(ctx context.Context, bucket, key string) ([]byte, error) {
+	obj, err := c.mc.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get: %w", err)
+	}
+	defer func() { _ = obj.Close() }()
+	body, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	return body, nil
 }
 
 // GetBytes fetches the object at bucket/key, verifies its sha256
