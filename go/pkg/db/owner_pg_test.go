@@ -76,3 +76,67 @@ func TestOwnerBundleAppliesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("audit_sd_append stamp requires_daemon_auth = %q; want true", stamp)
 	}
 }
+
+// TestOwnerBundleEighteenTransfersCohortOwnershipToRuntime is GH #442 / #441,
+// the closest pgtest can get to the prod fix: after the owner bundles apply, the
+// pre-split runtime cohort is owned by striatumd_rw, so the runtime role can ALTER
+// those tables (the property migration 0035/0036 need). pgtest is SINGLE-ROLE so
+// it cannot reproduce the bootstrap-owned starting condition, but it DOES exercise
+// the real bundle 0018 SQL: the GRANT CREATE prerequisite + the guarded
+// ALTER … OWNER TO striatumd_rw transfer, and proves a striatumd_rw-membership
+// session can subsequently run an ADD COLUMN against a transferred table.
+func TestOwnerBundleEighteenTransfersCohortOwnershipToRuntime(t *testing.T) {
+	pool := pgtest.Pool(t)
+	ctx := context.Background()
+
+	if _, _, err := db.ApplyOwnerBundles(ctx, pool.Runner, "test"); err != nil {
+		t.Fatalf("apply owner bundles: %v", err)
+	}
+
+	// Every cohort table the bundle transfers must now be striatumd_rw-owned.
+	for _, table := range []string{
+		"job_recovery_state",
+		"barrier_staged_contributions",
+		"barrier_state",
+		"fanin_freeze_points",
+		"conversations",
+		"conversation_post_dialog_hooks",
+		"dissent_ledger",
+		"interrogations",
+		"job_workspaces",
+		"spawn_authorization_grants",
+	} {
+		owner, err := pool.Runner.QueryScalar(ctx,
+			"SELECT tableowner FROM pg_tables WHERE schemaname='striatumd' AND tablename=$1", table)
+		if err != nil {
+			t.Fatalf("read owner of %s: %v", table, err)
+		}
+		if owner != "striatumd_rw" {
+			t.Fatalf("after bundle 0018, striatumd.%s owner = %q; want striatumd_rw", table, owner)
+		}
+	}
+
+	// The runtime role can now ALTER a transferred table (the exact shape of
+	// migration 0035's ADD COLUMN). SET ROLE / ALTER / RESET must run on the SAME
+	// physical connection, so acquire one rather than using the pool directly.
+	conn, err := pool.RawPool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire connection: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SET ROLE striatumd_rw"); err != nil {
+		t.Fatalf("set role striatumd_rw: %v", err)
+	}
+	_, alterErr := conn.Exec(ctx,
+		"ALTER TABLE striatumd.job_recovery_state ADD COLUMN IF NOT EXISTS pgtest_442_probe int")
+	if _, err := conn.Exec(ctx, "RESET ROLE"); err != nil {
+		t.Fatalf("reset role: %v", err)
+	}
+	if alterErr != nil {
+		t.Fatalf("striatumd_rw could not ALTER the transferred job_recovery_state (the #442 fix property): %v", alterErr)
+	}
+	if _, err := conn.Exec(ctx,
+		"ALTER TABLE striatumd.job_recovery_state DROP COLUMN IF EXISTS pgtest_442_probe"); err != nil {
+		t.Fatalf("clean up probe column: %v", err)
+	}
+}

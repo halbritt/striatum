@@ -18,36 +18,80 @@ const futureRuntimeMigrationOwnerDDLFloor = 27
 
 var runtimeMigrationOwnerDDLPattern = regexp.MustCompile(`(?is)\b(?:ALTER|DROP)\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(striatumd\.[a-z_][a-z0-9_]*)`)
 
-// runtimeOwnedTablesAlterable lists tables the RUNTIME role (striatumd_rw) itself
-// CREATEd in a regular runtime migration (sql/*.sql) and therefore OWNS. The
-// production deploy applies the sql/*.sql runtime set through the runtime-role
-// ApplyMigrations path (owner.go: owner DDL goes through `owner-ddl apply` as the
-// database owner, never through ApplyMigrations), so a runtime migration may
-// ALTER a table the runtime role owns without the owner-held crash-loop the
-// floor-27 guard exists to prevent (RFC 0079 §5 / RFC 0081). The guard's blanket
-// regex cannot introspect ownership, so confirmed runtime-owned tables are listed
-// here explicitly. job_recovery_state was created by the runtime migration 0020
-// (striatumd_rw owns it) and 0021 already ALTERed it (below the floor); RFC 0131
-// 131-C adds three confidence-gate columns to it via migration 0035 (above the
-// floor) — the same legitimate runtime-owned-table column add.
-// barrier_staged_contributions was created by the runtime migration 0029
-// (striatumd_rw owns it); RFC 0133's base-drift-as-a-recoverable-leg slice (#353)
-// adds two drift-leg columns to it via migration 0036 — the same legitimate
-// runtime-owned-table column add.
-var runtimeOwnedTablesAlterable = map[string]bool{
-	"striatumd.job_recovery_state":           true,
-	"striatumd.barrier_staged_contributions": true,
+// ownerBundleLiteralTransferPattern matches a literal
+// `ALTER TABLE [ONLY] striatumd.<name> OWNER TO striatumd_rw` ownership transfer
+// in an owner bundle (the direct, non-loop form). The captured table is then
+// alterable by a runtime migration.
+var ownerBundleLiteralTransferPattern = regexp.MustCompile(`(?is)ALTER\s+TABLE\s+(?:ONLY\s+)?striatumd\.([a-z_][a-z0-9_]*)\s+OWNER\s+TO\s+striatumd_rw`)
+
+// ownerBundleCohortTransferPattern matches the cohort-loop form owner bundle 0018
+// uses: a `format('ALTER TABLE striatumd.%I OWNER TO striatumd_rw', …)` over a
+// `v_cohort … ARRAY[ … ]` literal. When a bundle carries BOTH the cohort array
+// and the `format(... OWNER TO striatumd_rw)` transfer over it, every
+// single-quoted name inside that ARRAY[…] block is a table the bundle transfers
+// to runtime ownership.
+var ownerBundleCohortArrayPattern = regexp.MustCompile(`(?is)ARRAY\s*\[(.*?)\]`)
+var ownerBundleFormatTransferPattern = regexp.MustCompile(`(?is)format\([^)]*ALTER\s+TABLE\s+striatumd\.%I\s+OWNER\s+TO\s+striatumd_rw`)
+var cohortTableNamePattern = regexp.MustCompile(`'([a-z_][a-z0-9_]*)'`)
+
+// runtimeOwnedTablesAlterable is the set of striatumd.* tables an above-floor
+// runtime migration may legitimately ALTER, DERIVED from the owner bundles'
+// actual `ALTER TABLE … OWNER TO striatumd_rw` ownership transfers rather than a
+// name-based premise. THIS IS THE OWNERSHIP-AWARE GUARD (GH #442 / #441).
+//
+// The prior blanket allowlist (`"striatumd.job_recovery_state": true`, added by
+// #336) was UNSOUND: it reasoned "created by a runtime migration ⇒ runtime-owned,"
+// but on a two-role deploy the runbook applies the sql/NNNN runtime migrations as
+// the OWNER role (`daemon migrate-db --admin-url`), so a runtime-migration-CREATEd
+// table is owned by the BOOTSTRAP role (halbritt), NOT striatumd_rw. A runtime
+// ALTER of it then crash-loops the daemon with `must be owner of table …` (42501,
+// the prod incident #441/#442). pgtest is single-role and never reproduced it.
+//
+// The fix makes the allowlist truthful: a table is alterable-by-runtime ONLY when
+// an owner bundle has TRANSFERRED its ownership to striatumd_rw (owner bundle
+// 0018), which is applied as the owner before any runtime migration ALTERs it. So
+// the guard passes BECAUSE the table is genuinely runtime-owned at ALTER time, not
+// because of a name on a list. If owner bundle 0018 is ever dropped, the set goes
+// empty and 0035/0036 immediately FAIL the guard — exactly the trap D187/D215
+// describe, no escape.
+func runtimeOwnedTablesAlterable(t *testing.T) map[string]bool {
+	t.Helper()
+	bundles, err := OwnerBundles()
+	if err != nil {
+		t.Fatalf("load owner bundles for ownership-transfer derivation: %v", err)
+	}
+	allowed := map[string]bool{}
+	for _, bundle := range bundles {
+		// Direct literal transfers: ALTER TABLE striatumd.<name> OWNER TO striatumd_rw.
+		for _, m := range ownerBundleLiteralTransferPattern.FindAllStringSubmatch(bundle.SQL, -1) {
+			allowed["striatumd."+strings.ToLower(m[1])] = true
+		}
+		// Cohort-loop transfers: a format('ALTER TABLE striatumd.%I OWNER TO
+		// striatumd_rw', …) over a v_cohort ARRAY[…] literal. Only extract the
+		// cohort-array names, and only when the transfer-over-the-cohort is present,
+		// so unrelated quoted strings (role names, stamp capabilities) cannot widen
+		// the allowlist.
+		if ownerBundleFormatTransferPattern.MatchString(bundle.SQL) {
+			for _, arr := range ownerBundleCohortArrayPattern.FindAllStringSubmatch(bundle.SQL, -1) {
+				for _, m := range cohortTableNamePattern.FindAllStringSubmatch(arr[1], -1) {
+					allowed["striatumd."+strings.ToLower(m[1])] = true
+				}
+			}
+		}
+	}
+	return allowed
 }
 
-func runtimeMigrationOwnerDDLViolations(migration Migration) []string {
+func runtimeMigrationOwnerDDLViolations(migration Migration, runtimeOwned map[string]bool) []string {
 	matches := runtimeMigrationOwnerDDLPattern.FindAllStringSubmatch(migration.SQL, -1)
 	violations := make([]string, 0, len(matches))
 	seen := map[string]bool{}
 	for _, match := range matches {
 		cleaned := strings.Join(strings.Fields(match[0]), " ")
 		table := strings.ToLower(match[1])
-		if runtimeOwnedTablesAlterable[table] {
-			// A runtime-owned table the runtime role may legitimately ALTER.
+		if runtimeOwned[table] {
+			// A table an owner bundle has transferred to striatumd_rw ownership;
+			// the runtime role may legitimately ALTER it (ownership-aware, GH #442).
 			continue
 		}
 		if seen[cleaned] {
@@ -617,12 +661,97 @@ func TestFutureRuntimeMigrationsDoNotCarryOwnerDDL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
 	for _, migration := range migrations {
 		if migration.Version < futureRuntimeMigrationOwnerDDLFloor {
 			continue
 		}
-		if violations := runtimeMigrationOwnerDDLViolations(migration); len(violations) > 0 {
+		if violations := runtimeMigrationOwnerDDLViolations(migration, runtimeOwned); len(violations) > 0 {
 			t.Fatalf("migration %d carries owner-table DDL forbidden in regular runtime migrations: %v", migration.Version, violations)
+		}
+	}
+}
+
+// TestOwnershipAwareGuardCatchesAlterAbsentTransfer is the GH #442 / #441
+// regression: the owner-DDL guard MUST catch an above-floor runtime ALTER of a
+// bootstrap-owned table when no owner bundle has transferred that table to
+// striatumd_rw — there is NO name-based allowlist escape. It proves both that the
+// guard would have caught migration 0035's ALTER of job_recovery_state with the
+// ownership transfer removed (the prod crash-loop), AND that the live tree passes
+// only BECAUSE owner bundle 0018 truthfully transfers ownership before the
+// runtime migrations run.
+func TestOwnershipAwareGuardCatchesAlterAbsentTransfer(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var migration0035 *Migration
+	for index := range migrations {
+		if migrations[index].Version == 35 {
+			migration0035 = &migrations[index]
+			break
+		}
+	}
+	if migration0035 == nil {
+		t.Fatal("migration 35 is missing")
+	}
+
+	// With NO ownership-transfer guarantee (empty allowlist) the guard FIRES on
+	// 0035's ALTER of the bootstrap-owned job_recovery_state — the prod 42501.
+	withoutTransfer := runtimeMigrationOwnerDDLViolations(*migration0035, map[string]bool{})
+	if len(withoutTransfer) == 0 {
+		t.Fatal("ownership-aware guard must catch migration 0035's ALTER of job_recovery_state absent an owner-bundle ownership transfer (the #442 crash-loop)")
+	}
+	foundJRS := false
+	for _, v := range withoutTransfer {
+		if strings.Contains(v, "striatumd.job_recovery_state") {
+			foundJRS = true
+		}
+	}
+	if !foundJRS {
+		t.Fatalf("expected the job_recovery_state ALTER among violations, got %v", withoutTransfer)
+	}
+
+	// The live allowlist is DERIVED from the owner bundles' actual ownership
+	// transfers (owner bundle 0018), not a name list. It must contain
+	// job_recovery_state (so the live guard passes truthfully) and it must NOT be
+	// empty (a missing/regressed bundle 0018 would empty it and re-red 0035).
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
+	if !runtimeOwned["striatumd.job_recovery_state"] {
+		t.Fatal("owner bundle 0018 must transfer job_recovery_state to striatumd_rw so migration 0035's ALTER is truthfully runtime-safe")
+	}
+	if !runtimeOwned["striatumd.barrier_staged_contributions"] {
+		t.Fatal("owner bundle 0018 must transfer barrier_staged_contributions to striatumd_rw so migration 0036's ALTER is truthfully runtime-safe")
+	}
+	withTransfer := runtimeMigrationOwnerDDLViolations(*migration0035, runtimeOwned)
+	if len(withTransfer) != 0 {
+		t.Fatalf("migration 0035 must pass the ownership-aware guard once bundle 0018 transfers job_recovery_state ownership; got violations %v", withTransfer)
+	}
+}
+
+// TestOwnershipTransferBundleCoversAboveFloorRuntimeAlters proves the allowlist
+// and the ownership-transfer bundle are CONSISTENT: every striatumd.* table an
+// above-floor runtime migration ALTERs must be one the owner bundles transfer to
+// striatumd_rw. This is the standing invariant that keeps a NEW above-floor
+// runtime ALTER from sneaking past — if a future migration ALTERs a table no
+// owner bundle has transferred, this test (and the main guard) goes red until the
+// transfer is added to owner bundle 0018's cohort (or the ALTER is moved to an
+// owner bundle).
+func TestOwnershipTransferBundleCoversAboveFloorRuntimeAlters(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
+	for _, migration := range migrations {
+		if migration.Version < futureRuntimeMigrationOwnerDDLFloor {
+			continue
+		}
+		for _, match := range runtimeMigrationOwnerDDLPattern.FindAllStringSubmatch(migration.SQL, -1) {
+			table := strings.ToLower(match[1])
+			if !runtimeOwned[table] {
+				t.Fatalf("migration %d ALTERs %s but no owner bundle transfers it to striatumd_rw; add it to owner bundle 0018's cohort or move the DDL to an owner bundle (GH #442)", migration.Version, table)
+			}
 		}
 	}
 }
@@ -637,7 +766,7 @@ func TestRuntimeMigrationOwnerDDLGuardDetectsForbiddenDDL(t *testing.T) {
 		`,
 	}
 
-	violations := runtimeMigrationOwnerDDLViolations(migration)
+	violations := runtimeMigrationOwnerDDLViolations(migration, runtimeOwnedTablesAlterable(t))
 
 	expected := []string{
 		"ALTER TABLE striatumd.runs",
@@ -680,7 +809,7 @@ func TestMigration33ReapsTerminalRunSupervisors(t *testing.T) {
 			t.Fatalf("migration 33 missing %q", needle)
 		}
 	}
-	if violations := runtimeMigrationOwnerDDLViolations(*migration); len(violations) > 0 {
+	if violations := runtimeMigrationOwnerDDLViolations(*migration, runtimeOwnedTablesAlterable(t)); len(violations) > 0 {
 		t.Fatalf("migration 33 must be pure DML, found owner DDL: %v", violations)
 	}
 }
@@ -715,7 +844,7 @@ func TestMigration37ResolvesTerminalRunBlockers(t *testing.T) {
 			t.Fatalf("migration 37 missing %q", needle)
 		}
 	}
-	if violations := runtimeMigrationOwnerDDLViolations(*migration); len(violations) > 0 {
+	if violations := runtimeMigrationOwnerDDLViolations(*migration, runtimeOwnedTablesAlterable(t)); len(violations) > 0 {
 		t.Fatalf("migration 37 must be pure DML, found owner DDL: %v", violations)
 	}
 }

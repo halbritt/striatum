@@ -357,3 +357,73 @@ func TestOwnerBundleSixteenAddsVerifyJobType(t *testing.T) {
 		t.Fatal("owner bundle 16 has no label in ownerBundleLabels")
 	}
 }
+
+// TestOwnerBundleEighteenTransfersRuntimeTableOwnership is GH #442 / #441: the
+// owner bundle transfers the pre-split runtime-table cohort (job_recovery_state
+// etc.) to striatumd_rw so a runtime migration may ALTER those tables without the
+// `must be owner of table …` (42501) crash-loop on a two-role production daemon.
+//
+// The bundle's behavior contract this pins:
+//   - it transfers ownership TO striatumd_rw (not the owner) — the direction that
+//     makes the runtime ALTER legal;
+//   - it covers at least job_recovery_state (ALTERed by migration 0035, the live
+//     crash) and barrier_staged_contributions (ALTERed by 0036);
+//   - the transfer is GUARDED (EXISTS striatumd_rw + to_regclass) so it is a
+//     safe no-op on a single-role deploy or a DB behind on the creating migration;
+//   - it does NOT transfer any owner-held authority surface to the runtime role
+//     (no jobs/runs/sessions/events/clients/principals ownership move).
+func TestOwnerBundleEighteenTransfersRuntimeTableOwnership(t *testing.T) {
+	bundles, err := OwnerBundles()
+	if err != nil {
+		t.Fatalf("OwnerBundles: %v", err)
+	}
+	var bundle *OwnerBundle
+	for index := range bundles {
+		if bundles[index].Version == 18 {
+			bundle = &bundles[index]
+			break
+		}
+	}
+	if bundle == nil {
+		t.Fatal("owner bundle 18 is missing")
+	}
+	for _, needle := range []string{
+		// The cohort + the transfer over it.
+		"OWNER TO striatumd_rw",
+		"ALTER TABLE striatumd.%I OWNER TO striatumd_rw",
+		"'job_recovery_state'",
+		"'barrier_staged_contributions'",
+		// Deploy-order / idempotency guards.
+		"pg_roles WHERE rolname = 'striatumd_rw'",
+		"to_regclass('striatumd.' || v_table)",
+		// Capability stamp so the bundle records its application.
+		"runtime_table_ownership_transfer",
+	} {
+		if !strings.Contains(bundle.SQL, needle) {
+			t.Fatalf("bundle 18 missing %q", needle)
+		}
+	}
+	// It must NOT hand any owner-held authority surface to the runtime role: that
+	// would weaken an RFC 0110 boundary. Only the runtime-data cohort moves.
+	for _, forbidden := range []string{
+		"striatumd.jobs OWNER TO striatumd_rw",
+		"striatumd.runs OWNER TO striatumd_rw",
+		"striatumd.sessions OWNER TO striatumd_rw",
+		"striatumd.events OWNER TO striatumd_rw",
+		"striatumd.audit_log OWNER TO striatumd_rw",
+		"striatumd.clients OWNER TO striatumd_rw",
+		"striatumd.principals OWNER TO striatumd_rw",
+		// And it must not transfer ownership AWAY from the runtime role here.
+		"OWNER TO CURRENT_USER",
+	} {
+		if strings.Contains(bundle.SQL, forbidden) {
+			t.Fatalf("bundle 18 must not contain %q", forbidden)
+		}
+	}
+	if LatestOwnerBundleVersion < 18 {
+		t.Fatalf("LatestOwnerBundleVersion = %d; want >= 18 (owner bundle 0018 shipped)", LatestOwnerBundleVersion)
+	}
+	if ownerBundleLabels[18] == "" {
+		t.Fatal("owner bundle 18 has no label in ownerBundleLabels")
+	}
+}
