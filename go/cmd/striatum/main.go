@@ -19,6 +19,7 @@ import (
 	"github.com/halbritt/striatum/go/pkg/cli/rundrive"
 	cliskills "github.com/halbritt/striatum/go/pkg/cli/skills"
 	"github.com/halbritt/striatum/go/pkg/laneproviderauth"
+	"github.com/halbritt/striatum/go/pkg/verifier"
 	"github.com/halbritt/striatum/go/pkg/workflowauthoring"
 	"github.com/halbritt/striatum/go/pkg/workflowgenerate"
 	"github.com/halbritt/striatum/go/pkg/workflowtemplates"
@@ -809,6 +810,12 @@ func runWorkflowValidate(args []string, stdout io.Writer, stderr io.Writer, repo
 		if err := refuseSameModelLint(workflow); err != nil {
 			return outputWorkflowValidateError(stdout, stderr, jsonOutput, "workflow_lint_refused", err, 8)
 		}
+	}
+	// RFC 0141 Pillar 3 (UNFILLED): a verification gate whose external checks are
+	// sanctioned-but-unpinned on this host reads RED here, naming the entries and
+	// the literal fix command — never a false green. Pure file read, no lane.
+	if tb := verifier.EvaluateAllowlistTemplate(repoRoot, workflow); tb != nil {
+		return outputWorkflowValidateError(stdout, stderr, jsonOutput, tb.Reason, fmt.Errorf("%s", tb.Message), 8)
 	}
 	if jsonOutput {
 		return writeJSON(stdout, map[string]any{
