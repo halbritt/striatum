@@ -4,6 +4,60 @@
 
 ### Fixed
 
+- **Failure-mode audit remediation + open-issue triage wave (2026-06-19, D236).**
+  Resolves the SERIOUS/MINOR availability & liveness findings from the
+  `STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md` audit (#451–#458) plus the
+  prod-critical owner-DDL crash-loop (#442/#441) and three smaller runner bugs
+  (#445/#446/#447), each as a direct runner-fix PR:
+  - **daemon: a background-sweep panic no longer crash-loops the single writer
+    (#451, FMA-001).** The recovery and auto-spawn sweep goroutines now convert a
+    per-run panic into the same degraded-cursor + backoff path an error already
+    takes (the recovery loop's `panic(r)` re-raise is removed; the auto-spawn loop
+    gains the missing recover), so one poison durable row degrades that run instead
+    of downing the daemon on every restart.
+  - **db: migration apply is now atomic (#452, FMA-002/008).** `applyOne` wraps the
+    DDL and both version stamps in one transaction (mirroring `applyOneOwnerBundle`),
+    closing the crash-window that left DDL applied but the version unstamped; the
+    in-progress version's recorded hash is verified inside that tx, and a guard test
+    trips if any future runner migration introduces non-transactional DDL.
+  - **db: a two-role prod bootstrap no longer crash-loops on an owner-owned runtime
+    table (#442/#441, D236).** New owner bundle `0018` transfers the pre-split
+    runtime-data table cohort (`job_recovery_state` et al.) to `striatumd_rw`
+    ownership (with the required `GRANT CREATE ON SCHEMA` prerequisite) before any
+    runtime migration ALTERs them, so migration 0035's `ADD COLUMN` succeeds under
+    the runtime role instead of failing 42501. The unsound name-based owner-DDL
+    allowlist is removed; the guard now derives the runtime-ALTERable set from the
+    bundles' actual `OWNER TO` transfers, so it passes only because a table is
+    truthfully runtime-owned. Migration 0035's SQL is untouched (hash-stable).
+  - **blob: `PutBytes` verifies a content readback hash, not just object size
+    (#454, FMA-004).** A truncated/corrupt upload that satisfied the size check is
+    now caught at publish (new `ErrContentReadbackMismatch`) rather than late at the
+    run-completion reconstructability gate.
+  - **recovery: auto-finalize enforces the per-job durability floor (#455,
+    FMA-005).** `completeAutoFinalizedJob` now also runs
+    `ensurePerJobPublishedArtifactsDurable`, matching `completeRecoveredJob`, so a
+    job cannot seal `completed` with a non-durable optional published artifact.
+  - **supervisor: buffered `supervised_push` packets survive a daemon restart
+    (#456, FMA-006).** No-reader-buffered packets are persisted (new runtime table
+    via migration `0038`) and replayed on reader-attach, so a push lane no longer
+    silently loses a packet across a restart (self-driving pull lanes already
+    self-healed).
+  - **db: owner-bundle re-apply is legible and self-healing on a missing
+    cross-bundle dependency (#458, FMA-007).** An undefined-object failure now
+    reports the bundle + missing object + remediation, and a one-shot ordered
+    idempotent re-apply re-creates a missing earlier object before a later bundle
+    depends on it; fail-closed is preserved as the final safety property.
+  - **supervisor: the RFC 0015 skill bundle is installed into the lane user's
+    `~/.claude/skills/` at `supervise start` (#445).** Idempotent and non-fatal, it
+    closes the CLI-fallback gap where a lane user never received the protocol skills.
+  - **drive: `cannot_advance_blocked` distinguishes dependency-blocked from
+    seal-failed (#446).** A job merely waiting on an upstream dependency
+    (`started_at IS NULL`) no longer reports a phantom "lane finished but the seal
+    failed" — message-only, no state-machine change.
+  - **barrier: the RFC 0135 assembly commit is deterministic (#447).** The
+    `commit-tree` step now pins `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` + identity, so
+    crash-recovery re-assembly reproduces the journaled commit byte-for-byte (fixes
+    the `TestBarrierAssemblyCrashMidAssemblyResumes` CI flake).
 - **runner: a bare interactive agent-CLI lane now drives `work.*` instead of
   timing out (#431, D235) — the self-hosting crux.** A `process` lane whose
   command is a bare `claude`/`codex`/`agy` (argv where

@@ -1,11 +1,86 @@
 package db
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/halbritt/striatum/go/pkg/sessionliveness"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// TestIsCrossBundleDependencyError covers the FMA-007 (#458) trigger detection:
+// a missing-object SQLSTATE a re-applied later bundle raises when an earlier
+// bundle's object is gone is recognized; an unrelated error (or a non-pg error)
+// is not, so the ordered self-heal only fires on the dependency class.
+func TestIsCrossBundleDependencyError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"undefined_table", &pgconn.PgError{Code: "42P01", Message: `relation "striatumd.schema_authority" does not exist`}, true},
+		{"undefined_column", &pgconn.PgError{Code: "42703", Message: `column "x" does not exist`}, true},
+		{"undefined_function", &pgconn.PgError{Code: "42883", Message: `function striatumd.foo() does not exist`}, true},
+		{"undefined_object", &pgconn.PgError{Code: "42704", Message: `type "x" does not exist`}, true},
+		{"wrapped_undefined_table", fmt.Errorf("apply: %w", &pgconn.PgError{Code: "42P01", Message: "relation does not exist"}), true},
+		{"insufficient_privilege", &pgconn.PgError{Code: "42501", Message: "permission denied"}, false},
+		{"unique_violation", &pgconn.PgError{Code: "23505", Message: "duplicate key"}, false},
+		{"non_pg_error", errors.New("boom"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCrossBundleDependencyError(tc.err); got != tc.want {
+				t.Fatalf("isCrossBundleDependencyError(%v) = %v; want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWrapOwnerBundleApplyErrorIsLegible covers FMA-007 (#458): a missing
+// cross-bundle object produces an actionable message naming the failing bundle,
+// the missing object, and the one-step remediation — not a raw, opaque
+// `relation does not exist`. The original error is preserved for errors.As, so
+// the auto-reconcile trigger still recognizes it. An unrelated error keeps the
+// existing wrapping.
+func TestWrapOwnerBundleApplyErrorIsLegible(t *testing.T) {
+	bundle := OwnerBundle{Version: 2, Label: "runtime read grant"}
+
+	missing := &pgconn.PgError{Code: "42P01", Message: `relation "striatumd.schema_authority" does not exist`}
+	wrapped := wrapOwnerBundleApplyError(bundle, missing)
+	for _, needle := range []string{
+		"owner bundle 2 (runtime read grant)",
+		"missing cross-bundle dependency",
+		"42P01",
+		"striatumd.schema_authority",
+		"striatum daemon owner-ddl apply",
+		"database owner",
+	} {
+		if !strings.Contains(wrapped.Error(), needle) {
+			t.Fatalf("legible error missing %q; got: %s", needle, wrapped.Error())
+		}
+	}
+	// errors.As must still reach the original pg error so the self-heal trigger
+	// and any caller-side classification keep working.
+	var pgErr *pgconn.PgError
+	if !errors.As(wrapped, &pgErr) || pgErr.Code != "42P01" {
+		t.Fatalf("wrapped error lost the underlying pg error: %v", wrapped)
+	}
+	if !isCrossBundleDependencyError(wrapped) {
+		t.Fatal("wrapped legible error must still classify as a cross-bundle dependency error")
+	}
+
+	// A non-dependency error keeps the plain wrapping (no remediation noise).
+	other := wrapOwnerBundleApplyError(bundle, errors.New("connection reset"))
+	if !strings.Contains(other.Error(), "apply owner bundle 2 (runtime read grant)") {
+		t.Fatalf("non-dependency error lost its bundle context: %s", other.Error())
+	}
+	if strings.Contains(other.Error(), "missing cross-bundle dependency") {
+		t.Fatalf("non-dependency error must not carry the cross-bundle remediation: %s", other.Error())
+	}
+}
 
 func TestOwnerBundleSevenAddsArtifactPlacement(t *testing.T) {
 	bundles, err := OwnerBundles()
@@ -355,5 +430,75 @@ func TestOwnerBundleSixteenAddsVerifyJobType(t *testing.T) {
 	}
 	if ownerBundleLabels[16] == "" {
 		t.Fatal("owner bundle 16 has no label in ownerBundleLabels")
+	}
+}
+
+// TestOwnerBundleEighteenTransfersRuntimeTableOwnership is GH #442 / #441: the
+// owner bundle transfers the pre-split runtime-table cohort (job_recovery_state
+// etc.) to striatumd_rw so a runtime migration may ALTER those tables without the
+// `must be owner of table …` (42501) crash-loop on a two-role production daemon.
+//
+// The bundle's behavior contract this pins:
+//   - it transfers ownership TO striatumd_rw (not the owner) — the direction that
+//     makes the runtime ALTER legal;
+//   - it covers at least job_recovery_state (ALTERed by migration 0035, the live
+//     crash) and barrier_staged_contributions (ALTERed by 0036);
+//   - the transfer is GUARDED (EXISTS striatumd_rw + to_regclass) so it is a
+//     safe no-op on a single-role deploy or a DB behind on the creating migration;
+//   - it does NOT transfer any owner-held authority surface to the runtime role
+//     (no jobs/runs/sessions/events/clients/principals ownership move).
+func TestOwnerBundleEighteenTransfersRuntimeTableOwnership(t *testing.T) {
+	bundles, err := OwnerBundles()
+	if err != nil {
+		t.Fatalf("OwnerBundles: %v", err)
+	}
+	var bundle *OwnerBundle
+	for index := range bundles {
+		if bundles[index].Version == 18 {
+			bundle = &bundles[index]
+			break
+		}
+	}
+	if bundle == nil {
+		t.Fatal("owner bundle 18 is missing")
+	}
+	for _, needle := range []string{
+		// The cohort + the transfer over it.
+		"OWNER TO striatumd_rw",
+		"ALTER TABLE striatumd.%I OWNER TO striatumd_rw",
+		"'job_recovery_state'",
+		"'barrier_staged_contributions'",
+		// Deploy-order / idempotency guards.
+		"pg_roles WHERE rolname = 'striatumd_rw'",
+		"to_regclass('striatumd.' || v_table)",
+		// Capability stamp so the bundle records its application.
+		"runtime_table_ownership_transfer",
+	} {
+		if !strings.Contains(bundle.SQL, needle) {
+			t.Fatalf("bundle 18 missing %q", needle)
+		}
+	}
+	// It must NOT hand any owner-held authority surface to the runtime role: that
+	// would weaken an RFC 0110 boundary. Only the runtime-data cohort moves.
+	for _, forbidden := range []string{
+		"striatumd.jobs OWNER TO striatumd_rw",
+		"striatumd.runs OWNER TO striatumd_rw",
+		"striatumd.sessions OWNER TO striatumd_rw",
+		"striatumd.events OWNER TO striatumd_rw",
+		"striatumd.audit_log OWNER TO striatumd_rw",
+		"striatumd.clients OWNER TO striatumd_rw",
+		"striatumd.principals OWNER TO striatumd_rw",
+		// And it must not transfer ownership AWAY from the runtime role here.
+		"OWNER TO CURRENT_USER",
+	} {
+		if strings.Contains(bundle.SQL, forbidden) {
+			t.Fatalf("bundle 18 must not contain %q", forbidden)
+		}
+	}
+	if LatestOwnerBundleVersion < 18 {
+		t.Fatalf("LatestOwnerBundleVersion = %d; want >= 18 (owner bundle 0018 shipped)", LatestOwnerBundleVersion)
+	}
+	if ownerBundleLabels[18] == "" {
+		t.Fatal("owner bundle 18 has no label in ownerBundleLabels")
 	}
 }

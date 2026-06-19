@@ -126,6 +126,23 @@ owner bundles or owner/admin helpers, then run them with the owner/admin DSN.
 The Go migration tests enforce this forward boundary while preserving the
 hashes of deployed historical migrations.
 
+A runtime migration may, however, `ALTER` a table the runtime role itself
+*owns*. A table created by an early migration that ran under the owner role
+(e.g. `striatumd.job_recovery_state`, migration 0020) is owned by the bootstrap
+role, not the runtime role, so a later runtime `ALTER` of it would crash-loop
+the daemon (`must be owner of table …`, SQLSTATE 42501). Owner bundle 0018
+transfers the pre-split runtime-data cohort (recovery, barrier, conversation,
+interrogation, dissent, workspace, and spawn-grant tables) to `striatumd_rw`
+ownership — and grants the runtime role `CREATE` on the `striatumd` schema,
+which owning those tables requires — so the runtime role can apply those
+`ALTER`s without the owner-only failure. Because the cohort transfer is an owner
+bundle, on any upgrade that adds a runtime `ALTER` of a transferred table you
+must run `daemon owner-ddl apply` (with the owner DSN) **before** starting the
+daemon, so the ownership is already in place when the daemon's startup migrate
+runs as the runtime role. The owner-DDL guard test is ownership-aware: it
+permits a runtime `ALTER` only of tables an owner bundle has actually
+transferred to `striatumd_rw`, never via a name-based allowlist escape.
+
 If a migration fails with an ownership or permission error during daemon
 startup, stop the service, rerun `daemon migrate-db` with an owner/admin DSN,
 then start the service again:
