@@ -249,12 +249,25 @@ func verificationChecks(spec Spec) ([]string, error) {
 	if !ok {
 		return defaultVerificationChecks(), nil
 	}
-	checks, err := stringList(raw, "spec.options.checks")
-	if err != nil {
-		return nil, err
+	var checks []string
+	// The CLI delivers --option values as raw strings, so accept a comma-separated
+	// list (`--option checks=mypy,builtin:go-test`) in addition to a JSON string
+	// array (from a spec file or programmatic caller).
+	if s, isStr := raw.(string); isStr {
+		for _, part := range strings.Split(s, ",") {
+			if t := strings.TrimSpace(part); t != "" {
+				checks = append(checks, t)
+			}
+		}
+	} else {
+		var err error
+		checks, err = stringList(raw, "spec.options.checks")
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(checks) == 0 {
-		return nil, genErr("checks must be a non-empty JSON string array of check ids", "spec.options.checks")
+		return nil, genErr("checks must be a non-empty list of check ids (comma-separated or a JSON string array)", "spec.options.checks")
 	}
 	for idx, id := range checks {
 		if strings.TrimSpace(id) == "" {
@@ -334,6 +347,18 @@ func applyVerificationGateWorkflowFields(spec Spec, workflow map[string]any) err
 		return err
 	}
 	workflow["allowlist_status"] = status
+	// Declare the real repo-relative intent path so the validate / run-start
+	// hard-block (verifier.EvaluateAllowlistTemplate) finds the sanctioned set under
+	// the scaffold root (not the repo-root convention) when the gate is UNFILLED.
+	workflow["intent_path"] = spec.ScaffoldRoot + "/" + verificationIntentRelPath
+	// On the single-lane `local` fixture set, verify and the adjudicate gate share
+	// one lane, so the same_model_adjudicator_pair lint (CLI-refused) would reject
+	// the generated starter — exactly the documented legitimate override, matching
+	// the hand-authored example. Record the inline acceptance so the builtin-only
+	// default validates out of the box.
+	if spec.LaneSet == "local" || spec.LaneSet == "" {
+		workflow["allow_same_model_review_pairing"] = true
+	}
 	return nil
 }
 

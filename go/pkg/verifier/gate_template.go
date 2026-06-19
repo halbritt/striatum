@@ -51,29 +51,24 @@ func EvaluateAllowlistTemplate(repoRoot string, workflow map[string]any) *Templa
 	if !hasVerify && status == "" {
 		return nil
 	}
-	// A gate the generator marked FILLED, or an unmarked builtins-only gate, has no
-	// external checks to pin — runnable and honest out of the box.
+	// A gate the generator marked FILLED (or an unmarked builtins-only gate) has no
+	// external checks wired into the gate — runnable and honest out of the box. We
+	// TRUST the generator's FILLED determination and do NOT re-read the intent file
+	// here: the intent template always ships one illustrative external check so it
+	// parses, and that example is not part of a builtins-only gate. Re-deriving from
+	// the template would wrongly block the runnable default.
 	if status != AllowlistStatusUnfilled {
-		// Still authoritatively check IF an intent path is declared and resolvable:
-		// a stamped FILLED can be trusted, but an unstamped verify gate that
-		// references an intent should be verified live. We only proceed to the file
-		// check when an intent path is actually declared.
-		intentPath, ok := declaredIntentPath(workflow)
-		if !ok {
-			return nil
-		}
-		return blockIfUnpinned(repoRoot, intentPath)
+		return nil
 	}
 	// TEMPLATE_UNFILLED: authoritatively re-derive from the files so a post-pin run
-	// clears without regeneration.
+	// clears WITHOUT regenerating the workflow (the static hint goes stale; the
+	// files do not). The generator declares the real intent_path; fall back to the
+	// repo-root convention only if it did not.
 	intentPath, ok := declaredIntentPath(workflow)
 	if !ok {
 		intentPath = defaultIntentRepoPath
 	}
-	if tb := blockIfUnpinned(repoRoot, intentPath); tb != nil {
-		return tb
-	}
-	return nil
+	return blockIfUnpinned(repoRoot, intentPath)
 }
 
 const defaultIntentRepoPath = "verification/allowlist.intent.json"
