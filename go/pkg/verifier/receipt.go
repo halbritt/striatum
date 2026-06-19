@@ -35,6 +35,19 @@ type Receipt struct {
 	// rule. They are part of what the seal digest covers.
 	Posture         Posture
 	AgreementSignal bool
+	// BuiltinID and StriatumVersion are set ONLY for a RFC 0141 builtin check
+	// (resolved from the in-binary registry, self-pinned to the striatum binary).
+	// They are sealed into the transcript and surfaced in the body so the gate read
+	// can CAP a builtin receipt at ASSERTED — a self-pin proves which harness
+	// invoked the tool, never which tool ran. Empty for an operator-allowlist check.
+	BuiltinID       string
+	StriatumVersion string
+	// NegativeControlVoid records the Pillar 3 vacuity guard: the known-bad control
+	// is run FIRST, and a control that unexpectedly PASSES (exit 0) voids the
+	// receipt — a check that cannot fail on a known-bad cannot be trusted to pass
+	// for the right reason. NegativeControlExit is the control's exit code. Sealed.
+	NegativeControlExit int
+	NegativeControlVoid bool
 }
 
 // CheckResult is the per-check outcome the verifier lane derives mechanically.
@@ -45,17 +58,21 @@ type CheckResult struct {
 	// Passed is the mechanical pass condition outcome (exit_zero).
 	Passed bool
 	// Classification is one of "verified_eligible" (strict sandbox, two-signal
-	// agreement, exit-0), "asserted" (a lone exit-0 or a non-strict sandbox),
-	// or "indeterminate" (timeout / envelope violation / network touch). It maps
-	// to the lattice rung a receipt can EARN — never above ASSERTED unless both
-	// signals hold under a strict envelope.
+	// agreement, exit-0), "asserted" (a lone exit-0, a non-strict sandbox, or a
+	// builtin self-pin), "indeterminate" (timeout / envelope violation / network
+	// touch), or "void" (the negative control failed to fail). It maps to the
+	// lattice rung a receipt can EARN — never above ASSERTED unless both signals
+	// hold under a strict envelope AND the check is NOT a builtin.
 	Classification string
+	// VoidReason names why the receipt is void (Pillar 3), empty otherwise.
+	VoidReason string
 }
 
 const (
 	classVerifiedEligible = "verified_eligible"
 	classAsserted         = "asserted"
 	classIndeterminate    = "indeterminate"
+	classVoid             = "void"
 )
 
 // RunRequest is a single verifier check execution request (issued by the lane).
@@ -71,24 +88,103 @@ type RunRequest struct {
 	Limits SandboxLimits
 }
 
-// ExecuteCheck runs a single allowlisted check TWICE under the strict sandbox
-// envelope and mints a receipt. The two executions are the D227 "two signals":
-// a sealed receipt PLUS an independent re-execution agreement. Both must reach
-// the same exit code (and pass) under a STRICT sandbox for the check to be
-// VERIFIED-eligible; a lone or disagreeing pass earns at most ASSERTED; a
-// timeout / envelope violation / network touch is INDETERMINATE.
+// ResolvedExec is a fully-resolved check ready to execute: the exact argv, the
+// recorded binary sha (an operator pin for an external check, the striatum self-pin
+// for a builtin), the optional negative control, and the builtin markers. It is the
+// single input to executeResolved, so the external and builtin roads share one
+// mint path and one seal.
+type ResolvedExec struct {
+	CheckID         string
+	Argv            []string
+	BinarySHA256    string
+	BuiltinID       string
+	StriatumVersion string
+	NegativeControl *NegativeControl
+	PassWhen        string
+}
+
+// ExecuteCheck runs a single OPERATOR-ALLOWLISTED check (RFC 0134 path) under the
+// strict sandbox and mints a receipt. The builtin (RFC 0141) ids are handled here
+// too: a `builtin:*` id resolves from the in-binary registry and self-pins,
+// bypassing the operator allowlist. The two executions are the D227 "two signals".
 //
 // THIS RUNS IN THE VERIFIER LANE, OFF THE DAEMON GATE PATH. The daemon never
 // calls ExecuteCheck; it only reads the sealed receipt this produces.
 func ExecuteCheck(ctx context.Context, allowlist *Allowlist, req RunRequest) (CheckResult, error) {
-	entry, err := allowlist.Resolve(req.CheckID)
+	var rex ResolvedExec
+	if IsBuiltinID(req.CheckID) {
+		var err error
+		if rex, err = builtinResolvedExec(req.CheckID); err != nil {
+			return CheckResult{}, err
+		}
+	} else {
+		entry, err := allowlist.Resolve(req.CheckID)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		binarySHA, err := VerifyBinary(entry)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		rex = ResolvedExec{
+			CheckID:      entry.ID,
+			Argv:         append([]string(nil), entry.Argv...),
+			BinarySHA256: binarySHA,
+			PassWhen:     entry.PassWhen,
+		}
+	}
+	return executeResolved(ctx, rex, req)
+}
+
+// ExecuteIntentCheck is the RFC 0141 generatable-shape execution path: it resolves
+// a named check against the two-layer allowlist (intent ⋈ pins ⋈ attestations) and
+// runs it, carrying the intent's negative_control into the mint. It REFUSES a
+// NAMED-but-unpinned check on the typed sentinel (rather than executing unverified
+// bytes), so an unfilled template can never silently produce a green receipt. A
+// `builtin:*` id short-circuits to the self-pinned builtin road.
+func ExecuteIntentCheck(ctx context.Context, intent *AllowlistIntent, pins *Allowlist, attest *Attestations, req RunRequest) (CheckResult, error) {
+	if IsBuiltinID(req.CheckID) {
+		rex, err := builtinResolvedExec(req.CheckID)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		return executeResolved(ctx, rex, req)
+	}
+	entry, ok := intent.Entry(req.CheckID)
+	if !ok {
+		return CheckResult{}, fmt.Errorf("check %q is not sanctioned in the verifier allowlist intent (sanctioned: %s); a workflow may NAME a check but never AUTHOR the executed bytes", req.CheckID, strings.Join(intent.IDs(), ", "))
+	}
+	resolved := JoinIntentPins(intent, pins, attest, HostFingerprint())
+	var rc *ResolvedCheck
+	for i := range resolved {
+		if resolved[i].ID == req.CheckID {
+			rc = &resolved[i]
+			break
+		}
+	}
+	if rc == nil || rc.Status == StatusNamedUnpinned {
+		fix := "striatum verifier pin --host-here"
+		return CheckResult{}, fmt.Errorf("check %q is NAMED in the intent but UNPINNED on this host (%s): refuse to run unverified bytes — pin them first: %s", req.CheckID, HostFingerprint(), fix)
+	}
+	binarySHA, err := VerifyBinary(*rc.Pin)
 	if err != nil {
 		return CheckResult{}, err
 	}
-	binarySHA, err := VerifyBinary(entry)
-	if err != nil {
-		return CheckResult{}, err
-	}
+	return executeResolved(ctx, ResolvedExec{
+		CheckID:         entry.ID,
+		Argv:            append([]string(nil), rc.Pin.Argv...),
+		BinarySHA256:    binarySHA,
+		NegativeControl: entry.NegativeControl,
+		PassWhen:        entry.PassWhen,
+	}, req)
+}
+
+// executeResolved is the single mint path: it runs the negative control FIRST
+// (Pillar 3 — void the receipt if a known-bad unexpectedly passes), then runs the
+// check TWICE under the strict envelope for the two-signal agreement, seals the
+// transcript (including the builtin markers and the control outcome), and
+// classifies — capping a builtin at ASSERTED regardless of posture.
+func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (CheckResult, error) {
 	cwd := req.Cwd
 	if strings.TrimSpace(cwd) == "" {
 		cwd, _ = os.Getwd()
@@ -103,11 +199,41 @@ func ExecuteCheck(ctx context.Context, allowlist *Allowlist, req RunRequest) (Ch
 		Limits:          req.Limits,
 	})
 
-	first, err := runOnce(ctx, wrapper, entry.Argv, cwd, req.Limits)
+	// Pillar 3: run the negative control FIRST. A control that PASSES (exit 0) — or
+	// could not even run its envelope — means the check does not discriminate the
+	// defect it claims to; void the receipt rather than trust a green it cannot earn.
+	var control *runOutcome
+	if rex.NegativeControl != nil && len(rex.NegativeControl.Argv) > 0 {
+		out, runErr := runOnce(ctx, wrapper, rex.NegativeControl.Argv, cwd, req.Limits)
+		if runErr != nil {
+			return CheckResult{}, runErr
+		}
+		control = &out
+		controlFailed := out.exitCode != 0 && !out.timedOut // the control DID fail as required
+		if !controlFailed {
+			receipt := Receipt{
+				CheckID:             rex.CheckID,
+				Argv:                append([]string(nil), rex.Argv...),
+				BinarySHA256:        rex.BinarySHA256,
+				ExitCode:            -1,
+				CwdTreeSHA:          treeSHA,
+				CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+				Posture:             posture,
+				BuiltinID:           rex.BuiltinID,
+				StriatumVersion:     rex.StriatumVersion,
+				NegativeControlExit: out.exitCode,
+				NegativeControlVoid: true,
+			}
+			receipt.SealDigest = receipt.computeSeal()
+			return CheckResult{Receipt: receipt, Passed: false, Classification: classVoid, VoidReason: "negative_control_did_not_fail"}, nil
+		}
+	}
+
+	first, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits)
 	if err != nil {
 		return CheckResult{}, err
 	}
-	second, err := runOnce(ctx, wrapper, entry.Argv, cwd, req.Limits)
+	second, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits)
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -122,36 +248,47 @@ func ExecuteCheck(ctx context.Context, allowlist *Allowlist, req RunRequest) (Ch
 	agreement := first.exitCode == second.exitCode &&
 		first.stdoutSHA == second.stdoutSHA &&
 		!first.timedOut && !second.timedOut
-	passed := entry.PassWhen == passWhenExitZero && first.exitCode == 0
+	passWhen := rex.PassWhen
+	if passWhen == "" {
+		passWhen = passWhenExitZero
+	}
+	passed := passWhen == passWhenExitZero && first.exitCode == 0
 
 	receipt := Receipt{
-		CheckID:         entry.ID,
-		Argv:            append([]string(nil), entry.Argv...),
-		BinarySHA256:    binarySHA,
+		CheckID:         rex.CheckID,
+		Argv:            append([]string(nil), rex.Argv...),
+		BinarySHA256:    rex.BinarySHA256,
 		ExitCode:        first.exitCode,
 		StdoutSHA256:    first.stdoutSHA,
 		CwdTreeSHA:      treeSHA,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
 		Posture:         posture,
 		AgreementSignal: agreement,
+		BuiltinID:       rex.BuiltinID,
+		StriatumVersion: rex.StriatumVersion,
+	}
+	if control != nil {
+		receipt.NegativeControlExit = control.exitCode
 	}
 	receipt.SealDigest = receipt.computeSeal()
 
-	classification := classifyResult(posture, first, agreement, treeStable, passed)
+	classification := classifyResult(posture, first, agreement, treeStable, passed, rex.BuiltinID != "")
 	return CheckResult{Receipt: receipt, Passed: passed, Classification: classification}, nil
 }
 
 // classifyResult maps an execution to the lattice rung its receipt can EARN.
 // This is the heart of the two-signal rule: VERIFIED requires (a) a STRICT
 // sandbox, (b) the independent re-execution AGREEMENT, (c) a stable read-only
-// tree, and (d) a passing exit-0. Anything that touches the network, violates
-// the envelope, or times out is INDETERMINATE — never VERIFIED. A lone exit-0
-// (no strict envelope or no agreement) earns only ASSERTED.
-func classifyResult(posture Posture, first runOutcome, agreement, treeStable, passed bool) string {
+// tree, (d) a passing exit-0, AND (e) that the check is NOT a builtin. Anything
+// that touches the network, violates the envelope, or times out is INDETERMINATE.
+// A lone exit-0 (no strict envelope or no agreement) or ANY builtin earns only
+// ASSERTED — a builtin self-pin proves which harness invoked the tool, never which
+// tool ran, so it can never independently earn VERIFIED.
+func classifyResult(posture Posture, first runOutcome, agreement, treeStable, passed, builtin bool) string {
 	if first.timedOut || first.envelopeViolation || !treeStable {
 		return classIndeterminate
 	}
-	if posture.Strict && agreement && passed {
+	if posture.Strict && agreement && passed && !builtin {
 		return classVerifiedEligible
 	}
 	if passed {
@@ -303,6 +440,11 @@ func (r Receipt) computeSeal() string {
 	write(r.Argv...)
 	write(r.BinarySHA256, strconv.Itoa(r.ExitCode), r.StdoutSHA256, r.CwdTreeSHA)
 	write(string(r.Posture.Mechanism), strconv.FormatBool(r.Posture.Strict), strconv.FormatBool(r.AgreementSignal))
+	// RFC 0141: the builtin markers and the negative-control outcome are part of
+	// the tamper-evident transcript — stripping builtin_id to dodge the ASSERTED
+	// cap, or flipping the void, changes the seal.
+	write(r.BuiltinID, r.StriatumVersion)
+	write(strconv.Itoa(r.NegativeControlExit), strconv.FormatBool(r.NegativeControlVoid))
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum)
 }
