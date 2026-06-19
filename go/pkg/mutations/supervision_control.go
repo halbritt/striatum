@@ -121,6 +121,12 @@ func HandleSuperviseStart(ctx context.Context, runner db.Runner, envelope rpc.En
 	if err := prepareScratchACLsForLaneUser(config.RepoRoot, config.RunAsUser); err != nil {
 		return nil, rpc.NewError("invalid_transition", "could not prepare lane scratch ACLs: "+err.Error(), nil)
 	}
+	// #445: install the RFC 0015 claude_code skill bundle into the lane user's
+	// ~/.claude/skills/ (user scope) so CLI-fallback-path agents have the
+	// protocol skill documents available. Non-fatal: a failure here logs a
+	// warning and continues — a non-writable lane home must never block the
+	// spawn. No-op when RunAsUser is empty (daemon-user lane).
+	installLaneUserSkillBundleNonFatal(config.RunAsUser)
 	_ = os.Remove(pipePath)
 	if err := supervisionMkfifo(pipePath); err != nil {
 		return nil, err
