@@ -146,6 +146,35 @@
       }
     },
     {
+      "template_id": "verification_gate",
+      "kind": "shape",
+      "display_name": "Verification gate",
+      "summary": "Make completion a CHECKED property, not a word a producer types. The builder ships a claim ledger; a real type:verify job runs `striatum verifier run` against sanctioned checks (builtin go-test/vet/build run with zero operator JSON, capped at ASSERTED) and mints receipts; the adjudicator gates the cleared release on the receipts. The sanctioned-check intent is in the verify lane's forbidden_paths (separation of duties), and VERIFIED is reserved for an external, operator-pinned-and-attested check (RFC 0141).",
+      "recommended_for": ["gating a release on machine-checked claims", "completion provenance", "stopping ideation/doc stages from claiming features the build never delivered"],
+      "default_lane_sets": ["author_reviewer", "multi_review", "local"],
+      "required_options": ["workflow_id", "artifact_root"],
+      "generation_status": "generated",
+      "example_workflow_path": "examples/verification-gate-flow/workflow.json",
+      "graph_preview": {
+        "nodes": [
+          {"id": "build", "label": "Build + claim ledger"},
+          {"id": "verify", "label": "Verify (run checks, mint receipts)"},
+          {"id": "adjudicate", "label": "Adjudicate vs receipts"},
+          {"id": "commit_verified", "label": "Commit cleared release"},
+          {"id": "final_summary", "label": "Finalize"}
+        ],
+        "edges": [
+          {"from": "build", "to": "verify"},
+          {"from": "verify", "to": "adjudicate"},
+          {"from": "adjudicate", "to": "commit_verified"},
+          {"from": "commit_verified", "to": "final_summary"}
+        ],
+        "cycles": [
+          {"from": "adjudicate", "to": "build", "on_verdict": "needs_revision"}
+        ]
+      }
+    },
+    {
       "template_id": "fog_of_war_review",
       "kind": "shape",
       "display_name": "Fog-of-war review",
