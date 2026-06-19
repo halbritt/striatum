@@ -13,6 +13,7 @@ import (
 
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/rpc"
+	"github.com/halbritt/striatum/go/pkg/verifier"
 	"github.com/halbritt/striatum/go/pkg/workflowauthoring"
 )
 
@@ -75,6 +76,18 @@ func HandleRunStart(ctx context.Context, runner db.Runner, envelope rpc.Envelope
 		}
 		var warnings []string
 		if state == "ready" {
+			// RFC 0141 Pillar 3 (UNFILLED): refuse to start a verification gate whose
+			// external checks are sanctioned-but-unpinned on this host — it would mint
+			// no evidence and report a false green. This is a PURE FILE READ of the
+			// committed intent + per-host pins (D227: the daemon validates sealed
+			// bytes, it executes nothing); the block clears once the operator pins.
+			if tb := verifier.EvaluateAllowlistTemplate(fmt.Sprint(run["repo_root"]), workflow); tb != nil {
+				return nil, rpc.NewError(tb.Reason, tb.Message, map[string]any{
+					"fix_command":      tb.FixCommand,
+					"unpinned_entries": tb.UnpinnedEntries,
+					"intent_path":      tb.IntentPath,
+				})
+			}
 			// #242: supervised/agent-loop repo-write lanes must never launch into
 			// the shared checkout unless the workflow records the explicit
 			// interactive-human compatibility override. This is independent of

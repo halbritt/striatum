@@ -81,7 +81,8 @@ func voidedRef(runID, workflowJobID string, attempt int) string {
 //   - barrier_in_edges  edge   — one row per DECLARED sibling seat, carrying
 //     is_terminal_gap (TRUE when the seat is quarantined — RFC 0133
 //     quarantine-as-terminal-in-edge, so a quarantined sibling does not deadlock
-//     the barrier forever). entity_id is the stable workflow_job_id.
+//     the barrier forever; OR a sealed gap admitted in Go — RFC 0138, see below).
+//     entity_id is the stable workflow_job_id.
 //   - entity_live_seal  live   — each seat's LIVE attempt (MAX(attempt) over the
 //     COMPLETED job rows for that workflow_job_id). This is the load-bearing
 //     relation: the entity's live seal, NOT a per-edge count.
@@ -90,9 +91,21 @@ func voidedRef(runID, workflowJobID string, attempt int) string {
 //     EXCLUDED so a complete-stalled recovery ref cannot silently enter the
 //     canonical set (RFC 0133). A `voided` (tombstoned) row is excluded too.
 //
+// RFC 0138 (#453) — the SEALED-GAP disjunct. `sealedGapSeats` is the set of
+// workflow_job_ids the caller has resolved (in Go, faninBarrierReady →
+// resolveFaninSealedGapSeats) as admissible terminal gaps: a barrier that explicitly
+// OPTED IN (fanin_tolerates_sealed_gap) over a PROVABLY-DEAD required seat
+// (supervisedAgentConfirmedDead — the SAME oracle the quorum path reuses), within the
+// max_sealed_gaps budget. Those seats are OR'd into is_terminal_gap exactly the way a
+// quarantined seat already is — composing with the RFC 0135 predicate's
+// is_terminal_gap disjunct, NOT forking it. With an empty set (the default, opt-in
+// off), the SQL is byte-for-byte the prior behavior. The liveness probe is a Go
+// oracle, never a SQL predicate (a slow seat must never be a gap), so the SQL admits
+// the gap only over the seats the Go resolver already vetted as provably dead.
+//
 // The barrier id binds as $1 and the entity kind as $2 (the predicate's contract);
 // $3 binds the repository id, scoping every CTE.
-func faninBarrierReadinessSQL() (string, error) {
+func faninBarrierReadinessSQL(sealedGapSeats []string) (string, error) {
 	predicate, err := db.BarrierReadySQL(db.BarrierSpec{
 		EntityKind:         faninBarrierEntityKind,
 		InEdgesTable:       "barrier_in_edges",
@@ -111,7 +124,9 @@ func faninBarrierReadinessSQL() (string, error) {
 	// state = 'canceled' WITH a recorded quarantine (RFC 0133 / #311 P0); a seat
 	// with no completed job and no quarantine is neither live-sealed (live row
 	// absent) nor terminal, so the INNER JOIN on entity_live_seal drops it and the
-	// bool_and over the remaining edges cannot be TRUE while it is outstanding.
+	// bool_and over the remaining edges cannot be TRUE while it is outstanding —
+	// UNLESS the seat is an admitted sealed gap (RFC 0138), which the
+	// sealed_gap_seats CTE marks is_terminal_gap so it fires WITH a recorded gap.
 	return `WITH frozen AS (
     SELECT barrier_id, run_id, declared_sibling_job_ids
       FROM striatumd.fanin_freeze_points
@@ -122,6 +137,10 @@ func faninBarrierReadinessSQL() (string, error) {
            frozen.run_id  AS run_id
       FROM frozen,
            jsonb_array_elements_text(frozen.declared_sibling_job_ids) AS sib(value)
+), sealed_gap_seats AS (
+    -- RFC 0138: the seats the Go resolver admitted as sealed terminal gaps
+    -- (opted-in barrier + provably-dead seat + within budget). Empty by default.
+    ` + sealedGapSeatsCTEBody(sealedGapSeats) + `
 ), barrier_in_edges AS (
     SELECT d.entity_kind,
            d.entity_id,
@@ -129,10 +148,15 @@ func faninBarrierReadinessSQL() (string, error) {
            -- A quarantined seat (canceled with a quarantine marker) is a
            -- terminal-acceptable gap: the barrier fires WITH a recorded gap in the
            -- manifest rather than deadlocking. Resolved against the live job rows.
-           COALESCE(bool_or(j.state = 'canceled' AND COALESCE(j.write_scope_json->>'quarantined','') = 'true'), false) AS is_terminal_gap
+           -- RFC 0138: a Go-admitted sealed gap (sg.entity_id present) is ALSO a
+           -- terminal gap — the same is_terminal_gap disjunct (RFC 0135), so the
+           -- predicate is unchanged.
+           (COALESCE(bool_or(j.state = 'canceled' AND COALESCE(j.write_scope_json->>'quarantined','') = 'true'), false)
+            OR bool_or(sg.entity_id IS NOT NULL)) AS is_terminal_gap
       FROM declared d
       LEFT JOIN striatumd.jobs j
         ON j.repository_id = $3 AND j.run_id = d.run_id AND j.workflow_job_id = d.entity_id
+      LEFT JOIN sealed_gap_seats sg ON sg.entity_id = d.entity_id
      GROUP BY d.entity_kind, d.entity_id
 ), live_completed AS (
     -- The live seal (MAX completed attempt) per seat, only for seats with a
@@ -187,8 +211,20 @@ func faninBarrierReadinessSQL() (string, error) {
 // fire (every declared in-edge is live-staged or a terminal gap), the per-edge
 // classification used to build the manifest, and the freeze record. A NULL
 // bool_and (no declared in-edges resolvable yet) is treated as NOT ready.
+//
+// RFC 0138 (#453): BEFORE evaluating the SQL it resolves the admissible SEALED GAPS
+// in Go (resolveFaninSealedGapSeats — opted-in barrier + provably-dead seats + budget)
+// and threads them into the predicate's is_terminal_gap disjunct. With the opt-in off
+// (the default) this resolves to the empty set, so the readiness is byte-for-byte the
+// prior behavior. The liveness probe is a Go oracle (a merely-slow seat is NEVER a
+// gap), so a sealed gap is admitted only over seats the resolver vetted as provably
+// dead.
 func faninBarrierReady(ctx context.Context, runner db.TxRunner, repositoryID, barrierID string) (bool, error) {
-	query, err := faninBarrierReadinessSQL()
+	sealedGaps, err := resolveFaninSealedGapSeats(ctx, runner, repositoryID, barrierID)
+	if err != nil {
+		return false, err
+	}
+	query, err := faninBarrierReadinessSQL(sealedGaps)
 	if err != nil {
 		return false, err
 	}
@@ -200,6 +236,140 @@ func faninBarrierReady(ctx context.Context, runner db.TxRunner, repositoryID, ba
 	return ready != nil && *ready, nil
 }
 
+// sealedGapSeatsCTEBody renders the body of the sealed_gap_seats CTE: a VALUES list
+// of the admitted gap seats' entity_ids, or an empty-set SELECT when there are none.
+// The seat ids are workflow_job_ids (daemon-generated identifiers); they are quoted
+// as SQL string literals with single-quote doubling for defense-in-depth, exactly as
+// the quorum caller quotes its VALUES-built seat ids (barrier_quorum.go). They are
+// data rows, never interpolated into the predicate's identifier positions.
+func sealedGapSeatsCTEBody(seats []string) string {
+	if len(seats) == 0 {
+		// An empty set: a typed, zero-row relation the LEFT JOIN matches nothing in.
+		return "SELECT NULL::text AS entity_id WHERE false"
+	}
+	values := make([]string, 0, len(seats))
+	for _, s := range seats {
+		values = append(values, "('"+strings.ReplaceAll(s, "'", "''")+"')")
+	}
+	return "SELECT entity_id FROM (VALUES " + strings.Join(values, ", ") + ") AS sg(entity_id)"
+}
+
+// faninSealedGapDamageCode is the join_manifest.v1 damage_code recorded for a seat the
+// barrier fired WITHOUT because it was a provably-dead required seat the author opted
+// to tolerate (RFC 0138). It is the fan-in analog of the quarantine seat's
+// `seat_quarantined` code — a loud, durable marker that the join is SHORT a required
+// leg, so a downstream gate can refuse a degraded manifest.
+const faninSealedGapDamageCode = "required_seat_unrecoverable"
+
+// resolveFaninSealedGapSeats returns the workflow_job_ids of the declared sibling
+// seats this barrier may fire WITHOUT as sealed terminal gaps (RFC 0138, Option B).
+// It is the fan-in analog of resolvePanelSeats' abstention-budget admission, reusing
+// the SAME forgery-resistant supervisedAgentConfirmedDead oracle via
+// seatStructurallyUnrecoverable.
+//
+// A seat is admitted ONLY when ALL of:
+//
+//   - the barrier explicitly OPTED IN (fanin_tolerates_sealed_gap on the freeze
+//     record). With the opt-in off — the default — this returns nil immediately, so
+//     every existing strict fan-in is unchanged (Option A behavior).
+//   - the seat is OUTSTANDING: it has no live-seal staged contribution and is not
+//     already a quarantine terminal gap (a satisfied or quarantined seat needs no
+//     sealed gap).
+//   - the seat is PROVABLY DEAD: its live-attempt job's owning lane is dead per
+//     supervisedAgentConfirmedDead (a merely-slow seat is NEVER a gap — silence from
+//     a live lane is not consent, the D214b axiom carried over from the quorum path).
+//   - it is WITHIN the max_sealed_gaps budget: of the provably-dead outstanding seats,
+//     at most max_sealed_gaps are admitted (deterministically, sorted by seat id); a
+//     dead seat BEYOND the budget stays blocking, mirroring resolvePanelSeats. So a
+//     join is never shorter than the author declared tolerable.
+//
+// It NEVER seals a seat the author did not opt in for, a seat that is merely slow, or
+// a seat beyond the budget — so completeness is never silently forged.
+func resolveFaninSealedGapSeats(ctx context.Context, runner db.TxRunner, repositoryID, barrierID string) ([]string, error) {
+	fp, err := loadFaninFreezePoint(ctx, runner, repositoryID, barrierID)
+	if err != nil {
+		return nil, err
+	}
+	// Opt-in off (default) or a zero budget: no sealed gap is ever admitted (Option A).
+	if !fp.ToleratesSealedGap || fp.MaxSealedGaps <= 0 {
+		return nil, nil
+	}
+	// Resolve which declared seats are OUTSTANDING (not live-staged, not quarantined),
+	// with each seat's live attempt — exactly the seats that could need a sealed gap.
+	rows, err := queryRows(ctx, runner, `
+		WITH declared AS (
+		    SELECT sib.value::text AS workflow_job_id
+		      FROM striatumd.fanin_freeze_points fp,
+		           jsonb_array_elements_text(fp.declared_sibling_job_ids) AS sib(value)
+		     WHERE fp.repository_id = $1 AND fp.barrier_id = $2
+		)
+		SELECT d.workflow_job_id,
+		       COALESCE((
+		         SELECT MAX(j.attempt) FROM striatumd.jobs j
+		          WHERE j.repository_id = $1 AND j.run_id = $3
+		            AND j.workflow_job_id = d.workflow_job_id
+		       ), 0) AS live_attempt,
+		       COALESCE((
+		         SELECT bool_or(j.state = 'canceled'
+		                        AND COALESCE(j.write_scope_json->>'quarantined','') = 'true')
+		           FROM striatumd.jobs j
+		          WHERE j.repository_id = $1 AND j.run_id = $3
+		            AND j.workflow_job_id = d.workflow_job_id
+		       ), false) AS is_quarantined,
+		       EXISTS (
+		         SELECT 1 FROM striatumd.barrier_staged_contributions s
+		          WHERE s.repository_id = $1 AND s.barrier_id = $2
+		            AND s.workflow_job_id = d.workflow_job_id
+		            AND s.status = 'staged'
+		            AND s.staging_ref NOT LIKE 'refs/striatum/recovery/%'
+		            AND s.attempt = COALESCE((
+		                  SELECT MAX(j.attempt) FROM striatumd.jobs j
+		                   WHERE j.repository_id = $1 AND j.run_id = $3
+		                     AND j.workflow_job_id = d.workflow_job_id
+		                     AND j.state = 'completed'
+		                ), -1)
+		       ) AS live_staged
+		  FROM declared d
+		 ORDER BY d.workflow_job_id`,
+		repositoryID, barrierID, fp.RunID)
+	if err != nil {
+		return nil, err
+	}
+	// Of the OUTSTANDING seats, find the PROVABLY-DEAD ones (the same oracle the
+	// quorum reuses). A seat with no live-attempt job, or whose pointer is not
+	// probeable, is NOT provably dead → it stays blocking.
+	deadCandidates := make([]string, 0, len(rows))
+	for _, r := range rows {
+		seat := fmt.Sprint(r["workflow_job_id"])
+		if boolValue(r["live_staged"]) || boolValue(r["is_quarantined"]) {
+			continue // satisfied or already a terminal gap — no sealed gap needed
+		}
+		liveAttempt := intValue(r["live_attempt"])
+		if liveAttempt <= 0 {
+			// No live-attempt job row to probe → not provably dead → blocks.
+			continue
+		}
+		dead, derr := seatStructurallyUnrecoverable(ctx, runner, repositoryID, fp.RunID, seat, liveAttempt)
+		if derr != nil {
+			return nil, derr
+		}
+		if dead {
+			deadCandidates = append(deadCandidates, seat)
+		}
+	}
+	// Apply the budget: admit at most MaxSealedGaps provably-dead seats as sealed gaps
+	// (deterministically — deadCandidates is already sorted by seat id). A dead seat
+	// beyond the budget is NOT admitted and stays blocking (the join may not be shorter
+	// than the author declared tolerable).
+	if len(deadCandidates) > fp.MaxSealedGaps {
+		deadCandidates = deadCandidates[:fp.MaxSealedGaps]
+	}
+	if len(deadCandidates) == 0 {
+		return nil, nil
+	}
+	return deadCandidates, nil
+}
+
 // faninFreezePoint is the immutable freeze record written once at fan-out.
 type faninFreezePoint struct {
 	BarrierID               string
@@ -208,6 +378,16 @@ type faninFreezePoint struct {
 	FrozenTipSHA            string
 	FrozenTipTreeSHA        string
 	DeclaredSiblingJobIDs   []string
+	// ToleratesSealedGap is the RFC 0138 (#453) per-barrier opt-in: when true, the
+	// barrier may fire DEGRADED over up to MaxSealedGaps provably-dead REQUIRED seats
+	// (a sealed terminal gap), instead of parking the run in needs_operator. Default
+	// false — a dead required seat is an operator decision (Option A). Sealed with the
+	// barrier at fan-out (the freeze record is the immutable opt-in declaration).
+	ToleratesSealedGap bool
+	// MaxSealedGaps is the budget: how many provably-dead required legs the join may be
+	// short (the fan-in analog of the quorum's max_gating_abstentions). Default 0 — even
+	// with ToleratesSealedGap true, a 0 budget admits no gap.
+	MaxSealedGaps int
 }
 
 // recordFaninFreezePoint writes the immutable freeze record. It is append-only (the
@@ -224,6 +404,22 @@ func recordFaninFreezePoint(ctx context.Context, runner db.TxRunner, repositoryI
 	if strings.TrimSpace(fp.FrozenTipTreeSHA) != "" {
 		tree = fp.FrozenTipTreeSHA
 	}
+	// RFC 0138: write the sealed-gap tolerance columns when migration 0039 has landed.
+	// A deployment BEHIND on 0039 lacks the columns, so detect them and fall back to
+	// the prior INSERT (no opt-in possible — Option A behavior), exactly the degrade-
+	// safe pattern (a barrier authored before 0039 simply cannot tolerate a gap).
+	if faninSealedGapColumnsPresent(ctx, runner) {
+		return runner.Exec(ctx, `
+			INSERT INTO striatumd.fanin_freeze_points
+			  (repository_id, barrier_id, run_id, downstream_workflow_job_id,
+			   frozen_tip_sha, frozen_tip_tree_sha, declared_sibling_job_ids,
+			   fanin_tolerates_sealed_gap, max_sealed_gaps)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+			ON CONFLICT (repository_id, barrier_id) DO NOTHING`,
+			repositoryID, fp.BarrierID, fp.RunID, fp.DownstreamWorkflowJobID,
+			fp.FrozenTipSHA, tree, string(declared),
+			fp.ToleratesSealedGap, fp.MaxSealedGaps)
+	}
 	return runner.Exec(ctx, `
 		INSERT INTO striatumd.fanin_freeze_points
 		  (repository_id, barrier_id, run_id, downstream_workflow_job_id,
@@ -232,6 +428,22 @@ func recordFaninFreezePoint(ctx context.Context, runner db.TxRunner, repositoryI
 		ON CONFLICT (repository_id, barrier_id) DO NOTHING`,
 		repositoryID, fp.BarrierID, fp.RunID, fp.DownstreamWorkflowJobID,
 		fp.FrozenTipSHA, tree, string(declared))
+}
+
+// faninSealedGapColumnsPresent reports whether striatumd.fanin_freeze_points carries
+// the RFC 0138 (#453) sealed-gap tolerance columns (migration 0039 applied). Mirrors
+// dissentLedgerEnabled: on a deployment BEHIND on 0039 the columns are absent and the
+// barrier degrades to Option A (no sealed gap admitted, a dead required seat parks the
+// run) rather than erroring. The probe is cheap and the result stable per-deployment.
+func faninSealedGapColumnsPresent(ctx context.Context, runner any) bool {
+	row, err := oneRow(ctx, runner, `
+		SELECT EXISTS (
+		  SELECT 1 FROM information_schema.columns
+		   WHERE table_schema = 'striatumd'
+		     AND table_name = 'fanin_freeze_points'
+		     AND column_name = 'fanin_tolerates_sealed_gap'
+		) AS present`)
+	return err == nil && boolValue(row["present"])
 }
 
 // stageFaninContribution records a sibling's completion as an attempt-addressed
@@ -751,12 +963,21 @@ func gitTreeOf(ctx context.Context, repoRoot, commit string) (string, error) {
 	return tree, nil
 }
 
-// loadFaninFreezePoint reads the immutable freeze record for a barrier.
+// loadFaninFreezePoint reads the immutable freeze record for a barrier. RFC 0138: it
+// also reads the sealed-gap tolerance columns (migration 0039) when present; on a
+// deployment BEHIND on 0039 they are absent and the opt-in defaults to off (Option A).
 func loadFaninFreezePoint(ctx context.Context, runner any, repositoryID, barrierID string) (faninFreezePoint, error) {
+	// COALESCE the sealed-gap columns to their defaults so the projection is stable; a
+	// deployment behind on 0039 lacks the columns, so select them only when present.
+	gapCols := "false AS fanin_tolerates_sealed_gap, 0 AS max_sealed_gaps"
+	if faninSealedGapColumnsPresent(ctx, runner) {
+		gapCols = "COALESCE(fanin_tolerates_sealed_gap, false) AS fanin_tolerates_sealed_gap, COALESCE(max_sealed_gaps, 0) AS max_sealed_gaps"
+	}
 	rows, err := queryRows(ctx, runner, `
 		SELECT barrier_id, run_id, downstream_workflow_job_id,
 		       frozen_tip_sha, COALESCE(frozen_tip_tree_sha,'') AS frozen_tip_tree_sha,
-		       declared_sibling_job_ids
+		       declared_sibling_job_ids,
+		       `+gapCols+`
 		  FROM striatumd.fanin_freeze_points
 		 WHERE repository_id = $1 AND barrier_id = $2`,
 		repositoryID, barrierID)
@@ -785,6 +1006,8 @@ func loadFaninFreezePoint(ctx context.Context, runner any, repositoryID, barrier
 		FrozenTipSHA:            fmt.Sprint(r["frozen_tip_sha"]),
 		FrozenTipTreeSHA:        fmt.Sprint(r["frozen_tip_tree_sha"]),
 		DeclaredSiblingJobIDs:   declared,
+		ToleratesSealedGap:      boolValue(r["fanin_tolerates_sealed_gap"]),
+		MaxSealedGaps:           intValue(r["max_sealed_gaps"]),
 	}, nil
 }
 
@@ -793,7 +1016,7 @@ func loadFaninFreezePoint(ctx context.Context, runner any, repositoryID, barrier
 type faninManifestInEdge struct {
 	EntityID   string `json:"entity_id"`
 	Seal       int    `json:"seal"`
-	Status     string `json:"status"` // staged_live | quarantined
+	Status     string `json:"status"` // staged_live | quarantined | terminal_gap (RFC 0138 sealed gap)
 	CommitSHA  string `json:"commit_sha,omitempty"`
 	StagingRef string `json:"staging_ref,omitempty"`
 	DamageCode string `json:"damage_code,omitempty"`
@@ -813,9 +1036,20 @@ func faninBarrierManifest(ctx context.Context, runner db.TxRunner, repositoryID,
 	if err != nil {
 		return nil, err
 	}
+	// RFC 0138: resolve which outstanding seats were admitted as sealed terminal gaps,
+	// so the manifest records them as status=terminal_gap (NOT silently dropped) with a
+	// damage_code — the completeness-honesty record a downstream gate can refuse.
+	sealedGaps, err := resolveFaninSealedGapSeats(ctx, runner, repositoryID, barrierID)
+	if err != nil {
+		return nil, err
+	}
+	sealedGapSet := make(map[string]bool, len(sealedGaps))
+	for _, s := range sealedGaps {
+		sealedGapSet[s] = true
+	}
 	edges := make([]faninManifestInEdge, 0, len(fp.DeclaredSiblingJobIDs))
 	for _, seat := range fp.DeclaredSiblingJobIDs {
-		edge, err := faninManifestEdgeForSeat(ctx, runner, repositoryID, barrierID, fp.RunID, seat)
+		edge, err := faninManifestEdgeForSeat(ctx, runner, repositoryID, barrierID, fp.RunID, seat, sealedGapSet[seat])
 		if err != nil {
 			return nil, err
 		}
@@ -825,7 +1059,7 @@ func faninBarrierManifest(ctx context.Context, runner db.TxRunner, repositoryID,
 	return edges, nil
 }
 
-func faninManifestEdgeForSeat(ctx context.Context, runner db.TxRunner, repositoryID, barrierID, runID, seat string) (faninManifestInEdge, error) {
+func faninManifestEdgeForSeat(ctx context.Context, runner db.TxRunner, repositoryID, barrierID, runID, seat string, sealedGap bool) (faninManifestInEdge, error) {
 	// Quarantined (canceled + quarantine marker) seats are terminal gaps.
 	jobRows, err := queryRows(ctx, runner, `
 		SELECT state, COALESCE(write_scope_json->>'quarantined','') AS quarantined
@@ -843,6 +1077,14 @@ func faninManifestEdgeForSeat(ctx context.Context, runner db.TxRunner, repositor
 	}
 	if quarantined {
 		return faninManifestInEdge{EntityID: seat, Seal: 0, Status: "quarantined", DamageCode: "seat_quarantined"}, nil
+	}
+	// RFC 0138: a seat admitted as a SEALED GAP (opted-in barrier + provably-dead seat
+	// + within budget) is a terminal gap recorded LOUDLY — the join fired WITHOUT this
+	// required leg, so it carries the required_seat_unrecoverable damage_code and is
+	// NEVER recorded as staged_live. This is checked BEFORE the live-staged lookup
+	// because a sealed-gap seat is outstanding (no live-seal staged contribution).
+	if sealedGap {
+		return faninManifestInEdge{EntityID: seat, Seal: 0, Status: "terminal_gap", DamageCode: faninSealedGapDamageCode}, nil
 	}
 	// The live-seal staged contribution: the highest-attempt non-voided,
 	// non-recovery staging row, joined on the seat's live attempt. base_drift_onto_sha

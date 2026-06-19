@@ -31,6 +31,17 @@ const (
 	ReasonPIDIdentityUnavailable  LaneReason = "pid_identity_unavailable"
 )
 
+// LivenessAliveButSilent is the projection-only protocol state reported on
+// Health.LivenessClass for a lane doing honest long local work (RFC 0140): its
+// active PID probe is positively alive and identity-matched, but it has made no
+// tool-call progress for ToolProgressSeconds, so sessionliveness reclassifies it
+// wedged_no_tool_progress (#324). It is a first-class, attestation-PRESERVING
+// state — the supervised process is provably alive, so its byline is not forged
+// (RFC 0026 / D080). It is NOT a persisted liveness_stall_class enum value (it
+// never widens the migration-0012 CHECK constraint); it is computed on the fly by
+// Classify and surfaced only on the in-memory Health.
+const LivenessAliveButSilent = "alive_but_silent"
+
 // deliveryReasonAttachClientExited is the delivery_liveness reason emitted when
 // the `tmux attach-session` observer client exits. Per RFC 0089 that client is
 // an OBSERVER only and is not the delivery transport, so its exit must not
@@ -252,6 +263,34 @@ func Classify(f Facts, now time.Time) Health {
 	// 6. Stall classification
 	h.Stall = sessionliveness.Classify(f.SessionActivity, f.LivenessPolicy, now)
 	if h.Stall.StallClass != "" {
+		// RFC 0140 (part B): a wedged_no_tool_progress stall is a statement about
+		// MCP/tool-call PROGRESS, not about process death. A lane doing honest long
+		// local work (a full test suite, a browser-acceptance profile, a large repo
+		// scan) issues zero tool calls by design, so after ToolProgressSeconds it
+		// trips the #324 rung exactly as a dead-endpoint lane would. When that lane's
+		// ACTIVE PID probe is positively alive AND identity-matched, it is
+		// "alive but tool-call-silent" — attest it, do not drop the byline mid-work.
+		//
+		// This keys on the SAME forgery-resistant PID oracle the recovery decision
+		// tree uses to confirm death (pty_confirmed_dead). Reaching this point with
+		// f.ProbePerformed == true GUARANTEES f.ProbeResult.Alive == true and the
+		// start token verified: step 5 returns early for a dead PID, a pid-identity
+		// mismatch, or start_token_unverified. So f.ProbePerformed && f.ProbeResult.Alive
+		// here means a provably-live, identity-matched process — never a dead,
+		// hijacked, or closed-session lane (those never reach step 6 attested).
+		//
+		// A lane with NO positive PID oracle (a pipe / TransportPipe lane, or any
+		// lane whose probe was not performed) does NOT qualify and keeps today's
+		// behavior — ReasonSupervisorStalled, Attested=false — so the exemption can
+		// never rest on PTY freshness or the liveness verdict alone (RFC 0131
+		// "default to the lower-confidence classification on ambiguity"). Every
+		// OTHER stall class (discovery / await / ack / lease-heartbeat / protocol-
+		// idle / attention) still drops attestation unchanged.
+		if h.Stall.StallClass == sessionliveness.StallToolProgress && f.ProbePerformed && f.ProbeResult.Alive {
+			h.LivenessClass = LivenessAliveButSilent
+			h.Attested = true
+			return h
+		}
 		h.Reason = ReasonSupervisorStalled
 		return h
 	}

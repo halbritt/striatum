@@ -31,7 +31,7 @@ var (
 		"multi_phase", "custom", "conversation",
 		"falsification_gate", "cross_examination",
 		"adjudicated_constraint_extraction", "divergent_ideation",
-		"fog_of_war_review", "synaptic_prune",
+		"fog_of_war_review", "synaptic_prune", "verification_gate",
 	)
 	laneSets      = set("local", "single_agent", "author_reviewer", "multi_review", "custom")
 	laneModifiers = set("supervised", "worktree_isolated", "constrained", "harness_profiled")
@@ -45,6 +45,7 @@ var (
 		"branch_count", "ideas_per_branch", "deepen_count", "frame_pack",
 		"frame_packs", "score_weights", "problem_shape", "convergence_lane_id",
 		"reconstructor_count", "participant_count",
+		"gate_floor", "checks",
 	)
 	blockKinds = set(
 		"draft", "review", "synthesis", "implementation", "test",
@@ -378,7 +379,7 @@ func Generate(spec Spec) (Generated, error) {
 		parallelism = defaultParallelism(spec)
 	}
 	schemaVersion := WorkflowSchemaVersion
-	if spec.Shape == "multi_phase" || isCollaborationShape(spec.Shape) {
+	if isPhasedShape(spec.Shape) {
 		schemaVersion = WorkflowSchemaVersionV11
 	}
 	workflow := map[string]any{
@@ -396,7 +397,7 @@ func Generate(spec Spec) (Generated, error) {
 		"edges":            edges,
 		"cycles":           cycles,
 	}
-	if spec.Shape == "multi_phase" || isCollaborationShape(spec.Shape) {
+	if isPhasedShape(spec.Shape) {
 		workflow["phases"] = phases
 	}
 	if hasModifier(spec, "constrained") {
@@ -420,6 +421,15 @@ func Generate(spec Spec) (Generated, error) {
 	if spec.LaneSet == "single_agent" {
 		workflow["allow_same_model_review_pairing"] = true
 	}
+	// RFC 0141: stamp the verification_gate's allowlist_status (FILLED vs
+	// TEMPLATE_UNFILLED) so a downstream validator can tell a runnable builtin-only
+	// gate from one that still needs per-host pins. Done before ValidateWorkflow so
+	// the field is part of the validated, rendered workflow.json.
+	if spec.Shape == "verification_gate" {
+		if err := applyVerificationGateWorkflowFields(spec, workflow); err != nil {
+			return Generated{}, err
+		}
+	}
 	if hasModifier(spec, "harness_profiled") {
 		profiles, err := harnessProfiles(spec)
 		if err != nil {
@@ -434,6 +444,16 @@ func Generate(spec Spec) (Generated, error) {
 	files, err := renderFiles(spec, workflow, roles)
 	if err != nil {
 		return Generated{}, err
+	}
+	// RFC 0141: the verification_gate shape also emits the hashless intent template
+	// and a .gitignore for the per-host pins, beyond the workflow.json + role/prompt
+	// stubs renderFiles produces. Append them as shape-specific extras.
+	if spec.Shape == "verification_gate" {
+		extras, err := verificationGateExtras(spec)
+		if err != nil {
+			return Generated{}, err
+		}
+		files = append(files, extras...)
 	}
 	metadata := map[string]any{
 		"shape":             spec.Shape,
@@ -916,6 +936,8 @@ func roleStub(role string) string {
 		"judge":             "# Judge Role\n\nYou alone hold the FULL spec (the ground truth). You read only the curated reconstruction trajectory and score each hidden constraint reconstructed / hallucinated / missed; you publish the collaboration ledger verdict. A lane that claimed coverage it never reconstructed scores hallucinated/missed and you return needs_revision; the proposal stays withheld until your verdict clears. The `verdict` field MUST be one of: accept, accept_with_findings, needs_revision, reject.\n",
 		"proposer":          "# Proposer Role\n\nYou author the proposal — but only after the coverage gate cleared (the work-packet type sequencing withholds you until then). Build on the reconstructed constraints the judge confirmed, never on a constraint a reconstructor hallucinated.\n",
 		"pruner":            "# Pruner Role\n\nYou are a forum participant. While still live in your preserved-context window, you nominate exactly ONE claim from the forum to retire ('do not re-litigate'), with a coherent rationale. A claim is retired only if at least two participants independently nominate it. You do not tally — the adjudicator ledger records the ≥2-vote retirements.\n",
+		"builder":           "# Builder Role\n\nYou build the slice and publish a claim ledger naming every capability claim with a status (VERIFIED|ASSERTED|DESIGNED) and a stable id. You do NOT decide whether a claim is verified — the verify step runs the sanctioned checks and the adjudicator reads the receipts. Do not state a claim above the status its check can earn. You cannot author the sanctioned check set (the verifier intent is in your peer's forbidden_paths, not yours).\n",
+		"verifier":          "# Verifier Role\n\nYou run `striatum verifier run` against the sanctioned checks and publish the minted receipts as ground truth — never the builder's prose. The builtin checks (builtin:go-test/vet/build, artifact-anchor-integrity) need zero operator JSON and cap their claims at ASSERTED; VERIFIED is reserved for an external check the operator has pinned AND attested. You MUST NOT edit verification/allowlist.intent.json (it is in your forbidden_paths): a verified lane can never sanction its own checks. A check whose negative control unexpectedly passes voids the receipt — report it RED.\n",
 	}
 	if content, ok := panelRoles[role]; ok {
 		return content
@@ -1020,6 +1042,14 @@ func promptStub(prompt string) string {
 		return "Assemble the nominations for the prune tally. Stage the curated trajectory only.\n"
 	case "prune_tally.md":
 		return "Read only the curated nomination trajectory. Retire every claim nominated by ≥2 participants with coherent rationale as a nomination-kind entry in the collaboration_ledger (shape synaptic_prune); publish the verdict. The retired set is the durable NEGATIVE PREAMBLE ('do not re-litigate: …') injected into future runs on the same topic — provenance, not reputation.\n"
+	case "claim_build.md":
+		return "Build the slice and publish a claim_ledger. Give every capability claim a stable id, a status (VERIFIED|ASSERTED|DESIGNED), and (above DESIGNED) the id of the sanctioned check that substantiates it. Do not state a claim above the status its check can earn; deferral is a DESIGNED row, never hidden prose. You cannot author the sanctioned check set.\n"
+	case "verify_run.md":
+		return "Run `striatum verifier run` against the sanctioned checks and publish the minted receipts. The builtin checks (builtin:go-test/vet/build, artifact-anchor-integrity) run with no operator JSON and cap their claims at ASSERTED; VERIFIED needs an external check the operator has pinned (`striatum verifier pin --host-here`) AND attested. Receipts come from the engine's exit codes, not the builder's prose. Do NOT edit verification/allowlist.intent.json — it is in your forbidden_paths. A check whose negative control passes voids the receipt: report it RED.\n"
+	case "adjudicate.md":
+		return "Read the claim ledger and the minted receipts and publish the collaboration_ledger verdict. If ANY claim is stated above the status its receipt earns — VERIFIED over a missing/RED receipt, or completion language over an ASSERTED/DESIGNED row — record needs_revision and name the offending claims. Otherwise accept.\n"
+	case "commit_verified.md":
+		return "Publish the cleared release only after the collaboration ledger records an accepting verdict. Stamp every claim with its earned status and the receipt of record; no completion language survives above the receipted status.\n"
 	default:
 		return fmt.Sprintf("Complete the %s step declared by the workflow.\n", strings.ReplaceAll(strings.TrimSuffix(prompt, ".md"), "_", " "))
 	}
@@ -1395,6 +1425,17 @@ func isCollaborationShape(shape string) bool {
 	return shape == "falsification_gate" || shape == "cross_examination" ||
 		shape == "adjudicated_constraint_extraction" ||
 		shape == "fog_of_war_review" || shape == "synaptic_prune"
+}
+
+// isPhasedShape reports whether a shape emits a phased striatum.workflow.v1.1
+// graph (phases[] + phase_synthesis gate jobs). The collaboration shapes and
+// multi_phase carry their collaboration-pack semantics through
+// isCollaborationShape; verification_gate (RFC 0141) is phased — its adjudicate
+// gate is a phase_synthesis job emitting a cycle-templated collaboration_ledger,
+// exactly like the hand-authored verification-gate-flow example — but it is NOT a
+// collaboration-pack shape, so it joins here rather than in isCollaborationShape.
+func isPhasedShape(shape string) bool {
+	return shape == "multi_phase" || isCollaborationShape(shape) || shape == "verification_gate"
 }
 
 func validatePosture(posture, fieldPath string) error {

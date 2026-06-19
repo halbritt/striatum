@@ -333,6 +333,17 @@ func runWithIO(ctx context.Context, cfg runConfig, stdin io.Reader, stdout, stde
 		}
 	})
 
+	// RFC 0140 (part A): keep an honest long-local-work lane out of the #324
+	// wedged_no_tool_progress stall by emitting a periodic local_work keepalive
+	// from THIS supervised process while it holds an active lease. The keepalive
+	// is a work.heartbeat with local_work=true, which the daemon also folds into
+	// the tool-progress timeline — so a lane running a full test suite / browser
+	// profile / large repo scan (zero tool calls for minutes) never crosses
+	// ToolProgressSeconds and keeps its attested byline. It is forgery-resistant
+	// (only this live process holds the session-bound token), so a dead agent
+	// cannot fire it and recovery still reaps a genuinely dead lane.
+	startLocalWorkKeepalive(ctx, cfg, laneCommand[0], stderr)
+
 	// #323: a mid-run daemon restart rotates the MCP HTTP endpoint (dynamic
 	// port) and rewrites the runtime endpoint file, but this supervised lane
 	// (which survived the restart, #141) still holds the dead launch-time port,
@@ -430,6 +441,101 @@ func startDaemonReceiverLoop(ctx context.Context, cfg runConfig, adapter string,
 			if err := writePromptThenSubmit(ptmx, prompt, agentLoopSubmitDelay(), agentLoopSubmitSequence()); err != nil {
 				_, _ = fmt.Fprintf(stderr, "agent-loop daemon receiver prompt failed: %v\n", err)
 				return
+			}
+		}
+	}()
+}
+
+// localWorkKeepaliveInterval is the cadence of the RFC 0140 part-A local_work
+// keepalive. It defaults to ToolProgressSeconds/3 (~200s) so a lane is refreshed
+// well before it could cross the 600s wedged_no_tool_progress deadline, while not
+// hammering the daemon. Override via STRIATUM_AGENT_LOOP_KEEPALIVE_MS (>=0; 0
+// disables the keepalive, e.g. for tests or a build that relies solely on the
+// server-side liveness-truthful classifier, RFC 0140 part B).
+func localWorkKeepaliveInterval() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("STRIATUM_AGENT_LOOP_KEEPALIVE_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 200 * time.Second
+}
+
+// activeLeaseIDFromStatus extracts the active lease id from a supervise.status
+// envelope's protocol_liveness block. Returns "" when there is no active lease
+// (the keepalive only fires for a lease holder — a lane with no claimed work has
+// nothing to keep alive). Pure, so it is unit-testable without a live daemon.
+func activeLeaseIDFromStatus(status map[string]any) string {
+	liveness, _ := status["protocol_liveness"].(map[string]any)
+	if liveness == nil {
+		return ""
+	}
+	id := liveness["active_lease_id"]
+	if id == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(id))
+}
+
+// startLocalWorkKeepalive launches the RFC 0140 part-A keepalive loop. On a
+// periodic tick it reads supervise.status; if the session holds an active lease
+// it issues a work.heartbeat with local_work=true, which the daemon folds into
+// BOTH the lease-heartbeat and the tool-progress timelines — so a lane doing long
+// tool-call-less local work never ages into wedged_no_tool_progress and keeps its
+// attested byline. No active lease => no keepalive (nothing to keep alive).
+//
+// It reuses the daemon-receiver gating (STRIATUM_AGENT_LOOP_DAEMON_RECEIVER and
+// the codex carve-out) so it never races a lane that drives its own MCP loop, and
+// is disabled by STRIATUM_AGENT_LOOP_KEEPALIVE_MS=0.
+func startLocalWorkKeepalive(ctx context.Context, cfg runConfig, adapter string, stderr io.Writer) {
+	if daemonReceiverDisabled(cfg.Env, adapter) || cfg.RepositoryID == "" || cfg.SessionID == "" {
+		return
+	}
+	interval := localWorkKeepaliveInterval()
+	if interval <= 0 {
+		return
+	}
+	clientCfg := rpcclient.Config{
+		SocketPath: cfg.SocketPath,
+		Token:      cfg.Token.Token,
+		DeadlineMS: 15000,
+	}
+	if cfg.Token.Source != "" && cfg.Token.Source != EnvMCPToken {
+		clientCfg.TokenFile = cfg.Token.Source
+	}
+	client := rpcclient.Client{Config: clientCfg}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			statusCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			status, err := client.Invoke(statusCtx, "supervise.status", map[string]any{
+				"repository_id": cfg.RepositoryID,
+				"session_id":    cfg.SessionID,
+			})
+			cancel()
+			if err != nil {
+				_, _ = fmt.Fprintf(stderr, "agent-loop local_work keepalive status failed: %v\n", err)
+				continue
+			}
+			leaseID := activeLeaseIDFromStatus(status)
+			if leaseID == "" {
+				continue
+			}
+			hbCtx, cancelHB := context.WithTimeout(ctx, 15*time.Second)
+			_, err = client.Invoke(hbCtx, "work.heartbeat", map[string]any{
+				"repository_id": cfg.RepositoryID,
+				"session_id":    cfg.SessionID,
+				"lease_id":      leaseID,
+				"local_work":    true,
+			})
+			cancelHB()
+			if err != nil {
+				_, _ = fmt.Fprintf(stderr, "agent-loop local_work keepalive heartbeat failed: %v\n", err)
 			}
 		}
 	}()

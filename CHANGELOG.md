@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Added
+
+- **RFC 0141 (generatable `verification_gate` workflow shape) implemented at the
+  `experimental` tier (D239, #473).** `striatum workflow generate --shape
+  verification_gate` now scaffolds a real `type: verify` job → `claim_ledger` gate
+  that is **runnable out of the box** (builtin checks, capped honestly at ASSERTED)
+  and **cannot lie green**. Three pillars:
+  - **Two-layer allowlist** — a committed, hashless, reviewable
+    `verification/allowlist.intent.json` (`striatum.verifier_allowlist_intent.v1`,
+    in the verify job's `forbidden_paths` so the lane can't sanction its own checks)
+    overlaid by a gitignored per-host pins layer the operator never hand-types.
+    New verbs: `striatum verifier pin --host-here` (runs in the lane, OBSERVES each
+    sanctioned binary's sha; refuses drift / real-pin overwrite without `--force`)
+    and `striatum verifier attest` (the PINNED→VERIFIED hinge — **refused inside a
+    supervised lane** so the verified lane cannot bless its own pins). A re-pin of
+    different bytes invalidates a stale attestation.
+  - **Built-in check library** (`builtin:go-test`/`go-vet`/`go-build`/
+    `artifact-anchor-integrity`) self-pinned to the striatum binary, with
+    `builtin_id`+`striatum_version` sealed into `receipt.v1`. A builtin receipt
+    **caps at ASSERTED** at the daemon gate read regardless of strict posture +
+    agreement (a self-pin proves which harness invoked the tool, not which tool
+    ran); the generator refuses a `gate_floor=verified` gate composed only of
+    builtins.
+  - **The gate cannot lie green** — an UNFILLED gate (a sanctioned external check
+    with no host pin) hard-blocks `workflow validate` (exit 8) and `run start`,
+    naming the entry + the literal `verifier pin --host-here` fix (and clears once
+    pinned, no regeneration); a mandatory `negative_control` runs FIRST and voids
+    the receipt if the known-bad passes (catches a vacuous `true`).
+  - Registered in the workflow catalog at `experimental`; the interim
+    `examples/verification-gate-flow/` stays as the portable today-primitives demo
+    until graduation. D227 preserved: the daemon executes nothing. Graduation
+    follow-ups: gate-side daemon-authoritative attestation enforcement (#482),
+    doctor self-pin/pin-drift classes + version-skew resweep (#483).
+
 ### Changed
 
 - **RFC 0134 (executable verification gate + claim status-provenance) graduated to

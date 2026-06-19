@@ -112,7 +112,19 @@ func enforceCollaborationLedgerVerdict(ctx context.Context, runner any, reposito
 		return err
 	}
 	repoRoot := fmt.Sprint(run["repo_root"])
-	resolved, err := repoRelativePath(repoRoot, ledgerPath, false)
+	// #484: resolve the ledger through the job's active worktree, mirroring the
+	// worktree-aware publish path (artifactSourcePath in publishArtifactWithOptions)
+	// and the fresh-review re-read (enforceFreshReviewNotByteIdentical). A
+	// worktree-isolated adjudicate/review job publishes its ledger into the per-job
+	// worktree, not repoRoot (checked out on the default branch); a bare
+	// repoRelativePath read then fails with "collaboration_ledger artifact file does
+	// not exist" and the verdict can never be recorded. activeWorktreeForJob returns
+	// nil for a non-isolated job, so artifactSourcePath falls back to repoRoot.
+	activeWorktree, err := activeWorktreeForJob(ctx, runner, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil {
+		return err
+	}
+	resolved, err := artifactSourcePath(repoRoot, ledgerPath, activeWorktree)
 	if err != nil {
 		return rpc.NewError("artifact_error", err.Error(), nil)
 	}

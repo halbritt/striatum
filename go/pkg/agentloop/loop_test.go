@@ -207,6 +207,70 @@ func TestWritePromptThenSubmitAllowsZeroDelay(t *testing.T) {
 	}
 }
 
+func TestActiveLeaseIDFromStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		status map[string]any
+		want   string
+	}{
+		{
+			name:   "active lease present",
+			status: map[string]any{"protocol_liveness": map[string]any{"active_lease_id": "lease_abc"}},
+			want:   "lease_abc",
+		},
+		{
+			name:   "trims whitespace",
+			status: map[string]any{"protocol_liveness": map[string]any{"active_lease_id": "  lease_xyz  "}},
+			want:   "lease_xyz",
+		},
+		{
+			name:   "nil active lease => empty (no lease to keep alive)",
+			status: map[string]any{"protocol_liveness": map[string]any{"active_lease_id": nil}},
+			want:   "",
+		},
+		{
+			name:   "missing protocol_liveness => empty",
+			status: map[string]any{},
+			want:   "",
+		},
+		{
+			name:   "nil status => empty",
+			status: nil,
+			want:   "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := activeLeaseIDFromStatus(tc.status); got != tc.want {
+				t.Fatalf("activeLeaseIDFromStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLocalWorkKeepaliveInterval(t *testing.T) {
+	t.Run("default is ToolProgressSeconds/3", func(t *testing.T) {
+		if err := os.Unsetenv("STRIATUM_AGENT_LOOP_KEEPALIVE_MS"); err != nil {
+			t.Fatalf("unset keepalive env: %v", err)
+		}
+		if got := localWorkKeepaliveInterval(); got != 200*time.Second {
+			t.Fatalf("default keepalive interval = %s, want 200s (well under the 600s wedge deadline)", got)
+		}
+	})
+	t.Run("override", func(t *testing.T) {
+		t.Setenv("STRIATUM_AGENT_LOOP_KEEPALIVE_MS", "5000")
+		if got := localWorkKeepaliveInterval(); got != 5*time.Second {
+			t.Fatalf("override keepalive interval = %s, want 5s", got)
+		}
+	})
+	t.Run("zero disables", func(t *testing.T) {
+		t.Setenv("STRIATUM_AGENT_LOOP_KEEPALIVE_MS", "0")
+		if got := localWorkKeepaliveInterval(); got != 0 {
+			t.Fatalf("zero keepalive interval = %s, want 0 (disabled)", got)
+		}
+	})
+}
+
 func TestDaemonReceiverDisabledEnv(t *testing.T) {
 	if daemonReceiverDisabled([]string{"STRIATUM_AGENT_LOOP_DAEMON_RECEIVER=on"}, "codex") {
 		t.Fatalf("receiver should stay enabled for on")

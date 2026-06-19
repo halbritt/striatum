@@ -42,6 +42,16 @@ func (r Receipt) MarshalFrontMatter() string {
 	fmt.Fprintf(&b, "- sandbox_mechanism: `%s`\n", r.Posture.Mechanism)
 	fmt.Fprintf(&b, "- sandbox_strict: `%s`\n", strconv.FormatBool(r.Posture.Strict))
 	fmt.Fprintf(&b, "- independent_reexecution_agreement: `%s`\n", strconv.FormatBool(r.AgreementSignal))
+	// RFC 0141 markers (body, seal-covered — like the posture/agreement signals):
+	// builtin_id caps the gate read at ASSERTED, negative_control_void marks a
+	// receipt the vacuity guard rejected. Both are read back by the gate.
+	if r.BuiltinID != "" {
+		fmt.Fprintf(&b, "- builtin_id: `%s`\n", r.BuiltinID)
+		if r.StriatumVersion != "" {
+			fmt.Fprintf(&b, "- striatum_version: `%s`\n", r.StriatumVersion)
+		}
+	}
+	fmt.Fprintf(&b, "- negative_control_void: `%s`\n", strconv.FormatBool(r.NegativeControlVoid))
 	if len(r.Posture.Notes) > 0 {
 		fmt.Fprintf(&b, "- posture_notes: %s\n", strings.Join(r.Posture.Notes, "; "))
 	}
@@ -60,6 +70,13 @@ type ReceiptSignals struct {
 	Strict      bool
 	Agreement   bool
 	BodyPresent bool
+	// BuiltinID is non-empty for a RFC 0141 builtin receipt (self-pinned to the
+	// striatum binary). It CAPS the gate read at ASSERTED — a self-pin attests which
+	// harness invoked the tool, never which tool ran.
+	BuiltinID string
+	// NegativeControlVoid marks a receipt the Pillar 3 vacuity guard rejected (the
+	// known-bad control passed). A void receipt earns nothing.
+	NegativeControlVoid bool
 }
 
 // ReceiptSignalsFromDocument parses a receipt.v1 markdown document into the
@@ -77,12 +94,14 @@ func ReceiptSignalsFromDocument(doc string) (ReceiptSignals, error) {
 		return ReceiptSignals{}, fmt.Errorf("parse receipt front matter: %w", err)
 	}
 	sig := ReceiptSignals{
-		CheckID:     stringField(parsed["check_id"]),
-		SealDigest:  stringField(parsed["seal_digest"]),
-		CwdTreeSHA:  stringField(parsed["cwd_tree_sha"]),
-		Strict:      bodyMarker(doc, "sandbox_strict"),
-		Agreement:   bodyMarker(doc, "independent_reexecution_agreement"),
-		BodyPresent: true,
+		CheckID:             stringField(parsed["check_id"]),
+		SealDigest:          stringField(parsed["seal_digest"]),
+		CwdTreeSHA:          stringField(parsed["cwd_tree_sha"]),
+		Strict:              bodyMarker(doc, "sandbox_strict"),
+		Agreement:           bodyMarker(doc, "independent_reexecution_agreement"),
+		BuiltinID:           bodyStringMarker(doc, "builtin_id"),
+		NegativeControlVoid: bodyMarker(doc, "negative_control_void"),
+		BodyPresent:         true,
 	}
 	if v, ok := parsed["exit_code"]; ok {
 		sig.ExitCode = intField(v)
@@ -115,8 +134,17 @@ func EffectiveStatusFromReceipt(sig ReceiptSignals, boundInputDigest, evidenceDi
 	if sig.SealDigest == "" || sig.SealDigest != evidenceDigest {
 		return artifactcontracts.ClaimStatusAsserted // the named receipt's seal does not match the claim's evidence
 	}
+	if sig.NegativeControlVoid {
+		return artifactcontracts.ClaimStatusAsserted // Pillar 3: a vacuity-voided receipt earns nothing
+	}
 	if sig.ExitCode != 0 {
 		return artifactcontracts.ClaimStatusAsserted // a failing or indeterminate check earns no upgrade
+	}
+	// RFC 0141 HARD CAP: a builtin receipt self-pins to the striatum binary, which
+	// proves which harness invoked the tool, NEVER which `go`/`git` ran. It can
+	// never independently earn VERIFIED, regardless of strict posture + agreement.
+	if sig.BuiltinID != "" {
+		return artifactcontracts.ClaimStatusAsserted
 	}
 	if sig.Strict && sig.Agreement {
 		return artifactcontracts.ClaimStatusVerified // two signals under a strict envelope: the sealed mint
@@ -150,4 +178,20 @@ func intField(v any) int {
 func bodyMarker(doc, key string) bool {
 	needle := "- " + key + ": `true`"
 	return strings.Contains(doc, needle)
+}
+
+// bodyStringMarker reads the value of a `- <key>: `<value>`` line from the receipt
+// body (the seal-covered builtin_id marker). Returns "" when the marker is absent.
+func bodyStringMarker(doc, key string) string {
+	prefix := "- " + key + ": `"
+	idx := strings.Index(doc, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := doc[idx+len(prefix):]
+	end := strings.IndexByte(rest, '`')
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:end])
 }

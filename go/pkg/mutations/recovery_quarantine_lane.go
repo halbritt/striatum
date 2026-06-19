@@ -92,6 +92,17 @@ func HandleRecoveryQuarantineLane(ctx context.Context, runner db.Runner, envelop
 		// Run-state gate: only a TERMINAL (canceled/failed) run leaves orphaned
 		// lane dirt. Refuse anything else (active/completed) so the verb can never
 		// snapshot/discard a live or successful run's in-flight worktree.
+		//
+		// RFC 0138 (#453): this verb is the OPERATOR's manual exit for a terminal
+		// run's dead lane; it is NOT the live-run case. For a LIVE strict fan-in run
+		// wedged on a provably-dead REQUIRED seat, the automatic, opt-in,
+		// provably-dead-only exit is the sealed terminal gap
+		// (resolveFaninSealedGapSeats in barrier_fanin.go, fanin_tolerates_sealed_gap +
+		// max_sealed_gaps on the freeze record). The two do not overlap: quarantine-lane
+		// snapshots a canceled run's dirty worktree; the sealed gap fires a live run's
+		// barrier degraded. Without the opt-in, the doctor reason
+		// strict_fanin_required_seat_unrecoverable surfaces the operator's bounded
+		// recovery (cancel the run, then optionally quarantine the now-terminal seat).
 		if !reads.ArtifactDebrisRunStateTerminal(runState) {
 			return nil, rpc.NewError("invalid_transition", fmt.Sprintf(
 				"run is %s; quarantine-lane applies only to a terminal run (canceled/failed)", runState), nil)

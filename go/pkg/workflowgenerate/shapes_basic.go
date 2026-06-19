@@ -128,6 +128,8 @@ func compileShape(spec Spec) ([]map[string]any, []map[string]any, []map[string]a
 			return nil, nil, nil, nil, err
 		}
 		return jobs, edges, cycles, nil, nil
+	case "verification_gate":
+		return compileVerificationGate(spec)
 	case "multi_phase":
 		return compileMultiPhase(spec)
 	default:

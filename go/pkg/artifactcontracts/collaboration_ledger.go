@@ -13,6 +13,10 @@ func validateCollaborationLedger(parsed map[string]any) error {
 		participantSet[participant] = true
 	}
 	seen := map[string]bool{}
+	// RFC 0094 §5 Check-B: tally the per-challenge correspondence judgments so a
+	// clearing verdict can require >=1 landed_and_rebutted and NO landed_unrebutted.
+	correspondenceTally := map[string]int{}
+	checkBEngaged := false
 	for idx, entry := range collaborationLedgerEntryList(parsed["entries"]) {
 		kind := fmt.Sprint(entry["kind"])
 		if !participantSet[fmt.Sprint(entry["by"])] {
@@ -27,14 +31,61 @@ func validateCollaborationLedger(parsed map[string]any) error {
 				return fmt.Errorf("collaboration_ledger artifact front matter entries[%d].refs[%d] must match dialogue:<seq>", idx, refIdx)
 			}
 		}
+		// RFC 0094 §5 per-entry semantic fields (#402). `correspondence` is the
+		// Check-B challenge<->rebuttal judgment; it is only meaningful on a challenge
+		// entry (the challenge is what lands or fails to land). `coverage` is the
+		// fog_of_war_review judge's ground-truth score for a reconstructed constraint.
+		if raw, exists := entry["correspondence"]; exists {
+			value, ok := nonEmptyString(raw)
+			if !ok || !oneOfValue("landed_and_rebutted", "landed_unrebutted", "not_material")(value) {
+				return fmt.Errorf("collaboration_ledger artifact front matter entries[%d].correspondence must be one of landed_and_rebutted, landed_unrebutted, not_material", idx)
+			}
+			if kind != "challenge" {
+				return fmt.Errorf("collaboration_ledger artifact front matter entries[%d].correspondence is only valid on a challenge entry (RFC 0094 §5 Check-B), not a %s entry", idx, kind)
+			}
+			correspondenceTally[value]++
+			checkBEngaged = true
+		}
+		if raw, exists := entry["coverage"]; exists {
+			value, ok := nonEmptyString(raw)
+			if !ok || !oneOfValue("reconstructed", "hallucinated", "missed")(value) {
+				return fmt.Errorf("collaboration_ledger artifact front matter entries[%d].coverage must be one of reconstructed, hallucinated, missed", idx)
+			}
+		}
 		seen[kind] = true
 	}
 	verdict := fmt.Sprint(parsed["verdict"])
-	if verdict == "accept" || verdict == "accept_with_findings" {
+	clearing := verdict == "accept" || verdict == "accept_with_findings"
+	if clearing {
 		for _, requiredKind := range []string{"claim", "challenge", "rebuttal"} {
 			if !seen[requiredKind] {
 				return fmt.Errorf("collaboration_ledger clearing verdict requires at least one %s entry with refs", requiredKind)
 			}
+		}
+	}
+	// RFC 0094 §5 Check-B clearing rule: once the adjudicator records ANY
+	// correspondence judgment (opts into the semantic layer above V1's structural
+	// presence check), a clearing verdict requires at least one challenge that
+	// `landed_and_rebutted` and NO challenge left `landed_unrebutted`. A confident
+	// non-rebuttal that cites the right turn ids is recorded landed_unrebutted and
+	// can no longer talk the gate past with structural presence alone.
+	if clearing && checkBEngaged {
+		if correspondenceTally["landed_unrebutted"] > 0 {
+			return fmt.Errorf("collaboration_ledger clearing verdict requires every Check-B challenge be rebutted; %d challenge(s) are recorded landed_unrebutted (RFC 0094 §5)", correspondenceTally["landed_unrebutted"])
+		}
+		if correspondenceTally["landed_and_rebutted"] == 0 {
+			return fmt.Errorf("collaboration_ledger clearing verdict with Check-B engaged requires at least one challenge recorded landed_and_rebutted (RFC 0094 §5)")
+		}
+	}
+	// RFC 0094 §5 second-adjudicator-on-disagreement gate. When the ledger opts
+	// into `adjudication_mode: second_on_disagreement`, a CLEARING verdict must be
+	// backed by at least two DISTINCT adjudicators (the first + the second who
+	// independently scored the same trajectory under RFC 0064 diversity). A
+	// contested clear is conservatively recorded as needs_revision, so only a
+	// clearing verdict triggers the requirement.
+	if clearing {
+		if err := validateSecondAdjudicatorGate(parsed); err != nil {
+			return err
 		}
 	}
 	shape := fmt.Sprint(parsed["shape"])
@@ -55,6 +106,35 @@ func validateCollaborationLedger(parsed map[string]any) error {
 	}
 	if shape == "adjudicated_constraint_extraction" && verdict == "needs_revision" && productiveConstraintRows(constraints) == 0 {
 		return fmt.Errorf("adjudicated_constraint_extraction needs_revision requires a non-empty constraints[] (at least one binding constraint or unresolved_question row); see docs/reference/spec.md#artifact-front-matter-schemas")
+	}
+	return nil
+}
+
+// validateSecondAdjudicatorGate enforces RFC 0094 §5's second-adjudicator gate on
+// a CLEARING verdict. With `adjudication_mode: second_on_disagreement`, the gate is
+// only legitimately cleared when two DISTINCT adjudicators independently scored the
+// same trajectory and agreed; the contract layer enforces the recorded provenance of
+// that agreement — at least two distinct entries in `adjudicators`. In `single` mode
+// (or with no mode declared) the gate is unchanged. The caller only invokes this for
+// clearing verdicts (a contested clear is recorded as needs_revision, which never
+// trips the requirement).
+func validateSecondAdjudicatorGate(parsed map[string]any) error {
+	mode := fmt.Sprint(parsed["adjudication_mode"])
+	if mode != "second_on_disagreement" {
+		return nil
+	}
+	adjudicators, _ := stringList(parsed["adjudicators"])
+	distinct := map[string]bool{}
+	for _, adjudicator := range adjudicators {
+		if strings.TrimSpace(adjudicator) != "" {
+			distinct[adjudicator] = true
+		}
+	}
+	if len(distinct) < 2 {
+		if len(adjudicators) >= 2 {
+			return fmt.Errorf("collaboration_ledger adjudication_mode second_on_disagreement clearing verdict requires at least two DISTINCT adjudicators (RFC 0064 diversity); adjudicators[] repeats the same session id")
+		}
+		return fmt.Errorf("collaboration_ledger adjudication_mode second_on_disagreement clearing verdict requires at least two distinct adjudicators in adjudicators[] (a contested clear must be recorded as needs_revision) (RFC 0094 §5)")
 	}
 	return nil
 }
@@ -458,15 +538,24 @@ func isCollaborationLedgerEntriesValue(value any) bool {
 	if len(entries) == 0 {
 		return false
 	}
-	allowedKeys := map[string]bool{"kind": true, "by": true, "refs": true, "text": true}
+	requiredKeys := []string{"kind", "by", "refs", "text"}
+	// RFC 0094 §5 (#402) added optional per-entry fields. `correspondence` is the
+	// Check-B challenge<->rebuttal judgment; `coverage` is the fog_of_war_review
+	// ground-truth score. They are ADDITIVE: an entry without them stays a valid V1
+	// entry, so this structural gate tolerates them and the detailed value/enum +
+	// placement checks live in validateCollaborationLedger (which runs after this
+	// field-presence gate passes).
+	allowedKeys := map[string]bool{"kind": true, "by": true, "refs": true, "text": true, "correspondence": true, "coverage": true}
 	for _, entry := range entries {
 		for key := range entry {
 			if !allowedKeys[key] {
 				return false
 			}
 		}
-		if len(entry) != len(allowedKeys) {
-			return false
+		for _, key := range requiredKeys {
+			if _, ok := entry[key]; !ok {
+				return false
+			}
 		}
 		if !oneOfValue("claim", "challenge", "rebuttal", "constraint", "nomination")(entry["kind"]) {
 			return false

@@ -41,3 +41,26 @@ so a verifier that *skips* running a witness is only caught socially.
 proposes closing that: a first-class `verify` job type the **engine** executes,
 deriving the verdict mechanically from exit codes, plus a `claim_ledger` artifact
 with the `VERIFIED > ASSERTED > DESIGNED` status lattice as a first-class contract.
+
+## Generating the shape
+
+This pattern is now a **generatable workflow shape** (RFC 0141, `experimental`):
+
+```
+striatum workflow generate --shape verification_gate --write
+```
+
+The generated workflow uses a **real `type: verify` job** that runs
+`striatum verifier run` against the in-binary builtin checks
+(`builtin:go-build` / `builtin:go-test` / `builtin:go-vet`) with **zero operator
+JSON**, minting receipts the adjudicator gates on. It also scaffolds a hashless
+`verification/allowlist.intent.json` (in the verify lane's `forbidden_paths`, so a
+verified lane can never sanction its own checks) and a `.gitignore` for the
+per-host `allowlist.pins.*` files. Builtin receipts cap at **ASSERTED**; reaching
+**VERIFIED** requires an external check the operator pins
+(`striatum verifier pin --host-here`) and attests.
+
+This directory is retained as the **portable today-primitives demonstration**
+(no host-specific pins, runnable anywhere): it shows the same build → verify →
+adjudicate → commit gate built entirely on existing primitives, where the
+verifier's *agent* runs the witnesses rather than the engine.
