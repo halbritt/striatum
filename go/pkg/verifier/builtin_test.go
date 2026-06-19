@@ -3,10 +3,74 @@ package verifier
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
 )
+
+// TestBuiltinGoChecksRunOnValidModule is the end-to-end regression for the live
+// builtin path: a trivially-VALID Go module must actually PASS every go builtin
+// (and the anchor check), capped at ASSERTED. This is the test that catches the
+// real-execution bugs unit tests missed — the tool resolving off the fixed sandbox
+// PATH, GOCACHE/HOME landing on the read-only cwd, and `go build` writing its
+// binary to the read-only cwd. It runs against whatever sandbox posture the host
+// resolves (strict bwrap here, degraded none in CI); the pass + ASSERTED-cap
+// invariant holds under both, since a builtin can never reach verified_eligible.
+func TestBuiltinGoChecksRunOnValidModule(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not installed")
+	}
+	work := t.TempDir()
+	mustWrite(t, filepath.Join(work, "go.mod"), "module striatumverifiertest\n\ngo 1.21\n")
+	mustWrite(t, filepath.Join(work, "main.go"), "package main\n\nfunc main() { _ = 1 }\n")
+	scratch := t.TempDir()
+
+	for _, id := range []string{"builtin:go-vet", "builtin:go-build", "builtin:go-test"} {
+		res, err := ExecuteCheck(context.Background(), nil, RunRequest{CheckID: id, Cwd: work, ScratchDir: scratch})
+		if err != nil {
+			t.Fatalf("%s: ExecuteCheck: %v", id, err)
+		}
+		// The cardinal builtin invariant — never above ASSERTED.
+		if res.Classification == classVerifiedEligible {
+			t.Fatalf("%s: a builtin must never be verified_eligible: %+v", id, res)
+		}
+		if res.Receipt.BuiltinID != id {
+			t.Fatalf("%s: receipt must seal builtin_id, got %q", id, res.Receipt.BuiltinID)
+		}
+		if !res.Receipt.Posture.Strict {
+			// Degraded envelope — e.g. the GitHub runner, where systemd-run/unshare
+			// is on PATH but cannot actually launch the check (no user systemd
+			// manager / restricted userns), so a non-strict posture did not produce a
+			// clean run. The builtin cap is verified above; the real-execution
+			// regression can only be asserted on a host whose sandbox actually runs
+			// the check (strict bwrap). Skip rather than false-fail (f484996c precedent).
+			t.Logf("%s: non-strict posture %q (exit=%d) — real-run assertion skipped (degraded env)",
+				id, res.Receipt.Posture.Mechanism, res.Receipt.ExitCode)
+			continue
+		}
+		// Strict host: a trivially-valid module MUST pass — the regression for the
+		// tool-PATH / GOCACHE / go-build-output bugs — capped at ASSERTED.
+		if res.Receipt.NegativeControlVoid {
+			t.Fatalf("%s: a real check must not void on its negative control: %+v", id, res)
+		}
+		if !res.Passed || res.Receipt.ExitCode != 0 {
+			t.Fatalf("%s: a valid module must pass under a strict sandbox (exit=%d class=%s); regression in the sandbox exec env",
+				id, res.Receipt.ExitCode, res.Classification)
+		}
+		if res.Classification != classAsserted {
+			t.Fatalf("%s: a passing builtin must classify asserted, got %q", id, res.Classification)
+		}
+	}
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // TestBuiltinReceiptCapsAtAssertedAtGate is the cardinal RFC 0141 invariant, read
 // at the AUTHORITATIVE point (the daemon-side gate read): a builtin receipt that is
@@ -147,11 +211,17 @@ func TestBuiltinResolvedExecSelfPins(t *testing.T) {
 	if rex.BuiltinID != "builtin:go-vet" || rex.BinarySHA256 == "" {
 		t.Fatalf("builtin must carry its id and a self-pin sha, got %+v", rex)
 	}
-	if len(rex.Argv) == 0 || rex.Argv[0] != "go" {
-		t.Fatalf("builtin argv must come from the registry, got %+v", rex.Argv)
+	// argv[0] is resolved to the absolute host path (PATH-independent in the
+	// sandbox); its basename is still the registry tool, and the rest of argv is
+	// verbatim from the registry.
+	if len(rex.Argv) < 3 || filepath.Base(rex.Argv[0]) != "go" || rex.Argv[1] != "vet" || rex.Argv[2] != "./..." {
+		t.Fatalf("builtin argv must resolve the registry tool to an absolute path, got %+v", rex.Argv)
 	}
-	if rex.NegativeControl == nil {
-		t.Fatal("builtin must carry a negative control")
+	if !filepath.IsAbs(rex.Argv[0]) {
+		t.Fatalf("builtin tool must be resolved to an absolute path, got %q", rex.Argv[0])
+	}
+	if rex.NegativeControl == nil || filepath.Base(rex.NegativeControl.Argv[0]) != "go" {
+		t.Fatalf("builtin must carry a negative control with the resolved tool, got %+v", rex.NegativeControl)
 	}
 	if _, err := builtinResolvedExec("builtin:does-not-exist"); err == nil {
 		t.Fatal("unknown builtin must error")

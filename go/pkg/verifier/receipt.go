@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -189,22 +190,36 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 	if strings.TrimSpace(cwd) == "" {
 		cwd, _ = os.Getwd()
 	}
+	// The sandbox binds cwd READ-ONLY (the check observes, it does not mutate the
+	// tree it witnesses); the scratch dir is the single writable space. A toolchain
+	// that needs a writable cache (go-build, GOPATH) must target scratch, so a go
+	// builtin requires one — synthesize an ephemeral scratch when the caller gave
+	// none, and clean it up after.
+	scratch := req.ScratchDir
+	if strings.TrimSpace(scratch) == "" && isGoBuiltin(rex) {
+		if tmp, terr := os.MkdirTemp("", "verifier-scratch-*"); terr == nil {
+			scratch = tmp
+			defer func() { _ = os.RemoveAll(tmp) }()
+		}
+	}
 	treeSHA, err := CwdTreeSHA(ctx, cwd)
 	if err != nil {
 		return CheckResult{}, fmt.Errorf("compute cwd tree-sha: %w", err)
 	}
 	wrapper, posture := ResolveSandbox(SandboxSpec{
 		CwdReadOnly:     cwd,
-		ScratchWritable: req.ScratchDir,
+		ScratchWritable: scratch,
 		Limits:          req.Limits,
 	})
+	runEnv := checkRunEnv(rex, cwd, scratch)
+	rex.Argv = goBuildOutputRedirect(rex, scratch)
 
 	// Pillar 3: run the negative control FIRST. A control that PASSES (exit 0) — or
 	// could not even run its envelope — means the check does not discriminate the
 	// defect it claims to; void the receipt rather than trust a green it cannot earn.
 	var control *runOutcome
 	if rex.NegativeControl != nil && len(rex.NegativeControl.Argv) > 0 {
-		out, runErr := runOnce(ctx, wrapper, rex.NegativeControl.Argv, cwd, req.Limits)
+		out, runErr := runOnce(ctx, wrapper, rex.NegativeControl.Argv, cwd, req.Limits, runEnv)
 		if runErr != nil {
 			return CheckResult{}, runErr
 		}
@@ -229,11 +244,11 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 		}
 	}
 
-	first, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits)
+	first, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits, runEnv)
 	if err != nil {
 		return CheckResult{}, err
 	}
-	second, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits)
+	second, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits, runEnv)
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -306,10 +321,90 @@ type runOutcome struct {
 	envelopeViolation bool
 }
 
+// checkRunEnv builds the process env for a sandboxed check run. The sandbox binds
+// cwd READ-ONLY, so HOME points at the writable scratch when one is available. A go
+// builtin additionally needs GOCACHE/GOPATH in scratch and the host's module cache
+// (read-only, visible through the sandbox's ro-bind of /) with the network OFF, so
+// `go test/vet/build` runs against an offline, already-cached module. (`go` itself
+// is resolved on the fixed sandbox PATH like every other check binary.)
+func checkRunEnv(rex ResolvedExec, cwd, scratch string) []string {
+	home := cwd
+	if strings.TrimSpace(scratch) != "" {
+		home = scratch
+	}
+	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + home}
+	if isGoBuiltin(rex) && strings.TrimSpace(scratch) != "" {
+		env = append(env,
+			"GOCACHE="+filepath.Join(scratch, "go-build"),
+			"GOPATH="+filepath.Join(scratch, "go"),
+			"GOPROXY=off", // deps + any toolchain must already be cached; never reach the network
+			// GOTOOLCHAIN=auto so a project whose go.mod requires a newer go than the
+			// host's base `go` uses the ALREADY-CACHED toolchain (in the read-only host
+			// GOMODCACHE) offline; an uncached toolchain fails honestly (the strict
+			// sandbox has no network), rather than silently downgrading.
+			"GOTOOLCHAIN=auto",
+		)
+		if mod := hostGoModCache(); mod != "" {
+			env = append(env, "GOMODCACHE="+mod)
+		}
+	}
+	return env
+}
+
+// isGoBuiltin reports whether the resolved check is one of the builtin:go-* checks.
+func isGoBuiltin(rex ResolvedExec) bool {
+	return strings.HasPrefix(rex.BuiltinID, "builtin:go-")
+}
+
+// goBuildOutputRedirect points `go build`'s output at the writable scratch dir.
+// `go build ./...` writes the executable for a SINGLE main package into the cwd,
+// which is read-only in the sandbox; `-o <dir>` makes it write into scratch instead
+// (and is correct for multi-package too: each main lands in the dir, non-main
+// packages are discarded). No-op for any non-go-build check or when -o is already
+// set. The recorded argv reflects what actually ran (the seal stays honest).
+func goBuildOutputRedirect(rex ResolvedExec, scratch string) []string {
+	if rex.BuiltinID != "builtin:go-build" || strings.TrimSpace(scratch) == "" {
+		return rex.Argv
+	}
+	for _, a := range rex.Argv {
+		if a == "-o" {
+			return rex.Argv
+		}
+	}
+	outDir := filepath.Join(scratch, "gobuild-out")
+	_ = os.MkdirAll(outDir, 0o755)
+	out := make([]string, 0, len(rex.Argv)+2)
+	for i, a := range rex.Argv {
+		out = append(out, a)
+		if i == 1 { // insert after the "build" subcommand, before the package args
+			out = append(out, "-o", outDir)
+		}
+	}
+	return out
+}
+
+var (
+	hostGoModCacheValue string
+	hostGoModCacheOnce  sync.Once
+)
+
+// hostGoModCache returns the host's GOMODCACHE, read LANE-SIDE (outside the sandbox)
+// so already-downloaded module deps resolve offline inside it. Best-effort: empty
+// on failure (a no-dependency module needs no module cache at all).
+func hostGoModCache() string {
+	hostGoModCacheOnce.Do(func() {
+		out, err := exec.Command("go", "env", "GOMODCACHE").Output() //nolint:gosec // fixed argv, lane-side host config read
+		if err == nil {
+			hostGoModCacheValue = strings.TrimSpace(string(out))
+		}
+	})
+	return hostGoModCacheValue
+}
+
 // runOnce executes the wrapped check once with a wall-clock deadline, hashing
 // stdout. A non-zero exit is a normal result (recorded), NOT a Go error; a Go
 // error is reserved for failures to launch the sandbox itself.
-func runOnce(ctx context.Context, wrapper, argv []string, cwd string, limits SandboxLimits) (runOutcome, error) {
+func runOnce(ctx context.Context, wrapper, argv []string, cwd string, limits SandboxLimits, runEnv []string) (runOutcome, error) {
 	deadline := limits.withDefaults().WallClockSeconds
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(deadline)*time.Second)
 	defer cancel()
@@ -317,9 +412,12 @@ func runOnce(ctx context.Context, wrapper, argv []string, cwd string, limits San
 	full := append(append([]string(nil), wrapper...), argv...)
 	cmd := exec.CommandContext(execCtx, full[0], full[1:]...) //nolint:gosec // argv is the allowlisted, hash-pinned command wrapped by the resolved sandbox
 	cmd.Dir = cwd
-	// Minimal env: no inherited secrets. PATH only, so a network-resolving tool
-	// is the only way out and the namespace already blocks it.
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + cwd}
+	// Minimal, caller-built env: no inherited secrets. checkRunEnv supplies PATH +
+	// HOME (and the go-builtin cache vars when needed); the namespace blocks network.
+	if len(runEnv) == 0 {
+		runEnv = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + cwd}
+	}
+	cmd.Env = runEnv
 
 	var stdout hashingWriter
 	cmd.Stdout = &stdout

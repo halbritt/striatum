@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Fixed
+
+- **RFC 0141 `verifier run` builtins are now actually runnable end-to-end** (the
+  shipped unit tests passed but the live sandbox path was broken — found by
+  dogfooding). Five fixes: (1) `verifier run --check-id builtin:*` no longer
+  requires `--allowlist` (it contradicted "runnable with no operator JSON"), and a
+  new `--intent [--pins --attest]` resolves external two-layer-allowlist checks;
+  (2) builtin tools resolve to an ABSOLUTE host path so they are found regardless of
+  the fixed sandbox `PATH` (`go` may live in `~/.local/bin`); (3) go builtins point
+  `GOCACHE`/`GOPATH`/`HOME` at the writable scratch (the sandbox binds cwd read-only)
+  and `GOMODCACHE` at the host cache with `GOPROXY=off` (offline); (4) `go build`'s
+  output is redirected into scratch with `-o` (it otherwise writes the binary into
+  the read-only cwd for a single-main-package module); (5) `GOTOOLCHAIN=auto` so a
+  project requiring a newer `go` than the host's base binary uses the already-cached
+  toolchain offline. Verified live: all four builtins pass under a strict bubblewrap
+  envelope on a valid module (capped at ASSERTED), plus a new live regression test.
+
 ### Added
 
 - **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The

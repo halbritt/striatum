@@ -67,6 +67,9 @@ func runVerifier(args []string, stdout io.Writer, stderr io.Writer, repoRootOver
 	}
 	var (
 		allowlistPath string
+		intentPath    string
+		pinsPath      string
+		attestPath    string
 		checkID       string
 		cwd           string
 		scratch       string
@@ -80,6 +83,21 @@ func runVerifier(args []string, stdout io.Writer, stderr io.Writer, repoRootOver
 			i++
 			if i < len(rest) {
 				allowlistPath = rest[i]
+			}
+		case "--intent":
+			i++
+			if i < len(rest) {
+				intentPath = rest[i]
+			}
+		case "--pins":
+			i++
+			if i < len(rest) {
+				pinsPath = rest[i]
+			}
+		case "--attest":
+			i++
+			if i < len(rest) {
+				attestPath = rest[i]
 			}
 		case "--check-id":
 			i++
@@ -104,31 +122,68 @@ func runVerifier(args []string, stdout io.Writer, stderr io.Writer, repoRootOver
 		case "--json":
 			jsonOut = true
 		case "-h", "--help":
-			_, _ = fmt.Fprintln(stdout, "usage: striatum verifier run --allowlist <path> --check-id <id> --out <path> [--cwd <dir>] [--scratch <dir>] [--json]")
+			_, _ = fmt.Fprintln(stdout, "usage: striatum verifier run --check-id <id> --out <path> [--allowlist <path> | --intent <path> [--pins <path>] [--attest <path>]] [--cwd <dir>] [--scratch <dir>] [--json]")
+			_, _ = fmt.Fprintln(stdout, "  builtin:* check ids self-pin and need NEITHER --allowlist NOR --intent (runnable out of the box, capped at ASSERTED).")
 			return 0
 		default:
 			_, _ = fmt.Fprintf(stderr, "verifier run: unknown flag %q\n", rest[i])
 			return 2
 		}
 	}
-	if strings.TrimSpace(allowlistPath) == "" || strings.TrimSpace(checkID) == "" || strings.TrimSpace(outPath) == "" {
-		_, _ = fmt.Fprintln(stderr, "verifier run: --allowlist, --check-id, and --out are required")
+	if strings.TrimSpace(checkID) == "" || strings.TrimSpace(outPath) == "" {
+		_, _ = fmt.Fprintln(stderr, "verifier run: --check-id and --out are required")
 		return 2
 	}
 	if strings.TrimSpace(cwd) == "" {
 		cwd = repoRootOverride
 	}
 
-	allowlist, err := verifier.LoadAllowlist(allowlistPath)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "verifier run: %v\n", err)
-		return 1
+	// Resolve the check by source. A builtin id self-pins (RFC 0141 Pillar 2) and
+	// needs NO operator JSON — runnable out of the box. An external check resolves
+	// against the two-layer intent ⋈ pins ⋈ attest (Pillar 1). The legacy RFC 0134
+	// allowlist path remains for a directly-pinned operator allowlist.
+	req := verifier.RunRequest{CheckID: checkID, Cwd: cwd, ScratchDir: scratch}
+	var (
+		result verifier.CheckResult
+		err    error
+	)
+	switch {
+	case verifier.IsBuiltinID(checkID):
+		result, err = verifier.ExecuteCheck(context.Background(), nil, req)
+	case strings.TrimSpace(intentPath) != "":
+		intent, lerr := verifier.LoadIntent(intentPath)
+		if lerr != nil {
+			_, _ = fmt.Fprintf(stderr, "verifier run: %v\n", lerr)
+			return 1
+		}
+		fp := verifier.HostFingerprint()
+		if strings.TrimSpace(pinsPath) == "" {
+			pinsPath = filepath.Join(filepath.Dir(intentPath), verifier.PinsFileName(fp))
+		}
+		var pins *verifier.Allowlist
+		if loaded, perr := verifier.LoadAllowlist(pinsPath); perr == nil {
+			pins = loaded
+		}
+		if strings.TrimSpace(attestPath) == "" {
+			attestPath = filepath.Join(filepath.Dir(intentPath), verifier.AttestFileName(fp))
+		}
+		attest, aerr := verifier.LoadAttestations(attestPath)
+		if aerr != nil {
+			_, _ = fmt.Fprintf(stderr, "verifier run: %v\n", aerr)
+			return 1
+		}
+		result, err = verifier.ExecuteIntentCheck(context.Background(), intent, pins, attest, req)
+	case strings.TrimSpace(allowlistPath) != "":
+		allowlist, lerr := verifier.LoadAllowlist(allowlistPath)
+		if lerr != nil {
+			_, _ = fmt.Fprintf(stderr, "verifier run: %v\n", lerr)
+			return 1
+		}
+		result, err = verifier.ExecuteCheck(context.Background(), allowlist, req)
+	default:
+		_, _ = fmt.Fprintf(stderr, "verifier run: check %q is not a builtin; supply --intent <path> (RFC 0141) or --allowlist <path> (RFC 0134)\n", checkID)
+		return 2
 	}
-	result, err := verifier.ExecuteCheck(context.Background(), allowlist, verifier.RunRequest{
-		CheckID:    checkID,
-		Cwd:        cwd,
-		ScratchDir: scratch,
-	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "verifier run: %v\n", err)
 		return 1

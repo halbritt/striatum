@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 )
@@ -142,13 +143,48 @@ func builtinResolvedExec(id string) (ResolvedExec, error) {
 	if err != nil {
 		return ResolvedExec{}, err
 	}
+	// Resolve the tool to an ABSOLUTE host path so the builtin runs
+	// PATH-independently inside the sandbox (the fixed sandbox PATH is
+	// /usr/local/bin:/usr/bin:/bin, but `go`/`git` may live elsewhere e.g.
+	// ~/.local/bin; the whole host FS is ro-bound in, so an absolute path resolves).
+	argv, err := resolveToolArgv(bc.Argv)
+	if err != nil {
+		return ResolvedExec{}, err
+	}
+	var nc *NegativeControl
+	if bc.NegativeControl != nil {
+		ncArgv, ncErr := resolveToolArgv(bc.NegativeControl.Argv)
+		if ncErr != nil {
+			return ResolvedExec{}, ncErr
+		}
+		nc = &NegativeControl{Argv: ncArgv, MutationOf: bc.NegativeControl.MutationOf, Description: bc.NegativeControl.Description}
+	}
 	return ResolvedExec{
 		CheckID:         bc.ID,
-		Argv:            append([]string(nil), bc.Argv...),
+		Argv:            argv,
 		BinarySHA256:    sha,
 		BuiltinID:       bc.ID,
 		StriatumVersion: BuiltinStriatumVersion,
-		NegativeControl: bc.NegativeControl,
+		NegativeControl: nc,
 		PassWhen:        passWhenExitZero,
 	}, nil
+}
+
+// resolveToolArgv resolves argv[0] to an absolute host path (via PATH) so a builtin
+// is found inside the sandbox regardless of the fixed sandbox PATH. The resolved
+// tool's identity is NOT what a builtin pins — the receipt self-pins the striatum
+// binary and caps at ASSERTED — this only ensures the tool can be located.
+func resolveToolArgv(argv []string) ([]string, error) {
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return nil, fmt.Errorf("builtin check has an empty argv")
+	}
+	out := append([]string(nil), argv...)
+	if !strings.Contains(out[0], "/") {
+		abs, err := exec.LookPath(out[0])
+		if err != nil {
+			return nil, fmt.Errorf("builtin check tool %q is not installed on this host: %w", out[0], err)
+		}
+		out[0] = abs
+	}
+	return out, nil
 }
