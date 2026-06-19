@@ -2791,7 +2791,10 @@ func (r *superviseControlFakeRunner) fakeRow(sql string, args ...any) db.Row {
 		if r.activeSupervisorMissing {
 			return superviseControlFakeRow{err: pgx.ErrNoRows}
 		}
-		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", filepath.Join(r.repoRoot, ".striatum", "scratch", "sup_1"), r.pipePath, nil, "", "dsup_1", map[string]any{"stdin_delivery": stdinDeliveryPersistentFIFO}}}
+		// RFC 0139: requireActiveControlSupervisor now also reads p.updated_at (the
+		// prior pointer timestamp); a trailing nil means "no stored timestamp" → the
+		// coalesce always writes, preserving these tests' pre-RFC assertions.
+		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", filepath.Join(r.repoRoot, ".striatum", "scratch", "sup_1"), r.pipePath, nil, "", "dsup_1", map[string]any{"stdin_delivery": stdinDeliveryPersistentFIFO}, nil}}
 	default:
 		return superviseControlFakeRow{err: errors.New("unexpected runner query: " + sql)}
 	}
@@ -2854,7 +2857,11 @@ func (tx *superviseControlFakeTx) QueryRow(_ context.Context, sql string, args .
 		if metadata == nil {
 			metadata = map[string]any{"stdin_delivery": stdinDeliveryPersistentFIFO}
 		}
-		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", filepath.Dir(tx.pipePath), tx.pipePath, pid, tx.pidStart, "dsup_1", metadata}}
+		// RFC 0139: requireActiveControlSupervisor now also reads p.updated_at (the
+		// prior pointer timestamp) for the coalesce write-skip. A nil value (no
+		// stored timestamp) makes the bump always write — preserving the pre-RFC
+		// delivery/stop assertions these tests make.
+		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", filepath.Dir(tx.pipePath), tx.pipePath, pid, tx.pidStart, "dsup_1", metadata, nil}}
 	case strings.Contains(sql, "SELECT ps.supervisor_id"):
 		var pid any
 		if tx.pid > 0 {
@@ -2864,7 +2871,9 @@ func (tx *superviseControlFakeTx) QueryRow(_ context.Context, sql string, args .
 		if metadata == nil {
 			metadata = map[string]any{"stdin_delivery": stdinDeliveryPersistentFIFO}
 		}
-		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", pid, tx.pidStart, "dsup_1", metadata}}
+		// RFC 0139: findReportSupervisor now also reads p.updated_at; a trailing nil
+		// means "no stored timestamp" → the coalesce always writes.
+		return superviseControlFakeRow{values: []any{"sup_1", "run_1", "sess_1", "attached", pid, tx.pidStart, "dsup_1", metadata, nil}}
 	case strings.Contains(sql, "FROM striatumd.work_packets"):
 		return superviseControlFakeRow{values: []any{"packet_1", "run_1", "job_1", "lease_1", "sess_1", map[string]any{"packet": "body"}}}
 	case strings.Contains(sql, "FROM striatumd.leases"):

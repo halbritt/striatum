@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	LatestDaemonDBVersion = 38
+	LatestDaemonDBVersion = 39
 	MigrationLockKey      = 332933
 )
 
@@ -67,6 +67,7 @@ func Migrations() ([]Migration, error) {
 		35: "confidence-gated pipe-lane escalation state (RFC 0131 131-C / #336)",
 		37: "resolve blockers stranded open on terminal runs (#420)",
 		38: "durable buffer for no-reader supervised_push packets (FMA-006 / #456)",
+		39: "drop `state` from non-partial idx_process_supervisor_pointers_run to cut HOT-defeating index churn (RFC 0139 Direction 2 / #421)",
 	}
 	entries, err := migrationFS.ReadDir("sql")
 	if err != nil {

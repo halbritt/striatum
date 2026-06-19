@@ -53,6 +53,10 @@ type supervisorControlRow struct {
 	Metadata           map[string]any
 	EndedAt            any
 	StopReason         any
+	// PointerUpdatedAt is the pointer row's stored updated_at at read time. It
+	// drives the RFC 0139 coalesce write-skip from the already-read row so no
+	// extra SELECT enters the heartbeat path (#198/#355). Empty when unread.
+	PointerUpdatedAt string
 }
 
 type supervisionPacketRow struct {
@@ -460,7 +464,7 @@ func deliverClaimedPacketToSupervisorInTx(ctx context.Context, tx db.TxRunner, r
 		return nil, err
 	}
 	deliveredAt := nowString()
-	if err := refreshSupervisorHeartbeat(ctx, tx, repositoryID, supervisor.SupervisorID, supervisor.DaemonSupervisorID, deliveredAt); err != nil {
+	if err := refreshSupervisorHeartbeat(ctx, tx, repositoryID, supervisor.SupervisorID, supervisor.DaemonSupervisorID, supervisor.PointerUpdatedAt, deliveredAt); err != nil {
 		return nil, err
 	}
 	if err := drainHelperEvents(ctx, tx, repositoryID, supervisor.SupervisorID, 250*time.Millisecond); err != nil {
@@ -772,7 +776,10 @@ func HandleSuperviseRebridge(ctx context.Context, runner db.Runner, envelope rpc
 		if err := replacePointerMetadata(ctx, tx, repositoryID, supervisor.SupervisorID, updated); err != nil {
 			return nil, err
 		}
-		if err := refreshSupervisorHeartbeat(ctx, tx, repositoryID, supervisor.SupervisorID, supervisor.DaemonSupervisorID, rebridgedAt); err != nil {
+		// Rebridge is a rare, explicit operator action (not a write-amplification
+		// source), and it must durably record the rebridge time, so it is NOT
+		// coalesced: pass an empty prior timestamp so the bump always writes.
+		if err := refreshSupervisorHeartbeat(ctx, tx, repositoryID, supervisor.SupervisorID, supervisor.DaemonSupervisorID, "", rebridgedAt); err != nil {
 			return nil, err
 		}
 		payload := map[string]any{
@@ -964,7 +971,8 @@ func requireActiveControlSupervisor(ctx context.Context, runner any, repositoryI
 	sql := `
 		SELECT ps.supervisor_id, ps.run_id, ps.session_id, ps.state,
 		       COALESCE(ps.scratch_path, ''), COALESCE(ps.stdin_pipe_path, ''), ps.pid, COALESCE(ps.pid_start_time, ''),
-		       COALESCE(p.daemon_supervisor_id, ''), COALESCE(p.metadata_json, '{}'::jsonb)
+		       COALESCE(p.daemon_supervisor_id, ''), COALESCE(p.metadata_json, '{}'::jsonb),
+		       p.updated_at
 		  FROM striatumd.process_supervisors ps
 		  LEFT JOIN striatumd.process_supervisor_pointers p
 		    ON p.repository_id = ps.repository_id AND p.supervisor_id = ps.supervisor_id
@@ -981,10 +989,11 @@ func requireActiveControlSupervisor(ctx context.Context, runner any, repositoryI
 	var row supervisorControlRow
 	var pid *int
 	var metadata any
+	var pointerUpdatedAt any
 	err := rower.QueryRow(ctx, sql, repositoryID, sessionID, []string{"starting", "attached", "detached"}).Scan(
 		&row.SupervisorID, &row.RunID, &row.SessionID, &row.State,
 		&row.ScratchPath, &row.StdinPipePath, &pid, &row.PIDStartTime,
-		&row.DaemonSupervisorID, &metadata,
+		&row.DaemonSupervisorID, &metadata, &pointerUpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, rpc.NewError("invalid_transition", fmt.Sprintf("no active supervisor for session_id=%q", sessionID), nil)
@@ -997,6 +1006,9 @@ func requireActiveControlSupervisor(ctx context.Context, runner any, repositoryI
 		row.HasPID = true
 	}
 	row.Metadata = asMap(metadata)
+	if ts, ok := asTime(pointerUpdatedAt); ok {
+		row.PointerUpdatedAt = ts.UTC().Format(time.RFC3339)
+	}
 	return row, nil
 }
 
@@ -1422,7 +1434,82 @@ func updateSupervisorState(ctx context.Context, runner db.TxRunner, repositoryID
 	)
 }
 
-func refreshSupervisorHeartbeat(ctx context.Context, runner db.TxRunner, repositoryID, supervisorID, daemonSupervisorID, updatedAt string) error {
+// defaultSupervisorHeartbeatCoalesce is the write-skip floor (RFC 0139
+// Direction 1) for the supervisor heartbeat timestamp bumps. The helper progress
+// cadence is ~20s (defaultHeartbeatMinInterval), so a 30s floor lets consecutive
+// helper events coalesce to ~one timestamp write per supervisor per floor window
+// instead of one per drained event — a >=80% cut in the ~8.1M/16h reconcile-loop
+// timestamp writes the issue measured. It must stay well below the smallest
+// minutes-scale liveness/staleness threshold (the only sub-minute consumer of
+// these timestamps is the reconcile read's ORDER BY ... updated_at DESC tiebreak,
+// which a coarse-but-monotonic timestamp plus the supervisor_id secondary key
+// preserves).
+const defaultSupervisorHeartbeatCoalesce = 30 * time.Second
+
+// supervisorHeartbeatCoalesceEnv lets an operator tune or disable the coalesce
+// floor (RFC 0139 Open Question 3). A parseable Go duration sets the floor; "0",
+// a negative value, "off", or "disable" turns coalescing off (every bump writes,
+// preserving the pre-RFC-0139 behavior); an unparseable value falls back to the
+// default so a typo never silently disables the write-skip.
+const supervisorHeartbeatCoalesceEnv = "STRIATUM_SUPERVISOR_HEARTBEAT_COALESCE"
+
+// supervisorHeartbeatCoalesceFloor resolves the configured write-skip floor. A
+// non-positive floor (env "0"/"off"/negative) disables coalescing.
+func supervisorHeartbeatCoalesceFloor() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(supervisorHeartbeatCoalesceEnv))
+	if raw == "" {
+		return defaultSupervisorHeartbeatCoalesce
+	}
+	switch strings.ToLower(raw) {
+	case "off", "disable", "disabled", "none":
+		return 0
+	}
+	floor, err := time.ParseDuration(raw)
+	if err != nil {
+		// A misconfigured env var must not silently disable the write-skip; fall
+		// back to the safe default and keep coalescing.
+		return defaultSupervisorHeartbeatCoalesce
+	}
+	if floor < 0 {
+		return 0
+	}
+	return floor
+}
+
+// supervisorHeartbeatBumpSkipped reports whether a pure-timestamp heartbeat bump
+// can be skipped because the stored timestamp is younger than the coalesce floor.
+// The decision is computed from the prior timestamp the caller ALREADY read (the
+// FOR UPDATE row inside the active transaction) — it issues NO extra SELECT, so it
+// adds nothing inside the per-run advisory-lock window (#198/#355). A zero/negative
+// floor (coalescing disabled) or an unparseable/empty prior timestamp never skips,
+// so a row with no stored timestamp always gets its first write.
+func supervisorHeartbeatBumpSkipped(priorTimestamp, newTimestamp string) bool {
+	floor := supervisorHeartbeatCoalesceFloor()
+	if floor <= 0 {
+		return false
+	}
+	prior, ok := asTime(priorTimestamp)
+	if !ok {
+		return false
+	}
+	next, ok := asTime(newTimestamp)
+	if !ok {
+		return false
+	}
+	return next.Sub(prior) < floor
+}
+
+// refreshSupervisorHeartbeat bumps the three supervisor liveness timestamps. RFC
+// 0139 Direction 1: it skips the writes when the prior pointer timestamp
+// (priorUpdatedAt, read from the already-held FOR UPDATE row) is younger than the
+// coalesce floor, capping the per-row write rate at ~one per floor window under a
+// helper-event burst. The skip is a single shared decision across all three rows
+// so they stay consistent; an empty priorUpdatedAt (first bump / unknown) always
+// writes.
+func refreshSupervisorHeartbeat(ctx context.Context, runner db.TxRunner, repositoryID, supervisorID, daemonSupervisorID, priorUpdatedAt, updatedAt string) error {
+	if supervisorHeartbeatBumpSkipped(priorUpdatedAt, updatedAt) {
+		return nil
+	}
 	if err := runner.Exec(ctx, `
 		UPDATE striatumd.process_supervisors
 		   SET heartbeat_at = $1
