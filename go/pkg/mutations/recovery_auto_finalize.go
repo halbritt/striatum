@@ -1300,6 +1300,16 @@ func completeAutoFinalizedJob(ctx context.Context, runner any, repositoryID, job
 	if err := verifyRequiredArtifacts(ctx, runner, repositoryID, jobID); err != nil {
 		return nil, err
 	}
+	// FMA-005 (#455): enforce the same per-job durability floor as
+	// completeRecoveredJob. verifyRequiredArtifacts only covers the
+	// required-artifact row-presence floor; the auto-finalize twin must also
+	// run the per-job durability probe so it cannot seal a job `completed`
+	// while a published (including non-required) repo-write artifact body is
+	// non-durable outside the per-job worktree — the floor its recovery sibling
+	// already enforces.
+	if err := ensurePerJobPublishedArtifactsDurable(ctx, runner, repositoryID, job, "recovery.auto-finalize"); err != nil {
+		return nil, err
+	}
 	now := nowString()
 	exec, ok := runner.(interface {
 		Exec(context.Context, string, ...any) error
