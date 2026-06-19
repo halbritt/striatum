@@ -310,6 +310,48 @@ func TestDoctorDissentLedgerCompletenessFires(t *testing.T) {
 	}
 }
 
+// TestDoctorDissentLedgerCompletenessSkipsTerminalRun guards the live-run scoping:
+// a terminal run (completed/failed/canceled/compromised) will never recover or
+// transfer a seat, so a missing dissent_ledger row there is inert provenance, not a
+// live forward-write hole. Flagging it produced a permanent red on historical runs
+// predating migration 0032 (the dissent_ledger feature); the check must stay silent
+// on terminal runs even while the ledger row is absent.
+func TestDoctorDissentLedgerCompletenessSkipsTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	runner := pool.Runner
+
+	repoID := "repo_qdoc_ledger_term"
+	runID := "run_qdoc_ledger_term"
+	seedQuorumDoctorRepoRun(t, ctx, runner, repoID, runID, panelSnapshot("gate", map[string]string{
+		"rev_g": "gating",
+	}))
+	seedQuorumDoctorJob(t, ctx, runner, repoID, runID, "job_gate", "gate", "synthesis", "blocked", 1)
+	seedQuorumDoctorJob(t, ctx, runner, repoID, runID, "job_g", "rev_g", "review", "completed", 1)
+	seedQuorumDoctorDep(t, ctx, runner, repoID, "job_gate", "job_g")
+	seedQuorumDoctorSession(t, ctx, runner, repoID, runID, "sess_g")
+	// A needs_revision verdict at the seat's live attempt 1 with NO dissent_ledger row.
+	seedQuorumDoctorVerdict(t, ctx, runner, repoID, runID, "v_g", "job_g", "sess_g", "needs_revision")
+
+	// While the run is non-terminal ('running'), the check fires (matches the Fires test).
+	_, problems, _, _, _ := doctorQuorumIntegrity(ctx, runner, repoID)
+	if !hasQuorumProblem(problems, "dissent_ledger_incomplete.rev_g") {
+		t.Fatalf("expected dissent_ledger_incomplete while running, got: %v", problems)
+	}
+
+	// Terminal the run; the check goes silent for every terminal state even though the
+	// ledger row is still absent (no seat recovery/transfer is possible anymore).
+	for _, state := range []string{"canceled", "failed", "completed", "compromised"} {
+		if err := runner.Exec(ctx, `UPDATE striatumd.runs SET state=$3 WHERE repository_id=$1 AND run_id=$2`, repoID, runID, state); err != nil {
+			t.Fatalf("set run state %s: %v", state, err)
+		}
+		_, problemsT, _, _, _ := doctorQuorumIntegrity(ctx, runner, repoID)
+		if hasQuorumProblem(problemsT, "dissent_ledger_incomplete.rev_g") {
+			t.Fatalf("dissent_ledger_incomplete must be silent on terminal run state %q (no seat recovery/transfer possible), got: %v", state, problemsT)
+		}
+	}
+}
+
 // TestRunSummaryQuorumDissentLegibility asserts run.summary surfaces the live dissent
 // rows and open advisory holds so a quorum/advisory park is self-explaining before
 // checkpoint resolve (#342 finalize-decision legibility).

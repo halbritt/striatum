@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- **doctor: `dissent_ledger_incomplete` is scoped to non-terminal runs (D236).**
+  The `quorum_integrity` completeness check flagged every non-superseded
+  `needs_revision`/`reject` verdict that lacked a `dissent_ledger` row regardless
+  of run state, so historical terminal runs (completed/failed/canceled/
+  compromised) that predate migration 0032 (the dissent_ledger feature) showed up
+  as permanent doctor problems (25 on this workstation). The check's purpose is
+  forward-write safety — "a recovered/transferred seat could read this dissent as
+  absent" — and seat recovery/transfer (`seatHasLiveDissent` in
+  `barrier_quorum.go`) only fires while a run is being driven. A terminal run will
+  never recover or transfer a seat, so a missing ledger row there is inert
+  provenance, not a live hole. `doctorDissentLedgerCompleteness`
+  (`go/pkg/reads/doctor_quorum.go`) now joins `striatumd.runs` and excludes
+  terminal states, matching the live-run scoping the sibling quorum/lock-wait
+  checks already use. Regression test
+  `TestDoctorDissentLedgerCompletenessSkipsTerminalRun`. No schema, migration, or
+  RPC change.
+
 - **runner: a bare interactive agent-CLI lane now drives `work.*` instead of
   timing out (#431, D235) — the self-hosting crux.** A `process` lane whose
   command is a bare `claude`/`codex`/`agy` (argv where

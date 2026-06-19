@@ -150,7 +150,8 @@ func doctorQuorumIntegrity(ctx context.Context, runner any, repositoryID string)
 	records = append(records, ignoredRecords...)
 
 	// dissent_ledger_incomplete (#339): a non-accepting, non-superseded verdict at a
-	// seat's live attempt with no live dissent_ledger row.
+	// seat's live attempt with no live dissent_ledger row, on a NON-TERMINAL run
+	// (the forward-write hole only matters where a seat can still be recovered).
 	incompleteProblems, incompleteRecords := doctorDissentLedgerCompleteness(ctx, runner, repositoryID)
 	problems = append(problems, incompleteProblems...)
 	records = append(records, incompleteRecords...)
@@ -531,6 +532,15 @@ func gateEverHadAdvisoryGuardBlocker(ctx context.Context, runner any, repository
 // verdict at a seat's live attempt that has NO live dissent_ledger row at that
 // seat+attempt — the forward-write hole. Skipped when the dissent_ledger table is
 // absent (a daemon behind migration 0032).
+//
+// Scoped to NON-TERMINAL runs. The hole only matters because "a recovered/
+// transferred seat could read this dissent as absent" — and seat recovery/transfer
+// (the seatHasLiveDissent consumer in barrier_quorum.go) only fires while a run is
+// being driven. A terminal run (completed/failed/canceled/compromised) will never
+// recover or transfer a seat, so a missing ledger row there is inert provenance,
+// not a live forward-write hole; flagging it produced a permanent red on historical
+// runs that predate migration 0032 (the dissent_ledger feature). Mirrors the
+// live-run scoping the sibling quorum/lock-wait checks already use.
 func doctorDissentLedgerCompleteness(ctx context.Context, runner any, repositoryID string) ([]string, []map[string]any) {
 	problems := []string{}
 	records := []map[string]any{}
@@ -542,7 +552,10 @@ func doctorDissentLedgerCompleteness(ctx context.Context, runner any, repository
 		  FROM striatumd.verdicts v
 		  JOIN striatumd.jobs j
 		    ON j.repository_id = v.repository_id AND j.job_id = v.job_id
+		  JOIN striatumd.runs r
+		    ON r.repository_id = v.repository_id AND r.run_id = v.run_id
 		 WHERE v.repository_id = $1
+		   AND r.state NOT IN ('completed','failed','canceled','compromised')
 		   AND v.verdict IN ('needs_revision','reject')
 		   AND v.superseded_by_decision_id IS NULL
 		   AND j.attempt = (
