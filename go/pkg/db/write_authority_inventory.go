@@ -111,11 +111,17 @@ var writeAuthorityInventory = map[string]WriteAuthorityClass{
 	// terminal / run.stop. Live authorization state, direct runtime DML — like
 	// leases/sessions, not an append-only provenance surface.
 	"spawn_authorization_grants": ClassRuntimeDML,
-	"trajectory_segments":        ClassRuntimeDML,
-	"verdicts":                   ClassRuntimeDML,
-	"work_packets":               ClassRuntimeDML,
-	"workflow_accepted_risks":    ClassRuntimeDML,
-	"workflow_snapshots":         ClassRuntimeDML,
+	// supervisor_buffered_packets (#456 / FMA-006, migration 0038): the durable
+	// buffer for no-reader supervised_push packets. The delivery path INSERTs a
+	// buffered packet, the reader-attach replay DELETEs the drained rows, and a
+	// post-restart hydrate SELECTs them — live coordination state, direct runtime
+	// DML, not an append-only provenance surface.
+	"supervisor_buffered_packets": ClassRuntimeDML,
+	"trajectory_segments":         ClassRuntimeDML,
+	"verdicts":                    ClassRuntimeDML,
+	"work_packets":                ClassRuntimeDML,
+	"workflow_accepted_risks":     ClassRuntimeDML,
+	"workflow_snapshots":          ClassRuntimeDML,
 }
 
 // ClassifyTable returns the write-authority classification of a striatumd.*

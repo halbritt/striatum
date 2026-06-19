@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/rpc"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type supervisorPipeNoReaderDeliveryError struct {
@@ -64,6 +67,14 @@ func writeSupervisorPayload(ctx context.Context, runner db.TxRunner, repositoryI
 	if stdinDelivery == stdinDeliveryOneShotEOF && metadata["stdin_delivery_consumed"] == true {
 		return supervisorDeliveryResult{}, rpc.NewError("invalid_transition", "one-shot supervisor stdin has already been consumed", nil)
 	}
+	// #456 (FMA-006): a no-reader write buffers the payload in the process-global
+	// in-memory pipeBuffers, which a daemon restart drops. Before every delivery
+	// attempt, re-hydrate the in-memory queue for this pipe from the durable store
+	// so any packet buffered by a prior (now-restarted) daemon is re-queued and the
+	// reader-attach flush inside writeToPipe replays it the moment a reader exists.
+	if err := hydratePipeBufferFromStore(ctx, runner, repositoryID, supervisorID, pipePath); err != nil {
+		return supervisorDeliveryResult{}, err
+	}
 	bytesWritten, buffered, err := writeToPipe(ctx, pipePath, payload)
 	if err != nil {
 		if errors.Is(err, errSupervisorPipeNoReader) {
@@ -74,6 +85,19 @@ func writeSupervisorPayload(ctx context.Context, runner db.TxRunner, repositoryI
 			}
 		}
 		return supervisorDeliveryResult{}, err
+	}
+	// #456: keep the durable store in lockstep with the in-memory queue. A buffered
+	// write persists the payload so it survives a restart; a non-buffered write means
+	// a reader drained the whole queue (writeToPipe flushes PopAll() on a successful
+	// open), so the persisted rows for this pipe are now delivered and can be cleared.
+	if buffered {
+		if err := persistBufferedPacket(ctx, runner, repositoryID, supervisorID, pipePath, payload); err != nil {
+			return supervisorDeliveryResult{}, err
+		}
+	} else {
+		if err := clearBufferedPackets(ctx, runner, repositoryID, supervisorID, pipePath); err != nil {
+			return supervisorDeliveryResult{}, err
+		}
 	}
 	closed := stdinDelivery == stdinDeliveryOneShotEOF
 	// A buffered (no-reader) write was not flushed to the FIFO; do not consume a
@@ -106,7 +130,7 @@ func (b *NamedPipeBuffer) Push(payload []byte) error {
 	if b.degraded {
 		return fmt.Errorf("buffer is degraded")
 	}
-	if len(b.queue) >= 10 {
+	if len(b.queue) >= supervisorBufferedPacketCap {
 		b.degraded = true
 		return fmt.Errorf("buffer overflow, degraded")
 	}
@@ -128,6 +152,27 @@ func (b *NamedPipeBuffer) IsDegraded() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.degraded
+}
+
+// SeedIfEmpty repopulates the queue from the durable store ONLY when the
+// in-memory queue is currently empty (the post-restart case). When the queue
+// already holds packets it is the live mirror of the store, so seeding is a
+// no-op — this avoids double-queueing the same packet within one process while
+// still replaying packets a prior daemon buffered before it restarted. It is a
+// no-op on a degraded buffer (overflowed); a degraded buffer already refuses
+// delivery, and the operator must re-send. Returns true when it seeded.
+func (b *NamedPipeBuffer) SeedIfEmpty(packets [][]byte) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.degraded || len(b.queue) > 0 || len(packets) == 0 {
+		return false
+	}
+	for _, pkt := range packets {
+		cp := make([]byte, len(pkt))
+		copy(cp, pkt)
+		b.queue = append(b.queue, cp)
+	}
+	return true
 }
 
 var (
@@ -259,4 +304,114 @@ func metadataStdinDelivery(metadata map[string]any) string {
 		return value
 	}
 	return stdinDeliveryPersistentFIFO
+}
+
+// supervisorBufferedPacketCap bounds how many no-reader packets the durable store
+// retains per pipe. It matches the in-memory NamedPipeBuffer cap (Push degrades at
+// 10) so the durable store never accumulates unbounded: once the cap is reached the
+// in-memory buffer is degraded and refuses further delivery (the operator must
+// re-send), and persistBufferedPacket likewise refuses to grow the durable store
+// past the cap.
+const supervisorBufferedPacketCap = 10
+
+// isUndefinedTableErr reports whether err is a PostgreSQL undefined_table (42P01).
+// The #456 durable buffer is degrade-safe: a daemon deployed BEHIND the 0038
+// migration has no supervisor_buffered_packets table, so the persist / hydrate /
+// clear helpers swallow the missing-table error and fall back to the pre-#456
+// in-memory-only behavior rather than failing the delivery.
+func isUndefinedTableErr(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+// hydratePipeBufferFromStore reloads any durably-buffered packets for this pipe
+// into the in-memory NamedPipeBuffer, but only when that buffer is empty (the
+// post-restart case). The reader-attach flush inside writeToPipe then replays the
+// re-queued packets to the FIFO the moment a reader is present.
+func hydratePipeBufferFromStore(ctx context.Context, runner db.TxRunner, repositoryID, supervisorID, pipePath string) error {
+	q, ok := runner.(queryer)
+	if !ok {
+		return nil
+	}
+	buf := getPipeBuffer(pipePath)
+	if buf.IsDegraded() {
+		return nil
+	}
+	rows, err := q.Query(ctx, `
+SELECT payload
+  FROM striatumd.supervisor_buffered_packets
+ WHERE repository_id = $1 AND supervisor_id = $2 AND pipe_path = $3
+ ORDER BY seq ASC`, repositoryID, supervisorID, pipePath)
+	if err != nil {
+		if isUndefinedTableErr(err) {
+			return nil
+		}
+		return err
+	}
+	defer rows.Close()
+	packets := [][]byte{}
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return err
+		}
+		packets = append(packets, payload)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	buf.SeedIfEmpty(packets)
+	return nil
+}
+
+// persistBufferedPacket durably records a no-reader packet so it survives a daemon
+// restart, keyed by (repository_id, supervisor_id, pipe_path) plus a monotone seq.
+// It is bounded to supervisorBufferedPacketCap rows per pipe — past the cap it is a
+// no-op (the in-memory buffer is already degraded at that depth, so nothing more is
+// deliverable until the operator re-sends).
+func persistBufferedPacket(ctx context.Context, runner db.TxRunner, repositoryID, supervisorID, pipePath string, payload []byte) error {
+	count, err := runner.QueryScalar(ctx, `
+SELECT count(*)
+  FROM striatumd.supervisor_buffered_packets
+ WHERE repository_id = $1 AND supervisor_id = $2 AND pipe_path = $3`, repositoryID, supervisorID, pipePath)
+	if err != nil {
+		if isUndefinedTableErr(err) {
+			return nil
+		}
+		return err
+	}
+	if n, _ := strconv.Atoi(strings.TrimSpace(count)); n >= supervisorBufferedPacketCap {
+		return nil
+	}
+	if err := runner.Exec(ctx, `
+INSERT INTO striatumd.supervisor_buffered_packets
+  (repository_id, supervisor_id, pipe_path, seq, payload)
+VALUES (
+  $1, $2, $3,
+  COALESCE((SELECT max(seq) FROM striatumd.supervisor_buffered_packets
+             WHERE repository_id = $1 AND supervisor_id = $2 AND pipe_path = $3), 0) + 1,
+  $4
+)`, repositoryID, supervisorID, pipePath, payload); err != nil {
+		if isUndefinedTableErr(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// clearBufferedPackets removes the durable rows for a pipe after a reader has
+// drained the in-memory queue (a non-buffered write means writeToPipe flushed
+// every queued packet to an attached reader), so a later restart does not replay
+// already-delivered packets.
+func clearBufferedPackets(ctx context.Context, runner db.TxRunner, repositoryID, supervisorID, pipePath string) error {
+	if err := runner.Exec(ctx, `
+DELETE FROM striatumd.supervisor_buffered_packets
+ WHERE repository_id = $1 AND supervisor_id = $2 AND pipe_path = $3`, repositoryID, supervisorID, pipePath); err != nil {
+		if isUndefinedTableErr(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

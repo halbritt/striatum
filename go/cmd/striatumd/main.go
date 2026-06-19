@@ -758,10 +758,18 @@ func startRecoveryScheduler(ctx context.Context, cancel context.CancelFunc, runn
 	}
 	interval := time.Duration(sweepIntervalSeconds * float64(time.Second))
 	go func() {
+		// Per-run sweep panics are converted to degraded-cursor errors inside the
+		// sweep loop (recovery/sweep.go runPerRunSweep), so one poison run no longer
+		// reaches here. This goroutine-level recover is a backstop for a panic in the
+		// outer scheduler machinery (top-level query, cursor upsert, scheduler loop):
+		// it logs loud + stack and cancels the daemon for a clean, controlled
+		// shutdown (systemd restart) instead of re-raising into an uncontrolled
+		// process crash. It does NOT re-raise (issue #451 / FMA-001).
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("recovery scheduler goroutine panic: panic=%v\n%s", r, debug.Stack())
-				panic(r)
+				log.Printf("recovery scheduler goroutine panic recovered; cancelling daemon for clean restart: panic=%v\n%s", r, debug.Stack())
+				cancel()
+				done <- fmt.Errorf("recovery scheduler goroutine panic recovered: %v", r)
 			}
 		}()
 		result, err := recoverypkg.RunScheduler(ctx, recoverypkg.SchedulerOptions{
@@ -798,6 +806,19 @@ func startAutoSpawnScheduler(ctx context.Context, cancel context.CancelFunc, run
 	done := make(chan error, 1)
 	interval := time.Duration(intervalSeconds * float64(time.Second))
 	go func() {
+		// Per-run spawn panics are converted to degraded-cursor errors inside the
+		// sweep loop (recovery/sweep.go runPerRunSweep). This goroutine-level recover
+		// is a backstop for a panic in the outer scheduler machinery: it logs loud +
+		// stack and cancels the daemon for a clean, controlled restart instead of an
+		// unhandled panic taking the single-writer process down (issue #451 /
+		// FMA-001 — the auto_spawn loop previously had NO recover at all).
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("auto_spawn scheduler goroutine panic recovered; cancelling daemon for clean restart: panic=%v\n%s", r, debug.Stack())
+				cancel()
+				done <- fmt.Errorf("auto_spawn scheduler goroutine panic recovered: %v", r)
+			}
+		}()
 		_, err := recoverypkg.RunScheduler(ctx, recoverypkg.SchedulerOptions{
 			Interval: interval,
 			SweepOnce: recoverypkg.AutoSpawnSweep{

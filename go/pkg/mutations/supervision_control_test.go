@@ -2890,11 +2890,22 @@ func (tx *superviseControlFakeTx) QueryRow(_ context.Context, sql string, args .
 	}
 }
 
-func (tx *superviseControlFakeTx) QueryScalar(context.Context, string, ...any) (string, error) {
+func (tx *superviseControlFakeTx) QueryScalar(_ context.Context, sql string, _ ...any) (string, error) {
+	if strings.Contains(sql, "FROM striatumd.supervisor_buffered_packets") {
+		// #456: the persisted-buffer depth check. Empty in this in-memory fake, so
+		// persistBufferedPacket may proceed to its (fake-recorded) INSERT.
+		return "0", nil
+	}
 	return "", errors.New("unexpected query scalar")
 }
 
 func (tx *superviseControlFakeTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "FROM striatumd.supervisor_buffered_packets") {
+		// #456: the durable no-reader push buffer. This fake exercises the
+		// in-memory delivery path, so the durable store is empty (hydrate is a
+		// no-op) — return zero rows.
+		return runPrepareRowsFromMaps(nil), nil
+	}
 	if strings.Contains(sql, "SELECT run_id FROM striatumd.sessions") {
 		return runPrepareRowsFromMaps([]map[string]any{{"run_id": "run_1"}}), nil
 	}

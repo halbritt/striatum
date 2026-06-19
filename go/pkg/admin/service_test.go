@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -34,6 +33,16 @@ type fakeRunner struct {
 	execs   []string
 }
 
+// fakeTx is the transaction-scoped sibling of fakeRunner used by the admin
+// service test. It records statements executed inside the transaction and
+// publishes them to the parent's execs only on Commit — mirroring real
+// transactional visibility so that applyOne's atomicity (FMA-002) is
+// observable without a live PostgreSQL connection.
+type fakeTx struct {
+	parent *fakeRunner
+	execs  []string
+}
+
 func (f *fakeRunner) Exec(_ context.Context, sql string, _ ...any) error {
 	f.execs = append(f.execs, sql)
 	return nil
@@ -57,8 +66,33 @@ func (f *fakeRunner) QueryScalar(_ context.Context, sql string, _ ...any) (strin
 	return "", nil
 }
 
-func (f *fakeRunner) BeginTx(context.Context) (db.TxRunner, error) {
-	return nil, errors.New("fakeRunner does not support transactions")
+func (f *fakeRunner) BeginTx(_ context.Context) (db.TxRunner, error) {
+	return &fakeTx{parent: f}, nil
+}
+
+func (t *fakeTx) Exec(_ context.Context, sql string, _ ...any) error {
+	t.execs = append(t.execs, sql)
+	return nil
+}
+
+func (t *fakeTx) QueryRow(_ context.Context, sql string, _ ...any) db.Row {
+	return t.parent.QueryRow(context.Background(), sql)
+}
+
+func (t *fakeTx) QueryScalar(_ context.Context, sql string, _ ...any) (string, error) {
+	return t.parent.QueryScalar(context.Background(), sql)
+}
+
+func (t *fakeTx) Commit(_ context.Context) error {
+	// Publish the transaction's statements to the parent only on commit, so
+	// fakeRunner.execs reflects durably-applied SQL — matching real transactional
+	// semantics and allowing the migrate test to observe substrate_version stamps.
+	t.parent.execs = append(t.parent.execs, t.execs...)
+	return nil
+}
+
+func (t *fakeTx) Rollback(_ context.Context) error {
+	return nil
 }
 
 func TestRegisterInstallsDaemonMigrate(t *testing.T) {
