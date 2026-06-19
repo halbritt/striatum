@@ -1,6 +1,6 @@
 # RFC 0141: Generatable verification_gate workflow shape
 
-Status: accepted (D238)
+Status: implemented (D239)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8
 
@@ -328,3 +328,50 @@ Per [`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design
   (committed intent) and *host-local fact* (observed pins), which is the general
   answer to "commit the policy, observe the bytes per host" the runner can reuse
   for other host-specific content-addressed resources.
+
+## Implementation (D239)
+
+Landed at the `experimental` tier. What shipped and how the Open Questions resolved:
+
+- **Pillar 1 — two-layer allowlist.** `go/pkg/verifier/intent.go`
+  (`striatum.verifier_allowlist_intent.v1`, hashless; `ParseIntent` rejects a stray
+  `binary_sha256` and requires `backs_claim` + `negative_control`), the pure
+  `JoinIntentPins` three-valued join + typed `Unpinned` sentinel, and
+  `go/pkg/verifier/attest.go` (`striatum.verifier_allowlist_attest.v1`, keyed by
+  id→sha). Verbs in `go/cmd/striatum/verifier.go`: `verifier pin --host-here`
+  (observes the sha in the lane; drift/overwrite-refusing) and `verifier attest`
+  (**refused inside a supervised lane** — `STRIATUM_SESSION_ID`/`STRIATUM_LANE_ID`
+  present — so the verified lane cannot bless its own pins).
+- **Pillar 2 — builtins.** `go/pkg/verifier/builtin.go`
+  (`builtin:go-test`/`go-vet`/`go-build`/`artifact-anchor-integrity`, self-pinned to
+  the striatum binary, `BuiltinID`+`StriatumVersion` sealed). The **HARD CAP** is
+  enforced at the daemon gate read (`EffectiveStatusFromReceipt` returns ASSERTED for
+  any `builtin_id` receipt regardless of strict posture + agreement) AND at lane-side
+  classification. The generator **refuses** a `gate_floor=verified` gate composed
+  only of builtins.
+- **Pillar 3 — cannot lie green.** UNFILLED: `verifier.EvaluateAllowlistTemplate`
+  (pure read, no execution) hard-blocks `workflow validate` (exit 8) and daemon
+  `run start` naming the entry + the literal `verifier pin --host-here` fix; it is
+  self-updating (pinning clears the block without regenerating). VACUOUS: a
+  mandatory `negative_control` runs FIRST and voids the receipt
+  (`negative_control_did_not_fail`) if the known-bad passes.
+- **Shape + catalog.** `verification_gate` registered in `workflowgenerate` at the
+  `experimental` tier (catalog-reconcile green), scaffolding a real `type: verify`
+  job → `claim_ledger` gate, the hashless intent template (in `forbidden_paths`), a
+  `.gitignore` for `allowlist.pins.*`, and role/prompt stubs.
+
+Resolved Open Questions: **default gate floor = ASSERTED** (runnable-and-honest out
+of the box; VERIFIED is the opt-in `gate_floor=verified` external road).
+**Attestation lives in a sidecar** (`allowlist.pins.<fp>.attest.json`, never a
+lane-writable path under the sanctioned authoring road). **`builtin+toolchain:*`
+NOT shipped** — external operator-allowlisted checks remain the only honest road to
+VERIFIED. **Mutation-of-paired-fixture negative-control rigor stays an opt-in**
+graduation bar (the basic known-bad control is mandatory).
+
+Graduation follow-ups (experimental → supported): **gate-side, daemon-authoritative
+attestation enforcement** so a forged sidecar cannot reach VERIFIED (the current
+verb-level operator-token gate is the experimental-tier boundary) — GH #482; doctor
+self-pin/pin-drift classes + version-skew resweep — GH #483; and an RFC 0105
+unattended-reliability fixture, after which the interim
+`examples/verification-gate-flow/` is regenerated or retired. D227 preserved: the
+daemon executes nothing; `evaluateRunClaimVerification` still shells out to nothing.
