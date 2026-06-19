@@ -1,6 +1,6 @@
 # RFC 0140: Attestation for honest long local work — separate "alive but tool-call-silent" from "wedged/dead" so a lane running tests or scanning a repo keeps its publishable byline, without weakening the dead/hijacked-lane forgery guard
 
-Status: proposed
+Status: implemented (D240, 2026-06-19 — #457, PR #486)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8-001
 Context:

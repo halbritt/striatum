@@ -309,7 +309,7 @@ no longer reachable via row deletes.
 
 | Phase | Scope | Schema / ownership |
 | --- | --- | --- |
-| **P0 — decide the policy knobs** | Pin the **granularity** and **retention horizon** (Open Questions 1 + 2) with the maintainer. These are product/operations calls that everything else depends on; nothing physical lands until they are pinned. | none (decision) |
+| **P0 — decide the policy knobs** ✅ **DONE (2026-06-19, D241)** | ~~Pin the granularity and retention horizon with the maintainer.~~ **Resolved: weekly granularity; `events` 3-month retention, `audit_log` infinite (partitioned-but-never-dropped); Q3=(a) sole-writer, Q4=sibling slices, Q5=generalize segment abstraction.** See "P0 RESOLVED" above. | none (decision) |
 | **P1 — chain-segment sealing for events** | Generalize the audit-segment "seal + boundary-hash + retention_state" model to the **event** chain (an `event_chain_segments` ledger or a shared segment abstraction), so an event partition can be sealed and proven-continuous before any drop. Land this **before** any partitioning, so retention has a chain-safe boundary from day one. | runtime table (no FK into owner `events`, integrity in Go, explicit GRANT) per D215 |
 | **P2 — the reshape + partitioned `events`** | Owner bundle 0016: events PK → `(repository_id, event_id, created_at)`; drop the `repo_event_chain_heads` SQL FK and move its RI into the `append_event_row` transaction (Go/SD-local); create the partitioned table, attach the legacy heap as the historical partition (backfill form A), re-validate `append_event_row` against the parent, capability-parity stamp. | **owner bundle 0016** |
 | **P3 — partitioned `audit_log`** | Owner bundle 0016 (same bundle or a sibling): audit PK → `(audit_id, ts)`, UNIQUE → `(row_hash, ts)`; align partition boundaries to `audit_segments`; re-validate `append_audit_row`; partition-DROP wired to segment `purged`/`retention_state`. | **owner bundle 0016** |
@@ -371,23 +371,49 @@ highest-risk owner DDL. P4 makes retention real; P5 cashes in the read-performan
 6. **Runtime-DDL guard stays green.** `TestFutureRuntimeMigrationsDoNotCarryOwnerDDL`
    confirms none of the reshape DDL leaked into a runtime migration.
 
-## Open Questions
+## P0 RESOLVED (2026-06-19, D241) — the policy knobs are pinned
 
-1. **Partition granularity — monthly?** Monthly range partitions are the natural default
-   (a handful of live partitions, a clean human-legible retention horizon, segment
-   boundaries that line up with operator reasoning). Weekly or daily give finer drop
-   granularity at the cost of more partitions (and more local indexes); quarterly fewer.
-   The right answer depends on event/audit *velocity* and the retention horizon (Q2) —
-   monthly is the recommended starting point, pinned in P0 before any DDL. **Policy
-   call for the maintainer.**
-2. **Retention horizon — how long before a partition is droppable?** There is no
-   retention policy today; the tables only grow. The horizon (e.g. keep N months of
-   `events`, M months of `audit_log` — they may differ, since `audit_log` is the
-   compliance/forensic record and may warrant a longer or *infinite* horizon while
-   `events` is operational) is a **product/operations decision**, not a technical one.
-   It also decides whether `audit_log` is partitioned-but-never-dropped (still wins the
-   VACUUM/read benefits) vs. partitioned-and-retained. **Policy call for the
-   maintainer.**
+The maintainer pinned Open Questions 1–5 against **measured prod velocity** (not the
+RFC's original lower-velocity assumption). Grounding read on `striatum_daemon`
+2026-06-19: `events` = 14.0M rows / 20 GB and `audit_log` = 17.3M rows / 8.8 GB, both
+accumulated over a **~5-week** span (2026-05-14 → 2026-06-19) — i.e. ~468k events/day
+and ~576k audit rows/day, **~14 GB/month combined and accelerating** (June daily rate
+~4× May's). The figures reframed Q1: a *monthly* chunk at this velocity is ~9 GB
+(events) / ~5 GB (audit) — as large as the entire current table — which barely improves
+the per-chunk VACUUM story, so the RFC's reflexive "monthly default" was overridden.
+
+- **Q1 granularity → WEEKLY.** ~3.3M rows/~2.0 GB per `events` chunk, ~4.0M/~1.2 GB per
+  `audit_log` chunk, ~52 chunks/yr/table. Even per-chunk VACUUM and tight (1-week) drop
+  resolution at the measured rate.
+- **Q2 retention horizon → `events` 3 months (drop older), `audit_log` ∞ (never drop).**
+  `events` is operational telemetry whose debugging value decays in weeks; capping it at
+  ~3 months bounds it near ~27 GB steady-state. `audit_log` is the forensic/compliance
+  record: **partitioned-but-never-dropped** — it still wins the VACUUM/read benefits, but
+  the retention executor (P4) never carves it. (P4's `events` sweep is the only DROP path
+  that goes live; the `audit_log` DROP path stays disabled-by-policy until/unless a future
+  decision sets a finite audit horizon.)
+- **Q3 narrowed uniqueness → (a)** accept the SD-function-is-sole-writer invariant as
+  sufficient, documented explicitly; no per-partition/BRIN guard, no constraint-trigger.
+- **Q4 bundle layout → sibling slices within the owner-bundle line:** land `events` first,
+  let it prove the pattern, then `audit_log` on its own verified cutover.
+- **Q5 segment abstraction → generalize** the `audit_segments` seal/boundary-hash model
+  into a shared chain-segment abstraction reused by `events` (P1), rather than minting a
+  divergent parallel table.
+
+P1+ implementation stays **ready-for-human** (the P2/P3 owner-DDL reshape is the
+highest-risk slice and must land on a deliberate owner-bundle cutover). **Owner-bundle
+numbers in P2–P4 below say `0016`; that number is now TAKEN (the latest owner bundle on
+`main` is `0019`). Use the next free owner-bundle number at implementation time** (re-fetch
+before claiming — same renumber discipline as D236/D239).
+
+## Open Questions (resolved — see "P0 RESOLVED" above)
+
+1. ~~**Partition granularity — monthly?**~~ **RESOLVED → weekly** (D241). The original
+   monthly default assumed lower velocity; measured ~0.5M rows/day/table makes a monthly
+   chunk ≈ the whole current table, so weekly is the grounded pick.
+2. ~~**Retention horizon — how long before a partition is droppable?**~~ **RESOLVED →
+   `events` 3 months / `audit_log` infinite** (D241). `events` operational (bounded ~27 GB);
+   `audit_log` the forensic record, partitioned-but-never-dropped.
 3. **Re-assert the narrowed uniqueness, or rely on the sole-writer invariant?** After the
    reshape the DB no longer enforces `event_id`-unique-per-repo or globally-unique
    `row_hash`. Options: (a) accept the SD-function-is-sole-writer invariant as sufficient

@@ -1,6 +1,6 @@
 # RFC 0139: Supervisor reconcile/heartbeat loop write-amplification — stop the indexed-`state` churn and per-pass timestamp bumps from bloating `process_supervisor_pointers`
 
-Status: proposed
+Status: implemented (D240, 2026-06-19 — #421, PR #489; migration 0040 + owner bundle 0019)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8-001
 Context:

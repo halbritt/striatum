@@ -1,6 +1,6 @@
 # RFC 0138: A finite terminal-gap recovery exit for a STRICT fan-in barrier with a permanently-unrecoverable required seat — the missing analog of the quorum abstention budget, without silently forging completeness
 
-Status: proposed
+Status: implemented (D240, 2026-06-19 — #453, PR #488; migration 0039)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8-001
 Context:

@@ -4,6 +4,17 @@
 
 ### Added
 
+- **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
+  `collaboration_ledger` contract gains the residual adjudication shape deferred by
+  PR #432: a **Check-B correspondence rubric** (per-`challenge`
+  `landed_and_rebutted` / `landed_unrebutted` / `not_material`; a clearing verdict
+  requires ≥1 `landed_and_rebutted` and no `landed_unrebutted`), **v1.1 per-entry
+  fields** (`correspondence`, `coverage`) plus top-level `adjudicators[]` /
+  `adjudication_mode`, and a **second-adjudicator-on-disagreement gate**
+  (`adjudication_mode: second_on_disagreement` requires ≥2 distinct adjudicators for
+  a clearing verdict; a contested clear → `needs_revision`). Additive and enforced at
+  the publisher exit-6 front-matter contract — every existing v1/v1.1 ledger stays
+  valid.
 - **RFC 0141 (generatable `verification_gate` workflow shape) implemented at the
   `experimental` tier (D239, #473).** `striatum workflow generate --shape
   verification_gate` now scaffolds a real `type: verify` job → `claim_ledger` gate
@@ -63,6 +74,44 @@
 
 ### Fixed
 
+- **Actionable RFC-implementation wave (2026-06-19, D240).** Implements the
+  design-complete open issues from the post-audit handoff as direct runner-fix
+  PRs (one worktree-isolated agent each), graduating their RFCs
+  `proposed`→`implemented`:
+  - **barrier: a strict fan-in with a permanently-dead required seat now has a
+    finite terminal-gap exit instead of only parking in `needs_operator`
+    (#453, RFC 0138, PR #488).** Option A ships unconditionally — a sharper
+    `needs_operator` message and a new `strict_fanin_required_seat_unrecoverable`
+    doctor reason. Option B is opt-in per barrier (`fanin_tolerates_sealed_gap` /
+    `max_sealed_gaps`, sealed on the `fanin_freeze_points` record): a gap is
+    admitted **only** for a provably-dead required seat (reusing the quorum
+    `supervisedAgentConfirmedDead` oracle — no new liveness check), composed into
+    RFC 0135's `is_terminal_gap` predicate as a disjunct (no predicate fork), and
+    the degraded fire records `status=terminal_gap` + a `damage_code` in the join
+    manifest so a downstream gate can refuse a short join. Completeness is never
+    silently forged. Runtime migration `0039`.
+  - **daemon: the supervisor reconcile/heartbeat loop no longer write-amplifies
+    `process_supervisor_pointers` (#421, RFC 0139, PR #489).** A Go write-skip
+    coalesce floor (`STRIATUM_SUPERVISOR_HEARTBEAT_COALESCE`, ~30 s, computed from
+    the already-read row) skips redundant timestamp bumps in
+    `refreshSupervisorHeartbeat`/`refreshReportSupervisorHeartbeat`, and `state` is
+    dropped from the non-partial `idx_process_supervisor_pointers_run` so the common
+    intra-live transitions become HOT updates. The `#417` phantom-supervisor
+    stabilization (partial-unique `…_per_session` index, `state` column, reap
+    migration 0033) is untouched, and nothing is added inside the `lockRun`
+    advisory-lock transaction (#198/#355). Runtime migration `0040` + owner bundle
+    `0019` (transfers the three supervisor tables to `striatumd_rw` first, since
+    migration 0005 left them bootstrap-owned — apply `owner-ddl 0019` before the
+    daemon restart). Targets: ≥80 % fewer timestamp writes, new-page 20 %→≤5 %,
+    HOT→≥92 %.
+  - **attestation: a lane doing honest long tool-call-less local work keeps its
+    publishable byline (#457, RFC 0140, PR #486).** The agent loop now emits a
+    `work.heartbeat local_work=true` keepalive during long local work, and
+    `lanehealth.Classify` reclassifies a `wedged_no_tool_progress` stall on a
+    PID-alive, identity-matched lane as `alive_but_silent` (attestation preserved)
+    instead of an unconditional `Attested=false`. The byline-forgery guard
+    (RFC 0026/D080) is preserved — a confirmed-dead, hijacked, or no-PID-oracle
+    lane still loses attestation and is reaped.
 - **Failure-mode audit remediation + open-issue triage wave (2026-06-19, D236).**
   Resolves the SERIOUS/MINOR availability & liveness findings from the
   `STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md` audit (#451–#458) plus the
