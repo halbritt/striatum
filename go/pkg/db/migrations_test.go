@@ -89,6 +89,26 @@ func (r fakeRow) Scan(dest ...any) error {
 type fakeRunner struct {
 	scalars map[string]string
 	execs   []string
+	// txs records every transaction handed out via BeginTx, in order, so a test
+	// can inspect commit/rollback disposition and the statements each carried.
+	txs []*fakeTx
+	// failExecContaining, when non-empty, makes any tx Exec whose SQL contains
+	// this substring fail. It simulates a crash/error between the migration DDL
+	// and the version stamp and lets a test assert the whole transaction rolls
+	// back (FMA-002 atomicity).
+	failExecContaining string
+}
+
+// fakeTx is the transaction-scoped sibling of fakeRunner. It records the
+// statements executed inside the transaction and whether it was committed or
+// rolled back, so applyOne's atomicity is observable without a live PostgreSQL.
+// On commit it publishes its statements to the parent's execs; on rollback it
+// does not — mirroring real transactional visibility.
+type fakeTx struct {
+	parent     *fakeRunner
+	execs      []string
+	committed  bool
+	rolledBack bool
 }
 
 func (f *fakeRunner) Exec(_ context.Context, sql string, _ ...any) error {
@@ -115,7 +135,39 @@ func (f *fakeRunner) QueryScalar(_ context.Context, sql string, _ ...any) (strin
 }
 
 func (f *fakeRunner) BeginTx(_ context.Context) (TxRunner, error) {
-	return nil, errors.New("fakeRunner does not support transactions")
+	tx := &fakeTx{parent: f}
+	f.txs = append(f.txs, tx)
+	return tx, nil
+}
+
+func (t *fakeTx) Exec(_ context.Context, sql string, _ ...any) error {
+	if needle := t.parent.failExecContaining; needle != "" && strings.Contains(sql, needle) {
+		return errors.New("injected exec failure for: " + needle)
+	}
+	t.execs = append(t.execs, sql)
+	return nil
+}
+
+func (t *fakeTx) QueryRow(_ context.Context, sql string, _ ...any) Row {
+	return t.parent.QueryRow(context.Background(), sql)
+}
+
+func (t *fakeTx) QueryScalar(_ context.Context, sql string, _ ...any) (string, error) {
+	return t.parent.QueryScalar(context.Background(), sql)
+}
+
+func (t *fakeTx) Commit(_ context.Context) error {
+	t.committed = true
+	// Publish the transaction's statements to the parent only on commit, so
+	// fakeRunner.execs reflects durably-applied SQL (rolled-back work stays
+	// invisible), matching real transactional semantics.
+	t.parent.execs = append(t.parent.execs, t.execs...)
+	return nil
+}
+
+func (t *fakeTx) Rollback(_ context.Context) error {
+	t.rolledBack = true
+	return nil
 }
 
 func TestMigrationsAreOrdered(t *testing.T) {
@@ -732,6 +784,143 @@ func TestApplyMigrationsRecordsVersion(t *testing.T) {
 	joined := strings.Join(runner.execs, "\n")
 	if !strings.Contains(joined, "substrate_version") {
 		t.Fatalf("substrate version was not recorded")
+	}
+}
+
+// TestApplyOneIsTransactional (FMA-002) asserts that applyOne runs the migration
+// DDL and BOTH version stamps (schema_migrations + schema_meta.substrate_version)
+// inside ONE transaction that is committed exactly once. Before the fix these
+// were three separate autocommit Exec calls, so a crash between the DDL and the
+// stamps left the schema DDL-applied yet version-unstamped.
+func TestApplyOneIsTransactional(t *testing.T) {
+	runner := &fakeRunner{scalars: map[string]string{}}
+	migration := Migration{Version: 99, Label: "test atomic apply", SQL: "CREATE TABLE striatumd.fma002_probe (id int);"}
+
+	if err := applyOne(context.Background(), runner, migration, "test"); err != nil {
+		t.Fatalf("applyOne: %v", err)
+	}
+
+	if len(runner.txs) != 1 {
+		t.Fatalf("applyOne opened %d transactions, want exactly 1", len(runner.txs))
+	}
+	tx := runner.txs[0]
+	if !tx.committed {
+		t.Fatal("applyOne did not commit the transaction")
+	}
+	if tx.rolledBack {
+		t.Fatal("applyOne rolled back a successful transaction")
+	}
+	// The DDL and both stamps must all have run inside the single transaction —
+	// none of them leaked to an autocommit Exec on the pool. (The pool .execs
+	// only contains what the tx published on commit.)
+	joined := strings.Join(tx.execs, "\n")
+	for _, needle := range []string{
+		"fma002_probe", // the migration DDL
+		"INSERT INTO striatumd.schema_migrations", // the version stamp
+		"substrate_version",                       // the schema_meta stamp
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("transaction did not carry %q; statements=%q", needle, tx.execs)
+		}
+	}
+	if len(tx.execs) != 3 {
+		t.Fatalf("transaction carried %d statements, want exactly 3 (DDL + 2 stamps): %q", len(tx.execs), tx.execs)
+	}
+}
+
+// TestApplyOneRollsBackWhenStampFails (FMA-002) simulates a failure AFTER the
+// migration DDL but DURING the version stamp and asserts the whole transaction
+// is rolled back (nothing committed) and the error propagates. This is the
+// crash-between-DDL-and-stamp window: with the atomic wrap the DDL never lands
+// unless the version is also stamped, so a restart never re-runs a half-applied
+// migration.
+func TestApplyOneRollsBackWhenStampFails(t *testing.T) {
+	runner := &fakeRunner{
+		scalars:            map[string]string{},
+		failExecContaining: "INSERT INTO striatumd.schema_migrations",
+	}
+	migration := Migration{Version: 99, Label: "test rollback", SQL: "CREATE TABLE striatumd.fma002_probe (id int);"}
+
+	err := applyOne(context.Background(), runner, migration, "test")
+	if err == nil {
+		t.Fatal("applyOne should have failed when the version stamp errored")
+	}
+
+	if len(runner.txs) != 1 {
+		t.Fatalf("applyOne opened %d transactions, want exactly 1", len(runner.txs))
+	}
+	tx := runner.txs[0]
+	if tx.committed {
+		t.Fatal("applyOne committed a transaction whose stamp failed (FMA-002: half-applied schema)")
+	}
+	if !tx.rolledBack {
+		t.Fatal("applyOne did not roll back the failed transaction")
+	}
+	// Nothing reaches the durable pool execs because the tx never committed.
+	if joined := strings.Join(runner.execs, "\n"); strings.Contains(joined, "fma002_probe") {
+		t.Fatalf("rolled-back migration DDL leaked to the durable pool: %q", runner.execs)
+	}
+}
+
+// TestApplyOneVerifiesInProgressVersionHash (FMA-008) asserts that applyOne
+// verifies the recorded sha for exactly the version it is (re)applying — the
+// in-progress migration that the <= current verifyRecordedHash pass never
+// reaches because it is not yet <= current. If a pre-fix crashed deploy already
+// stamped a DIFFERENT sha for this version, the ON CONFLICT DO NOTHING insert
+// no-ops, so the in-tx hash check is what catches the drift and aborts the apply.
+func TestApplyOneVerifiesInProgressVersionHash(t *testing.T) {
+	migration := Migration{Version: 99, Label: "test hash verify", SQL: "CREATE TABLE striatumd.fma008_probe (id int);"}
+	runner := &fakeRunner{scalars: map[string]string{
+		// A stale sha already recorded for this version by a prior partial deploy.
+		"SELECT sha256 FROM striatumd.schema_migrations": "deadbeefstalehashthatdoesnotmatch",
+	}}
+
+	err := applyOne(context.Background(), runner, migration, "test")
+	if err == nil {
+		t.Fatal("applyOne should fail when the in-progress version's recorded hash mismatches")
+	}
+	if !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("expected hash mismatch error, got: %v", err)
+	}
+	if len(runner.txs) != 1 || runner.txs[0].committed {
+		t.Fatal("applyOne must not commit when the in-progress hash mismatches")
+	}
+	if !runner.txs[0].rolledBack {
+		t.Fatal("applyOne must roll back when the in-progress hash mismatches")
+	}
+}
+
+// TestRunnerMigrationsHaveNoNonTransactionalDDL guards the precondition that
+// makes applyOne's unconditional transaction wrap safe (FMA-002): the embedded
+// runner migrations (sql/*.sql) must contain NO DDL that cannot run inside a
+// transaction block. If a future runner migration introduces CREATE INDEX
+// CONCURRENTLY, ALTER TYPE ... ADD VALUE (in a multi-statement body), VACUUM,
+// REINDEX, or similar, this test fails loudly so applyOne is updated with an
+// explicit, hash-asserted fallback for the flagged migration rather than silently
+// dropping the whole runner's atomicity. (CONCURRENTLY is legitimately confined
+// to the separate owner-bundle path, sql/owner/*.sql, which this guard excludes.)
+func TestRunnerMigrationsHaveNoNonTransactionalDDL(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	// Patterns that PostgreSQL forbids inside an explicit transaction block.
+	nonTransactional := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bCREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY\b`),
+		regexp.MustCompile(`(?i)\bDROP\s+INDEX\s+CONCURRENTLY\b`),
+		regexp.MustCompile(`(?i)\bREINDEX\b.*\bCONCURRENTLY\b`),
+		regexp.MustCompile(`(?i)\bALTER\s+TYPE\b.*\bADD\s+VALUE\b`),
+		regexp.MustCompile(`(?i)\bVACUUM\b`),
+		regexp.MustCompile(`(?i)\bCREATE\s+DATABASE\b`),
+		regexp.MustCompile(`(?i)\bALTER\s+SYSTEM\b`),
+		regexp.MustCompile(`(?i)\bCREATE\s+TABLESPACE\b`),
+	}
+	for _, migration := range migrations {
+		for _, pattern := range nonTransactional {
+			if pattern.MatchString(migration.SQL) {
+				t.Fatalf("runner migration %d (%s) contains non-transactional DDL matching %q; applyOne wraps every migration in a single transaction, so this body cannot apply. Add an explicit hash-asserted fallback in applyOne for this migration before merging.", migration.Version, migration.Path, pattern.String())
+			}
+		}
 	}
 }
 
