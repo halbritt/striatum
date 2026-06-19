@@ -386,21 +386,49 @@ func verificationGateExtras(spec Spec) ([]map[string]any, error) {
 // The operator edits this file to sanction real external checks; the example row
 // is the template they replace.
 func verificationIntentTemplate(spec Spec) (string, error) {
+	checks, err := verificationChecks(spec)
+	if err != nil {
+		return "", err
+	}
+	external := externalChecks(checks)
+	var entries []verifier.IntentEntry
+	for _, id := range external {
+		// Sanction each operator-named external check so the generated intent ⋈ gate
+		// is coherent (the verify job references only sanctioned ids). argv /
+		// backs_claim / negative_control are TEMPLATE placeholders the operator
+		// replaces with the real command before pinning — the gate stays UNFILLED
+		// (hard-blocked) until then.
+		entries = append(entries, verifier.IntentEntry{
+			ID:         id,
+			Argv:       []string{id},
+			PassWhen:   "exit_zero",
+			BacksClaim: id + "-claim",
+			NegativeControl: &verifier.NegativeControl{
+				Argv:        []string{id, "--striatum-negative-control"},
+				Description: "TEMPLATE: a known-bad the check MUST fail on; replace with a one-line mutation of a paired passing fixture so it exercises the same code path.",
+			},
+			Description: "TEMPLATE: replace argv with the real command for '" + id + "', set backs_claim to the claim_ledger claim it substantiates, and give a discriminating negative control. Then `striatum verifier pin --host-here` (never hand-type a sha) and `striatum verifier attest`.",
+		})
+	}
+	if len(entries) == 0 {
+		// Builtins-only default: keep one illustrative example so the committed file
+		// teaches the external→VERIFIED road and always parses. It is NOT wired into
+		// the runnable builtin gate, so it never blocks the default.
+		entries = []verifier.IntentEntry{{
+			ID:         "example-external-lint",
+			Argv:       []string{"true"},
+			PassWhen:   "exit_zero",
+			BacksClaim: "example-claim",
+			NegativeControl: &verifier.NegativeControl{
+				Argv:        []string{"false"},
+				Description: "A known-bad invocation the check MUST fail on; replace it with a one-line mutation of a paired passing fixture so it exercises the same code path.",
+			},
+			Description: "TEMPLATE: replace with a real external check (argv), the claim_ledger claim id it backs, and a discriminating negative control. Pin its bytes with `striatum verifier pin --host-here` (never hand-type a sha). Builtin checks (builtin:go-test/vet/build) need no entry here.",
+		}}
+	}
 	file := verifier.AllowlistIntentFile{
 		SchemaVersion: verifier.AllowlistIntentSchemaVersion,
-		Checks: []verifier.IntentEntry{
-			{
-				ID:         "example-external-lint",
-				Argv:       []string{"true"},
-				PassWhen:   "exit_zero",
-				BacksClaim: "example-claim",
-				NegativeControl: &verifier.NegativeControl{
-					Argv:        []string{"false"},
-					Description: "A known-bad invocation the check MUST fail on; replace it with a one-line mutation of a paired passing fixture so it exercises the same code path.",
-				},
-				Description: "TEMPLATE: replace with a real external check (argv), the claim_ledger claim id it backs, and a discriminating negative control. Pin its bytes with `striatum verifier pin --host-here` (never hand-type a sha). Builtin checks (builtin:go-test/vet/build) need no entry here.",
-			},
-		},
+		Checks:        entries,
 	}
 	body, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
