@@ -98,11 +98,16 @@ var readAuthorityInventory = map[string]ReadAuthorityClass{
 	// (owner principal, run-as, capability envelope) the runtime role SELECTs to
 	// drive the auto_spawn scheduler — like leases/sessions/principal_clients.
 	"spawn_authorization_grants": ReadClassRuntimeSensitive,
-	"trajectory_segments":        ReadClassRuntimeSensitive,
-	"verdicts":                   ReadClassRuntimeSensitive,
-	"work_packets":               ReadClassRuntimeSensitive,
-	"workflow_accepted_risks":    ReadClassRuntimeSensitive,
-	"workflow_snapshots":         ReadClassRuntimeSensitive,
+	// supervisor_buffered_packets (#456 / FMA-006): holds buffered work-packet
+	// payloads (agent-facing prose) the runtime role SELECTs to replay a
+	// no-reader push delivery across a daemon restart — sensitive, like
+	// work_packets.
+	"supervisor_buffered_packets": ReadClassRuntimeSensitive,
+	"trajectory_segments":         ReadClassRuntimeSensitive,
+	"verdicts":                    ReadClassRuntimeSensitive,
+	"work_packets":                ReadClassRuntimeSensitive,
+	"workflow_accepted_risks":     ReadClassRuntimeSensitive,
+	"workflow_snapshots":          ReadClassRuntimeSensitive,
 
 	// Operational metadata and chain pointers. Still selected by the runtime
 	// role in the current broad posture; not a private-read-denial claim.

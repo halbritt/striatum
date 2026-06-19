@@ -156,7 +156,7 @@ func PlanLaunch(jobs []map[string]any, workflow map[string]any, sessions []map[s
 					Role:        StringValue(job["role_id"]),
 					Kind:        LaunchUnadvanceable,
 					State:       state,
-					Remediation: UnadvanceableRemediation(state),
+					Remediation: UnadvanceableRemediation(job),
 				})
 			}
 			continue
@@ -243,16 +243,31 @@ func UnadvanceableJobState(state string) bool {
 }
 
 // UnadvanceableRemediation returns the one-line, copy-pasteable hint naming the
-// recovery verb(s) that unstick a job in the given state. It is purely advisory
-// legibility — it changes no behavior and triggers no auto-recovery.
-func UnadvanceableRemediation(state string) string {
+// recovery verb(s) that unstick a job in the given unadvanceable state. It is
+// purely advisory legibility — it changes no behavior and triggers no
+// auto-recovery.
+//
+// For `blocked` jobs the hint branches on whether the job ever started (non-nil
+// started_at): a job that started means the lane finished but the artifact seal
+// failed (#389 path); a job that never started is still waiting on an upstream
+// dependency and must not claim a seal failure occurred.
+func UnadvanceableRemediation(job map[string]any) string {
+	state := StringValue(job["state"])
 	switch state {
 	case "blocked":
-		// The canonical #389 path: a transient publish/seal failure left the work
-		// done-and-durable on disk but the job `blocked`. `recovery reseal` moves
-		// it blocked -> queued on the same attempt; `recovery resolve-blocker`
-		// clears a dangling blocker that no completion path cleared.
-		return "job is blocked and cannot be driven; run `striatum recovery reseal --run-id <run> --job-id <job>` (lane finished but the seal failed) or `striatum recovery resolve-blocker <blocker-id>`"
+		if job["started_at"] != nil && job["started_at"] != "" {
+			// The canonical #389 path: a transient publish/seal failure left the
+			// work done-and-durable on disk but the job `blocked`. `recovery
+			// reseal` moves it blocked -> queued on the same attempt; `recovery
+			// resolve-blocker` clears a dangling blocker that no completion path
+			// cleared.
+			return "job is blocked and cannot be driven; run `striatum recovery reseal --run-id <run> --job-id <job>` (lane finished but the seal failed) or `striatum recovery resolve-blocker <blocker-id>`"
+		}
+		// The job has never started: it is waiting on an upstream dependency
+		// that has not yet completed. `recovery resolve-blocker` clears a
+		// dangling blocker; inspect with `striatum why` to identify the
+		// unsatisfied dependency.
+		return "job is blocked waiting on an upstream dependency; inspect with `striatum why` to identify the unsatisfied dependency or run `striatum recovery resolve-blocker <blocker-id>` if a blocker is dangling"
 	default:
 		return "job is " + state + " and cannot be driven; inspect with `striatum doctor` / `striatum why` and recover via the `striatum recovery` verbs"
 	}

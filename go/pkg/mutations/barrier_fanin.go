@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -650,8 +651,26 @@ func assembleFaninBarrier(ctx context.Context, runner db.TxRunner, repoRoot, rep
 		if edge.BaseDriftOnto != "" {
 			msg += fmt.Sprintf(" [recovered base drift: rebased onto evolved base %s]", edge.BaseDriftOnto)
 		}
-		cout, cexit, err := integrateGit(ctx, repoRoot,
-			"-c", "user.name=striatum-fanin", "-c", "user.email=fanin@striatum.local",
+		// Pin the assembly commit to a deterministic author/committer timestamp so
+		// crash-recovery re-assembly (assembleFaninBarrier called a second time from the
+		// same frozen contributions) produces the byte-identical commit — and therefore
+		// the identical commit SHA — as the original. Without this pin, git uses the
+		// wall clock, so the re-assembly commit has a different timestamp and a
+		// different SHA, causing the crash-recovery mismatch check in runBarrierAssembly
+		// to fire erroneously (flaky: TestBarrierAssemblyCrashMidAssemblyResumes, #447).
+		// The epoch "0 +0000" (1970-01-01T00:00:00 UTC) is a fixed well-known sentinel
+		// that is reproducible from persisted barrier state on BOTH the original and
+		// recovery paths (they both call this function with the same inputs).
+		deterministicDate := "@0 +0000"
+		assemblyEnv := append(os.Environ(),
+			"GIT_AUTHOR_NAME=striatum-fanin",
+			"GIT_AUTHOR_EMAIL=fanin@striatum.local",
+			"GIT_AUTHOR_DATE="+deterministicDate,
+			"GIT_COMMITTER_NAME=striatum-fanin",
+			"GIT_COMMITTER_EMAIL=fanin@striatum.local",
+			"GIT_COMMITTER_DATE="+deterministicDate,
+		)
+		cout, cexit, err := runGitWithEnv(ctx, repoRoot, assemblyEnv,
 			"commit-tree", newTree, "-p", tip, "-p", edge.CommitSHA, "-m", msg)
 		if err != nil {
 			return "", "", nil, err

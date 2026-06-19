@@ -183,8 +183,15 @@ func TestReconcilePredicateParityOnlyQueuedJobsDecide(t *testing.T) {
 // otherwise emit nothing and idle silently. PlanLaunch must surface it as a
 // LaunchUnadvanceable decision carrying the state and a remediation hint — a
 // visible "cannot advance" signal, never a silent skip.
+//
+// This sub-test covers the seal-failed variant (started_at set): the
+// remediation must name `recovery reseal`. A separate test (#446) covers the
+// dependency-blocked variant (no started_at).
 func TestPlanLaunchSurfacesBlockedJobAsUnadvanceable(t *testing.T) {
-	jobs := []map[string]any{job("design_codex", "designer", "codex", "blocked", 1)}
+	// started_at set → seal-failed path (#389): lane ran but seal failed.
+	sealFailedJob := job("design_codex", "designer", "codex", "blocked", 1)
+	sealFailedJob["started_at"] = "2026-01-01T00:00:00Z"
+	jobs := []map[string]any{sealFailedJob}
 	got := PlanLaunch(jobs, nil, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("decisions = %#v, want exactly one unadvanceable decision", shapes(got))
@@ -200,8 +207,81 @@ func TestPlanLaunchSurfacesBlockedJobAsUnadvanceable(t *testing.T) {
 		t.Fatalf("slot/role = %#v / %q, want design_codex / designer", d.Slot, d.Role)
 	}
 	if !strings.Contains(d.Remediation, "recovery reseal") {
-		t.Fatalf("remediation = %q, want it to name `recovery reseal`", d.Remediation)
+		t.Fatalf("remediation = %q, want it to name `recovery reseal` (seal-failed path)", d.Remediation)
 	}
+	if strings.Contains(d.Remediation, "upstream dependency") {
+		t.Fatalf("remediation = %q, must not claim dependency-blocked for a seal-failed job", d.Remediation)
+	}
+}
+
+// TestPlanLaunchDependencyBlockedDistinctFromSealFailed (#446): a `blocked` job
+// whose started_at is nil (never ran — waiting on upstream) must surface an
+// accurate dependency-blocked message, NOT a seal-failure claim.
+func TestPlanLaunchDependencyBlockedDistinctFromSealFailed(t *testing.T) {
+	// no started_at → dependency-blocked path (#446): upstream not yet done.
+	depBlockedJob := job("review_codex", "reviewer", "agy", "blocked", 1)
+	// started_at deliberately absent (nil in the map)
+	jobs := []map[string]any{depBlockedJob}
+	got := PlanLaunch(jobs, nil, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("decisions = %#v, want exactly one unadvanceable decision", shapes(got))
+	}
+	d := got[0]
+	if d.Kind != LaunchUnadvanceable {
+		t.Fatalf("kind = %v, want LaunchUnadvanceable; decision=%#v", d.Kind, d)
+	}
+	if d.State != "blocked" {
+		t.Fatalf("state = %q, want blocked", d.State)
+	}
+	// Must NOT claim the lane finished or a seal failed.
+	if strings.Contains(d.Remediation, "lane finished") {
+		t.Fatalf("remediation = %q, must not claim lane finished for dependency-blocked job", d.Remediation)
+	}
+	if strings.Contains(d.Remediation, "seal failed") {
+		t.Fatalf("remediation = %q, must not claim seal failure for dependency-blocked job", d.Remediation)
+	}
+	if !strings.Contains(d.Remediation, "upstream dependency") {
+		t.Fatalf("remediation = %q, want it to describe upstream dependency blocking", d.Remediation)
+	}
+}
+
+// TestUnadvanceableRemediationBothBlockedPaths (#446): unit-tests the
+// UnadvanceableRemediation helper for both the seal-failed and
+// dependency-blocked variants of a `blocked` job.
+func TestUnadvanceableRemediationBothBlockedPaths(t *testing.T) {
+	t.Run("seal_failed", func(t *testing.T) {
+		j := map[string]any{"state": "blocked", "started_at": "2026-01-01T00:00:00Z"}
+		msg := UnadvanceableRemediation(j)
+		if !strings.Contains(msg, "recovery reseal") {
+			t.Fatalf("seal-failed remediation = %q, want it to name `recovery reseal`", msg)
+		}
+		if strings.Contains(msg, "upstream dependency") {
+			t.Fatalf("seal-failed remediation = %q, must not mention upstream dependency", msg)
+		}
+	})
+	t.Run("dependency_blocked", func(t *testing.T) {
+		j := map[string]any{"state": "blocked"} // no started_at
+		msg := UnadvanceableRemediation(j)
+		if strings.Contains(msg, "lane finished") {
+			t.Fatalf("dep-blocked remediation = %q, must not claim lane finished", msg)
+		}
+		if strings.Contains(msg, "seal failed") {
+			t.Fatalf("dep-blocked remediation = %q, must not claim seal failed", msg)
+		}
+		if !strings.Contains(msg, "upstream dependency") {
+			t.Fatalf("dep-blocked remediation = %q, want it to describe upstream dependency", msg)
+		}
+	})
+	t.Run("dependency_blocked_explicit_nil", func(t *testing.T) {
+		j := map[string]any{"state": "blocked", "started_at": nil}
+		msg := UnadvanceableRemediation(j)
+		if strings.Contains(msg, "lane finished") || strings.Contains(msg, "seal failed") {
+			t.Fatalf("dep-blocked (nil started_at) remediation = %q, must not claim seal failure", msg)
+		}
+		if !strings.Contains(msg, "upstream dependency") {
+			t.Fatalf("dep-blocked (nil started_at) remediation = %q, want upstream dependency", msg)
+		}
+	})
 }
 
 // TestPlanLaunchBlockedAndQueuedTogether: a run with one blocked job and one

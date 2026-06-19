@@ -139,13 +139,17 @@ func TestRunDriveAdoptsExistingSessions(t *testing.T) {
 }
 
 // TestRunDriveSurfacesBlockedJobInsteadOfIdling (#389 gap 2): a run whose only
-// non-terminal job is `blocked` (a transient publish/seal failure left it stuck)
-// must produce a VISIBLE "cannot advance" action naming the remediation — not an
-// empty, silent reconcile. It must not launch or register anything.
+// non-terminal job is `blocked` with started_at set (a transient publish/seal
+// failure left it stuck after the lane completed work) must produce a VISIBLE
+// "cannot advance" action naming the seal-failure remediation — not an empty,
+// silent reconcile. It must not launch or register anything.
 func TestRunDriveSurfacesBlockedJobInsteadOfIdling(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeDrive()
-	fake.jobs = []map[string]any{job("job_design", "design_codex", "designer", "codex", "blocked", 1)}
+	// started_at is set: the lane ran and finished but the seal failed (#389).
+	sealFailedJob := job("job_design", "design_codex", "designer", "codex", "blocked", 1)
+	sealFailedJob["started_at"] = "2026-01-01T00:00:00Z"
+	fake.jobs = []map[string]any{sealFailedJob}
 	driver := testDriver(fake)
 
 	actions, _, terminal, err := driver.ReconcileOnce(ctx)
@@ -166,7 +170,10 @@ func TestRunDriveSurfacesBlockedJobInsteadOfIdling(t *testing.T) {
 		t.Fatalf("cannot_advance action = %#v, want design_codex / cannot_advance_blocked", signal)
 	}
 	if !strings.Contains(signal.Message, "recovery reseal") {
-		t.Fatalf("cannot_advance message = %q, want it to name `recovery reseal`", signal.Message)
+		t.Fatalf("cannot_advance message = %q, want it to name `recovery reseal` (seal-failed path)", signal.Message)
+	}
+	if strings.Contains(signal.Message, "upstream dependency") {
+		t.Fatalf("cannot_advance message = %q, must not claim dependency-blocked for a seal-failed job", signal.Message)
 	}
 	// The driver must NOT try to launch or register a blocked job.
 	if got := fake.count("session.register"); got != 0 {
@@ -183,6 +190,44 @@ func TestRunDriveSurfacesBlockedJobInsteadOfIdling(t *testing.T) {
 	driver.emit(signal)
 	if !strings.Contains(stderr.String(), "cannot advance design_codex") {
 		t.Fatalf("emit did not write the cannot-advance warning to stderr: %q", stderr.String())
+	}
+}
+
+// TestRunDriveSurfacesDependencyBlockedJobDistinctFromSealFailed (#446): a
+// `blocked` job whose started_at is nil (never started — waiting on an upstream
+// dependency) must NOT claim a seal failure in its cannot_advance message.
+func TestRunDriveSurfacesDependencyBlockedJobDistinctFromSealFailed(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeDrive()
+	// started_at is absent: the job is dependency-blocked, not seal-failed.
+	fake.jobs = []map[string]any{job("job_review", "review_agy", "reviewer", "agy", "blocked", 1)}
+	driver := testDriver(fake)
+
+	actions, _, terminal, err := driver.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if terminal {
+		t.Fatalf("a run with a dependency-blocked job is not terminal")
+	}
+	idx := actionIndex(actions, "cannot_advance")
+	if idx < 0 {
+		t.Fatalf("expected a 'cannot_advance' action for the dependency-blocked job, got %#v", actions)
+	}
+	signal := actions[idx]
+	if signal.WorkflowJobID != "review_agy" || signal.Result != "cannot_advance_blocked" {
+		t.Fatalf("cannot_advance action = %#v, want review_agy / cannot_advance_blocked", signal)
+	}
+	// Dependency-blocked message must NOT say "lane finished" or "seal failed".
+	if strings.Contains(signal.Message, "lane finished") {
+		t.Fatalf("cannot_advance message = %q, must not claim the lane finished for a dependency-blocked job", signal.Message)
+	}
+	if strings.Contains(signal.Message, "seal failed") {
+		t.Fatalf("cannot_advance message = %q, must not claim a seal failure for a dependency-blocked job", signal.Message)
+	}
+	// Must name the dependency-blocking context.
+	if !strings.Contains(signal.Message, "upstream dependency") {
+		t.Fatalf("cannot_advance message = %q, want it to describe upstream dependency blocking", signal.Message)
 	}
 }
 

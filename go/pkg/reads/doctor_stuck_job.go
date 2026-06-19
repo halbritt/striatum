@@ -148,6 +148,7 @@ func doctorStuckJobsNoLiveSession(ctx context.Context, runner db.Runner, reposit
 		jobID := stringFrom(row, "job_id")
 		runID := stringFrom(row, "run_id")
 		jobState := stringFrom(row, "job_state")
+		remediation := stuckJobRemediation(jobState, row["started_at"])
 		record := map[string]any{
 			"check":             "job_stuck_no_live_session",
 			"job_id":            jobID,
@@ -158,13 +159,13 @@ func doctorStuckJobsNoLiveSession(ctx context.Context, runner db.Runner, reposit
 			"job_state":         jobState,
 			"quiet_since":       quietSince.UTC().Format(time.RFC3339),
 			"threshold_seconds": int(doctorStuckJobNoLiveSessionAfter.Seconds()),
-			"remediation":       stuckJobRemediation(jobState),
+			"remediation":       remediation,
 		}
 		stuck = append(stuck, record)
 		records = append(records, record)
 		warnings = append(warnings, "job_stuck_no_live_session."+jobID+": job_state="+jobState+
 			" with no live session and no progress since "+record["quiet_since"].(string)+
-			"; "+stuckJobRemediation(jobState))
+			"; "+remediation)
 	}
 	block["stuck_count"] = len(stuck)
 	block["stuck_jobs"] = stuck
@@ -196,10 +197,23 @@ func stuckJobQuietSince(row map[string]any) (time.Time, bool) {
 }
 
 // stuckJobRemediation names the verb(s) that unstick a job in the given state.
-func stuckJobRemediation(jobState string) string {
+// startedAt is the job's started_at column value (nil or "" means the job never
+// started, i.e. it is dependency-blocked rather than seal-failed).
+func stuckJobRemediation(jobState string, startedAt any) string {
 	switch jobState {
 	case "blocked":
-		return "run `striatum recovery reseal --run-id <run> --job-id <job>` (lane finished but the seal failed) or `striatum recovery resolve-blocker <blocker-id>`"
+		if startedAt != nil && startedAt != "" {
+			// The job started (a lane claimed and ran it) but a transient
+			// publish/seal failure left it blocked. `recovery reseal` re-queues
+			// the same attempt; `recovery resolve-blocker` clears a dangling
+			// blocker that no completion path cleared.
+			return "run `striatum recovery reseal --run-id <run> --job-id <job>` (lane finished but the seal failed) or `striatum recovery resolve-blocker <blocker-id>`"
+		}
+		// The job has never started: it is blocked waiting on an upstream
+		// dependency, not because a seal failed. `recovery resolve-blocker`
+		// clears a dangling blocker; inspect with `striatum why` to identify
+		// the unsatisfied dependency.
+		return "job is blocked waiting on an upstream dependency; inspect with `striatum why` to identify the unsatisfied dependency or run `striatum recovery resolve-blocker <blocker-id>` if a blocker is dangling"
 	case "stale_lease":
 		return "run `striatum recovery requeue-stale` to reclaim the lease, or `striatum recovery complete-stalled --run-id <run> --job-id <job>` if the work is already durable"
 	default: // running / claimed
