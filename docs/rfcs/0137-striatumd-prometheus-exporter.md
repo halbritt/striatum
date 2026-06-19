@@ -9,6 +9,24 @@
 > branches: read-path source, an enforced cardinality/privacy contract, and a
 > failure-mode-shaped taxonomy.
 
+> **Revision — design-run hardening (2026-06-19).** This spec was driven through
+> a Striatum `falsification_gate` design run
+> (`run_04db6534e5590c81a7ad8c8a27b650da`). The adjudicator returned
+> `needs_revision` on two material, source-grounded findings, both since confirmed
+> against current `main` (and sealed by a `striatum verifier run`
+> `builtin:go-build` receipt, `seal_digest 8e9eeaf1…`): **(F-A8)** the
+> `doctor_problems{class}` label must be pinned to a *static* problem-code field —
+> the always-returned `problems` strings carry dynamic ids in their prefix
+> (`run_needs_operator.<run_id>`, `supervisor_liveness.<supervisor_id>`,
+> `recovery_sweep_cursor_latch_error.<run_id>`; `doctor.go:109/147/369`) — or A3
+> (value leak) and A5 (cardinality) break; and **(F-A6)** `liveness_deadline_missed`
+> is a *reversible* pre-death observation (`session.liveness_recovered` exists,
+> `recovery.go:1244`; `ProbeBasisDeadlineElapsedOnly`, `liveness.go:155`), not
+> necrosis, so it must not enter the apoptosis/necrosis conservation law. Both are
+> folded in below. Code anchors were also re-pinned to current source (the
+> earlier draft had drifted). The RFC remains **proposed**; this revision answers
+> the design gate, not an acceptance.
+
 ## Background
 
 `striatumd` is the daemon-owned authority for all live workflow state (RFC 0033
@@ -100,7 +118,7 @@ The exporter never queries PostgreSQL or takes a runner mutex at scrape time.
   `--sweep-interval-seconds 60`), reusing the rows that tick already scanned, and
   published with `.Store()` at the end of the tick.
 - `/metrics` mounts into the existing daemon HTTP handler
-  (`newDaemonHTTPHandler`, `go/cmd/striatumd/main.go:413`) next to
+  (`newDaemonHTTPHandler`, `go/cmd/striatumd/web_service.go:57`) next to
   `/v1/health`. The handler does exactly: `Load()` → render text → write. No PG
   round-trip, no shared mutex, so **N concurrent scrapers cost the same as
   one** and live on the `http.Server`'s own goroutines, lock-domain-disjoint
@@ -163,23 +181,39 @@ All families carry the low-cardinality `origin` enum
 | Family | Type | Key labels | Detects |
 | --- | --- | --- | --- |
 | `striatum_apoptosis_total` | counter | `origin`, `reason` (closed set: `run_completed`, `job_succeeded`, `lease_handoff`, `supervisor_drained`, `session_closed_clean`) | healthy programmed self-termination — never confused with damage |
-| `striatum_necrosis_total` | counter | `origin`, `reason` (`liveness_deadline_missed`, `agent_exited_unsealed`, `recovery_exhausted`, `worktree_lost`, `panic`) | uncontrolled death; any nonzero rate is directly alertable |
+| `striatum_necrosis_total` | counter | `origin`, `reason` (the **confirmed-dead** classes only: `agent_pid_dead`, `agent_exited_unsealed`, `recovery_exhausted`) | uncontrolled death; any nonzero rate is directly alertable. **F-A6:** `liveness_deadline_missed` is deliberately **excluded** — it is reversible (see the non-terminal liveness counter below) and would make the OQ2 conservation gauge fire on a recoverable stall |
 | `striatum_lease_transitions_total` | counter | `from`, `to`, `reason` | stale-lease storms, dead-agent-recovery thrash (`to="stale_lease"` rate; requeue/transfer reasons) |
 | `striatum_run_wedge_age_seconds` | histogram | `origin` | wedged runs (high `_bucket` tail = time since last job-state advance while non-terminal) |
 | `striatum_liveness_deadline_margin_seconds` | histogram | `origin` | distribution sliding toward zero forewarns liveness misses *before* they become necrosis |
-| `striatum_doctor_problems` | gauge | `class` (the seven known integrity classes) | a red `doctor` becomes a paging stop-and-fix alert, not a manual CLI run |
+| `striatum_liveness_deadline_events_total` | counter | `reason` (`deadline_missed`, `recovered`) | **F-A6:** the non-terminal home for `session.liveness_deadline_missed`/`session.liveness_recovered` (`recovery.go:1229/1244`). Outside the apoptosis/necrosis conservation law — a reversible stall moves these, never `necrosis_total` |
+| `striatum_doctor_problems` | gauge | `class` (**static** problem-code only — `problem_records[*].check`, never the dynamic-id `problems` prefix) | a red `doctor` becomes a paging stop-and-fix alert, not a manual CLI run |
 | `striatum_pg_pool_inuse` / `..._max`, `striatum_pg_query_seconds` | gauge / histogram | `query_class`, salted `repo` | PG-boundary saturation that localizes a saturating repo |
 
 The **apoptosis/necrosis split is the spine**: programmed self-termination and
 pathological death share the same terminal DB transition, so the distinction
 must be tagged *at the code site that ends the lifecycle* (the terminator
 declares intent and emits `apoptosis`; only the recovery/liveness paths that
-detect an unannounced exit emit `necrosis`). `origin` and `reason` are closed Go
-enums wired to existing source constants (necrosis reasons ↔
-`go/pkg/reads/escalation_resolve.go`; doctor classes ↔
-`go/pkg/reads/doctor_artifact_anchor.go`, `worktree_refs.go`) and pinned by a
-guardrail test asserting the metric label set equals the union of those
-source-of-truth constants.
+detect an unannounced exit emit `necrosis`).
+
+`origin`, the `apoptosis`/`necrosis` `reason` sets, and `recovery_class` are
+**new, CREATE-defined closed Go enums** — they do **not** exist as source
+constants today (the earlier draft's "wired to existing constants" claim was
+false; F-A6/anchor verification). The new enums are *anchored to* the real
+constants that do exist and pinned by a guardrail test:
+
+- **necrosis `reason`** is the union of the **confirmed-dead** stall classes —
+  `agent_pid_dead`, `agent_exited_unsealed` (`go/pkg/mutations/recovery_decision_tree.go`,
+  which explicitly separates these from the *reversible* `sessionliveness.*`
+  protocol stalls, ~line 146) plus the `recovery_exhausted` blocker kind
+  (`go/pkg/mutations/recovery_escalation.go`). The guardrail test asserts the
+  necrosis domain equals exactly that set, so a new stall class cannot silently
+  appear in (or `liveness_deadline_missed` re-enter) the necrosis label.
+- **doctor `class`** is the set of **static `problem_records[*].check` codes**
+  emitted by the `go/pkg/reads/doctor_*.go` checks — never the always-returned
+  `problems` prefix strings, which interpolate run/gate/supervisor ids
+  (`doctor.go:109/147/369`, `doctor_quorum.go`). The guardrail test seeds
+  adversarial run/gate ids and asserts no dynamic id ever reaches `class` and the
+  series count stays constant (see Acceptance Criteria).
 
 ### 4. Binding, auth, and consent
 
@@ -223,8 +257,10 @@ violated. Build the safety/contract harness **first** (TDD), then the taxonomy.
 - `Classification` taxonomy + `Register()` refusal of `Forbidden`.
 - Per-family series budget + `cardinality_clipped_total`.
 - Boot-time `metrics_allowlist.json` hash check (guardrail test + boot abort).
-- `doctor_problems{class}` gauge sourced from existing `reads/doctor_*` checks
-  on a bounded cadence (not on every scrape).
+- `doctor_problems{class}` gauge sourced from the **static
+  `problem_records[*].check` codes** of the existing `reads/doctor_*` checks
+  (never the dynamic-id `problems` prefix), on a bounded cadence (not on every
+  scrape). Ship `TestDoctorClassRejectsDynamicIdentifiers` (F-A8) in this phase.
 
 ### Phase D — multi-tenant hardening, consent, alert rules
 - Capability-scoped `/metrics` filtering by authorized repos.
@@ -245,6 +281,14 @@ violated. Build the safety/contract harness **first** (TDD), then the taxonomy.
   the boot-time allowlist hash matches the checked-in manifest.
 - Each family in §3 exists with closed-enum labels pinned to source constants by
   a guardrail test; cardinality cannot grow with the number of runs/jobs.
+- **`TestDoctorClassRejectsDynamicIdentifiers` (F-A8):** seeds quorum/recovery
+  failures with adversarial run/gate ids, scrapes `/metrics`, and asserts only
+  static `problem_records[*].check` codes appear as `class`, no dynamic id leaks,
+  and the series count stays constant.
+- **`TestLivenessMissCanRecoverWithoutNecrosis` (F-A6):** drives
+  `active → liveness_deadline_missed → liveness_recovered` and asserts
+  `striatum_liveness_deadline_events_total` moved, `striatum_necrosis_total` did
+  **not** increment, and the OQ2 lifecycle-balance gauge stayed zero.
 - A reconstructed #417-shaped fixture produces a visible `origin="supervisor"`
   ramp on the relevant families.
 
