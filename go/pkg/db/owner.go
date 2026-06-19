@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // LatestOwnerBundleVersion is the highest owner-DDL bundle the binary ships.
@@ -114,6 +117,17 @@ func OwnerBundleVersion(ctx context.Context, runner Runner) (int, error) {
 // that stamps owner_bundle_meta last, so a partially-applied bundle cannot
 // persist (atomic per version); re-applying a stamped version is a no-op. It
 // returns the versions applied this call and the resulting version.
+//
+// FMA-007 / GH #458 self-heal: the normal apply path skips any bundle whose
+// version is already stamped, so if an *earlier* bundle's objects went missing
+// (a credential/ownership skew or a hand-edited database) the later bundle that
+// depends on them fails on a missing cross-bundle object. When that happens this
+// re-applies *every* shipped bundle in ascending order once — each bundle is
+// idempotent DDL in its own transaction, so a missing earlier object is
+// re-created before the later bundle that needs it — and retries. Only if the
+// ordered reconciliation still cannot satisfy the dependency does it return a
+// legible, actionable error; the daemon stays fail-closed as the final safety
+// property. The reconciliation never creates objects outside the bundle DDL.
 func ApplyOwnerBundles(ctx context.Context, runner Runner, daemonVersion string) ([]int, int, error) {
 	if daemonVersion == "" {
 		daemonVersion = "dev"
@@ -126,18 +140,125 @@ func ApplyOwnerBundles(ctx context.Context, runner Runner, daemonVersion string)
 	if err != nil {
 		return nil, 0, err
 	}
+	applied, current, err := applyPendingOwnerBundles(ctx, runner, bundles, current, daemonVersion)
+	if err == nil {
+		return applied, current, nil
+	}
+	// A non-dependency failure (or a reconciliation already attempted) is
+	// returned as-is, fail-closed.
+	if !isCrossBundleDependencyError(err) {
+		return applied, current, err
+	}
+	// Ordered idempotent reconciliation: re-apply every shipped bundle so a
+	// missing earlier object is re-created before the later bundle depends on
+	// it. Each bundle is idempotent, so already-present objects are no-ops.
+	reapplied, reErr := ReapplyAllOwnerBundles(ctx, runner, bundles, daemonVersion)
+	if reErr != nil {
+		// Reconciliation could not heal the gap (e.g. the missing object is not
+		// produced by any earlier bundle, or the owner lacks the privilege to
+		// re-create it). Surface the actionable message; fail-closed.
+		return applied, current, reErr
+	}
+	// Reconciliation re-ran the full bundle set; recompute the resulting state
+	// and report every version it touched.
+	final, verErr := OwnerBundleVersion(ctx, runner)
+	if verErr != nil {
+		return reapplied, current, verErr
+	}
+	return reapplied, final, nil
+}
+
+// applyPendingOwnerBundles applies, in ascending order, each bundle newer than
+// current. A failure on a missing cross-bundle object is wrapped legibly so the
+// caller (and the operator) sees which bundle failed, which object is missing,
+// and the one-step remediation, instead of a raw `relation does not exist`.
+func applyPendingOwnerBundles(ctx context.Context, runner Runner, bundles []OwnerBundle, current int, daemonVersion string) ([]int, int, error) {
 	var applied []int
 	for _, bundle := range bundles {
 		if bundle.Version <= current {
 			continue
 		}
 		if err := applyOneOwnerBundle(ctx, runner, bundle, daemonVersion); err != nil {
-			return applied, current, fmt.Errorf("apply owner bundle %d (%s): %w", bundle.Version, bundle.Label, err)
+			return applied, current, wrapOwnerBundleApplyError(bundle, err)
 		}
 		applied = append(applied, bundle.Version)
 		current = bundle.Version
 	}
 	return applied, current, nil
+}
+
+// ReapplyAllOwnerBundles re-applies every shipped owner bundle in ascending
+// numeric order, regardless of the recorded version. Each bundle is idempotent
+// DDL applied in its own transaction (so an already-present object is a no-op
+// and the stamp INSERT is ON CONFLICT DO NOTHING), which makes this the
+// ordered self-heal for a database whose earlier-bundle objects went missing
+// (FMA-007 / GH #458): a missing object is re-created by its owning bundle
+// before any later bundle depends on it. It returns the versions it (re)ran.
+// A failure is wrapped with the same legible remediation as the normal path.
+func ReapplyAllOwnerBundles(ctx context.Context, runner Runner, bundles []OwnerBundle, daemonVersion string) ([]int, error) {
+	if daemonVersion == "" {
+		daemonVersion = "dev"
+	}
+	if bundles == nil {
+		loaded, err := OwnerBundles()
+		if err != nil {
+			return nil, err
+		}
+		bundles = loaded
+	}
+	var ran []int
+	for _, bundle := range bundles {
+		if err := applyOneOwnerBundle(ctx, runner, bundle, daemonVersion); err != nil {
+			return ran, wrapOwnerBundleApplyError(bundle, err)
+		}
+		ran = append(ran, bundle.Version)
+	}
+	return ran, nil
+}
+
+// crossBundleDependencySQLStates are the PostgreSQL undefined-object codes a
+// bundle raises when an object an earlier bundle should have created is absent:
+// undefined_table (relation does not exist), undefined_column, undefined_function,
+// and the generic undefined_object. These are the FMA-007 cross-bundle failures.
+var crossBundleDependencySQLStates = map[string]struct{}{
+	"42P01": {}, // undefined_table
+	"42703": {}, // undefined_column
+	"42883": {}, // undefined_function
+	"42704": {}, // undefined_object
+}
+
+// isCrossBundleDependencyError reports whether err is a missing-object failure
+// of the kind a re-applied later bundle raises when an earlier bundle's object
+// is gone (the FMA-007 self-heal trigger).
+func isCrossBundleDependencyError(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	_, ok := crossBundleDependencySQLStates[pgErr.Code]
+	return ok
+}
+
+// wrapOwnerBundleApplyError annotates a bundle-apply failure. For a missing
+// cross-bundle object it produces an actionable message naming the failing
+// bundle, the missing object, and the one-step remediation; other errors keep
+// the existing wrapping so unrelated failures stay legible too.
+func wrapOwnerBundleApplyError(bundle OwnerBundle, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if _, ok := crossBundleDependencySQLStates[pgErr.Code]; ok {
+			missing := strings.TrimSpace(pgErr.Message)
+			if missing == "" {
+				missing = "an object an earlier owner bundle should have created"
+			}
+			return fmt.Errorf(
+				"apply owner bundle %d (%s): missing cross-bundle dependency (%s: %s); "+
+					"re-run `striatum daemon owner-ddl apply` to re-create the earlier bundle's objects in order, "+
+					"and if it still fails restore the missing object as the database owner: %w",
+				bundle.Version, bundle.Label, pgErr.Code, missing, err)
+		}
+	}
+	return fmt.Errorf("apply owner bundle %d (%s): %w", bundle.Version, bundle.Label, err)
 }
 
 // capabilityProtectedTable maps each SD-append capability stamp to the table

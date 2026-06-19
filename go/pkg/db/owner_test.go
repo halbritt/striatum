@@ -1,11 +1,86 @@
 package db
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/halbritt/striatum/go/pkg/sessionliveness"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// TestIsCrossBundleDependencyError covers the FMA-007 (#458) trigger detection:
+// a missing-object SQLSTATE a re-applied later bundle raises when an earlier
+// bundle's object is gone is recognized; an unrelated error (or a non-pg error)
+// is not, so the ordered self-heal only fires on the dependency class.
+func TestIsCrossBundleDependencyError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"undefined_table", &pgconn.PgError{Code: "42P01", Message: `relation "striatumd.schema_authority" does not exist`}, true},
+		{"undefined_column", &pgconn.PgError{Code: "42703", Message: `column "x" does not exist`}, true},
+		{"undefined_function", &pgconn.PgError{Code: "42883", Message: `function striatumd.foo() does not exist`}, true},
+		{"undefined_object", &pgconn.PgError{Code: "42704", Message: `type "x" does not exist`}, true},
+		{"wrapped_undefined_table", fmt.Errorf("apply: %w", &pgconn.PgError{Code: "42P01", Message: "relation does not exist"}), true},
+		{"insufficient_privilege", &pgconn.PgError{Code: "42501", Message: "permission denied"}, false},
+		{"unique_violation", &pgconn.PgError{Code: "23505", Message: "duplicate key"}, false},
+		{"non_pg_error", errors.New("boom"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCrossBundleDependencyError(tc.err); got != tc.want {
+				t.Fatalf("isCrossBundleDependencyError(%v) = %v; want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWrapOwnerBundleApplyErrorIsLegible covers FMA-007 (#458): a missing
+// cross-bundle object produces an actionable message naming the failing bundle,
+// the missing object, and the one-step remediation — not a raw, opaque
+// `relation does not exist`. The original error is preserved for errors.As, so
+// the auto-reconcile trigger still recognizes it. An unrelated error keeps the
+// existing wrapping.
+func TestWrapOwnerBundleApplyErrorIsLegible(t *testing.T) {
+	bundle := OwnerBundle{Version: 2, Label: "runtime read grant"}
+
+	missing := &pgconn.PgError{Code: "42P01", Message: `relation "striatumd.schema_authority" does not exist`}
+	wrapped := wrapOwnerBundleApplyError(bundle, missing)
+	for _, needle := range []string{
+		"owner bundle 2 (runtime read grant)",
+		"missing cross-bundle dependency",
+		"42P01",
+		"striatumd.schema_authority",
+		"striatum daemon owner-ddl apply",
+		"database owner",
+	} {
+		if !strings.Contains(wrapped.Error(), needle) {
+			t.Fatalf("legible error missing %q; got: %s", needle, wrapped.Error())
+		}
+	}
+	// errors.As must still reach the original pg error so the self-heal trigger
+	// and any caller-side classification keep working.
+	var pgErr *pgconn.PgError
+	if !errors.As(wrapped, &pgErr) || pgErr.Code != "42P01" {
+		t.Fatalf("wrapped error lost the underlying pg error: %v", wrapped)
+	}
+	if !isCrossBundleDependencyError(wrapped) {
+		t.Fatal("wrapped legible error must still classify as a cross-bundle dependency error")
+	}
+
+	// A non-dependency error keeps the plain wrapping (no remediation noise).
+	other := wrapOwnerBundleApplyError(bundle, errors.New("connection reset"))
+	if !strings.Contains(other.Error(), "apply owner bundle 2 (runtime read grant)") {
+		t.Fatalf("non-dependency error lost its bundle context: %s", other.Error())
+	}
+	if strings.Contains(other.Error(), "missing cross-bundle dependency") {
+		t.Fatalf("non-dependency error must not carry the cross-bundle remediation: %s", other.Error())
+	}
+}
 
 func TestOwnerBundleSevenAddsArtifactPlacement(t *testing.T) {
 	bundles, err := OwnerBundles()
