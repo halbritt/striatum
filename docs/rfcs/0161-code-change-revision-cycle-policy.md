@@ -1,6 +1,6 @@
 # RFC 0161: code_change revision-cycle policy (cycle width + in-loop author rebuttal)
 
-Status: proposed (revised 2026-06-20; rebuttal alternative added; ratification pending)
+Status: accepted (D253; cheapest-first + bounded concession-only rebuttal alt; default cycles unchanged)
 Date: 2026-06-20
 author: proposer-claude-opus-4-8
 

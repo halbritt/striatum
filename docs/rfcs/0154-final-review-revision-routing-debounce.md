@@ -1,6 +1,6 @@
 # RFC 0154: Debounce multi-reviewer final-review fan-in before revision-cycle routing — should a single `needs_revision` route to author while sibling final reviewers are still in flight?
 
-Status: proposed (revised 2026-06-20; RFC_REVIEW findings addressed; ratification pending)
+Status: accepted (D250; option B -- opt-in, default-preserving final-review debounce)
 Date: 2026-06-20
 author: triager-claude-opus-4-8-001
 

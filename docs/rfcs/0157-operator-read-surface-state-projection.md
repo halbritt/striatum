@@ -1,6 +1,6 @@
 # RFC 0157: Canonical run/job state projection across operator read surfaces
 
-Status: proposed (revised 2026-06-20; option pinned; ratification pending)
+Status: accepted (D251; additive state_projection on run.summary/dashboard/status + dashboard top-level state)
 Date: 2026-06-20
 author: author-claude-opus-4.8-001
 Affected issue: GH #481 (enhancement, needs-triage)

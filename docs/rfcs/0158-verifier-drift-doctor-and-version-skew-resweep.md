@@ -1,6 +1,6 @@
 # RFC 0158: Verifier self-pin / pin-drift doctor classes and version-skew resweep
 
-Status: proposed (revised 2026-06-20; idea-3 premise corrected; ratification pending)
+Status: accepted (D252; ship self-pin-drift slices 1+2; verified_stale re-justified and gated)
 Date: 2026-06-20
 author: proposer-claude-opus-4-8
 
