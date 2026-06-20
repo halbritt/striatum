@@ -42,17 +42,46 @@ const (
 // history hits are memoized by (root|ref|path|sha), and the curated
 // acknowledged-loss baseline is loaded once per repo root.
 type artifactAnchorPass struct {
-	defaultRefByRoot map[string]string
-	historyByKey     map[string]bool
-	ackByRoot        map[string]acknowledgedLossSet
+	defaultRefByRoot      map[string]string
+	localDefaultRefByRoot map[string]string
+	historyByKey          map[string]bool
+	ackByRoot             map[string]acknowledgedLossSet
 }
 
 func newArtifactAnchorPass() *artifactAnchorPass {
 	return &artifactAnchorPass{
-		defaultRefByRoot: map[string]string{},
-		historyByKey:     map[string]bool{},
-		ackByRoot:        map[string]acknowledgedLossSet{},
+		defaultRefByRoot:      map[string]string{},
+		localDefaultRefByRoot: map[string]string{},
+		historyByKey:          map[string]bool{},
+		ackByRoot:             map[string]acknowledgedLossSet{},
 	}
+}
+
+// defaultRefs returns the default-branch refs the anchor checks should consult
+// for a repo root: the primary (remote-preferred) ref from
+// resolveDefaultRefCached, plus — when it differs — the LOCAL default branch
+// (refs/heads/main) that `run integrate` advances. Probing both lets a
+// locally-integrated-but-unpushed deliverable clear (#504) instead of staying an
+// ok-reddening hash mismatch until the run is pushed to origin. Both lookups are
+// memoized per repo root; empties and duplicates are dropped.
+func (p *artifactAnchorPass) defaultRefs(ctx context.Context, repoRoot, primary string) []string {
+	refs := []string{}
+	if strings.TrimSpace(primary) != "" {
+		refs = appendUniqueString(refs, primary)
+	}
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return refs
+	}
+	local, ok := p.localDefaultRefByRoot[repoRoot]
+	if !ok {
+		local = readGitLocalDefaultBranchRef(ctx, repoRoot)
+		p.localDefaultRefByRoot[repoRoot] = local
+	}
+	if strings.TrimSpace(local) != "" {
+		refs = appendUniqueString(refs, local)
+	}
+	return refs
 }
 
 // ackSet loads (and memoizes) the curated acknowledged-loss baseline for a repo
@@ -191,7 +220,7 @@ func checkBlobExhaustArtifact(ctx context.Context, row map[string]any, bucket, d
 		// durable ref, the default-branch tip, or (D205 Rule A) anywhere in
 		// default-branch history, downgrade to a legacy warning; only genuine loss
 		// (content absent everywhere) stays an ok-reddening problem.
-		if artifactContentPreserved(ctx, row, defaultRef, pass.historyByKey) {
+		if artifactContentPreserved(ctx, row, defaultRef, pass) {
 			warning, record := artifactWarning(artifactLegacyUnverifiable, row, "blob_key_absent_predates_blob_storage", defaultRef)
 			return "", nil, warning, record
 		}
@@ -201,11 +230,16 @@ func checkBlobExhaustArtifact(ctx context.Context, row map[string]any, bucket, d
 		}
 		repoRoot := strings.TrimSpace(stringFrom(row, "repo_root"))
 		repoPath, pathOK := cleanArtifactAnchorPath(stringFrom(row, "repo_path"))
-		// D205 Rule B: the deliverable path is still live on the default-branch tip
-		// (only the recorded draft sha is unverifiable) -> superseded warning.
-		if pathOK && defaultRef != "" && pathExistsOnRef(ctx, repoRoot, defaultRef, repoPath) {
-			warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_content_sha_unverifiable_path_live_on_default", defaultRef)
-			return "", nil, warning, record
+		// D205 Rule B (+#504): the deliverable path is still live on a default-branch
+		// tip — primary (remote) OR the local default branch `run integrate` advances
+		// — and only the recorded draft sha is unverifiable -> superseded warning.
+		if pathOK {
+			for _, ref := range pass.defaultRefs(ctx, repoRoot, defaultRef) {
+				if pathExistsOnRef(ctx, repoRoot, ref, repoPath) {
+					warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_content_sha_unverifiable_path_live_on_default", ref)
+					return "", nil, warning, record
+				}
+			}
 		}
 		// D205 Rule C: a curated, sha-bound acknowledged immaterial loss -> warning.
 		if entry, ok := pass.ackSet(repoRoot).honor(stringFrom(row, "artifact_id"), expected); ok {
@@ -303,22 +337,32 @@ func checkArtifactAnchor(ctx context.Context, row map[string]any, defaultRef str
 	}
 	row["checked_refs"] = checkedRefs
 
+	// #504: consult BOTH the primary (remote-preferred) default ref AND the local
+	// default branch that `run integrate` advances, so a locally-integrated but
+	// not-yet-pushed deliverable clears the same way a pushed one does instead of
+	// staying an ok-reddening hash mismatch until the run reaches origin.
+	defaultRefList := pass.defaultRefs(ctx, repoRoot, defaultRef)
+
 	// Legibility rule 1 (D-doctor-integrity-legibility): content that matches the
-	// artifact's content_sha256 at the default-branch tip is durably preserved
+	// artifact's content_sha256 at a default-branch tip is durably preserved
 	// (the run branch was merged then deleted). That is not loss, so it is clean —
 	// not even a warning, since there is nothing for the operator to anchor.
-	if defaultRef != "" && artifactContentMatchesRef(ctx, repoRoot, defaultRef, repoPath, expected) {
-		return "", nil, "", nil
+	for _, ref := range defaultRefList {
+		if artifactContentMatchesRef(ctx, repoRoot, ref, repoPath, expected) {
+			return "", nil, "", nil
+		}
 	}
 
 	// D205 Rule A: content that matches the artifact's content_sha256 at ANY
-	// reachable revision of the default branch (not only its tip) is durably
+	// reachable revision of a default branch (not only its tip) is durably
 	// preserved — the deliverable was merged, then the path was later deleted or
 	// rewritten. The recorded content still has a durable home in history, so this
 	// is clean, like a tip match. Must run before the hash_mismatch verdict so a
 	// merged-then-edited path is recovered rather than flagged.
-	if defaultRef != "" && artifactContentInDefaultRefHistory(ctx, repoRoot, defaultRef, repoPath, expected, pass.historyByKey) {
-		return "", nil, "", nil
+	for _, ref := range defaultRefList {
+		if artifactContentInDefaultRefHistory(ctx, repoRoot, ref, repoPath, expected, pass.historyByKey) {
+			return "", nil, "", nil
+		}
 	}
 
 	// Legibility rule 2: a finding from an abandoned (terminal-debris) run is
@@ -332,13 +376,15 @@ func checkArtifactAnchor(ctx context.Context, row map[string]any, defaultRef str
 		return "", nil, warning, record
 	}
 
-	// D205 Rule B: the deliverable's repo_path is still live on the default-branch
+	// D205 Rule B: the deliverable's repo_path is still live on a default-branch
 	// tip (in any content). The deliverable landed at that path; only the recorded
 	// draft content_sha256 is unverifiable (the lane draft was revised before
 	// merge). That is not an active durability gap -> warning, not a problem.
-	if defaultRef != "" && pathExistsOnRef(ctx, repoRoot, defaultRef, repoPath) {
-		warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_draft_sha_unverifiable_path_live_on_default", defaultRef)
-		return "", nil, warning, record
+	for _, ref := range defaultRefList {
+		if pathExistsOnRef(ctx, repoRoot, ref, repoPath) {
+			warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_draft_sha_unverifiable_path_live_on_default", ref)
+			return "", nil, warning, record
+		}
 	}
 
 	// D205 Rule C: a genuinely lost artifact (path absent from the default branch,
@@ -363,16 +409,20 @@ func checkArtifactAnchor(ctx context.Context, row map[string]any, defaultRef str
 // at the default-branch tip, or (D205 Rule A) at any reachable revision of the
 // default branch's history. It degrades safely: a missing repo root, path, sha,
 // or ref is treated as "not preserved here".
-func artifactContentPreserved(ctx context.Context, row map[string]any, defaultRef string, historyCache map[string]bool) bool {
+func artifactContentPreserved(ctx context.Context, row map[string]any, defaultRef string, pass *artifactAnchorPass) bool {
 	repoRoot := strings.TrimSpace(stringFrom(row, "repo_root"))
 	repoPath, ok := cleanArtifactAnchorPath(stringFrom(row, "repo_path"))
 	expected := strings.TrimSpace(stringFrom(row, "content_sha256"))
 	if repoRoot == "" || !ok || expected == "" {
 		return false
 	}
+	// #504: probe both default refs (remote-preferred primary + the local default
+	// branch `run integrate` advances) so a locally-integrated legacy artifact is
+	// recognized as preserved before the run is pushed to origin.
+	defaultRefList := pass.defaultRefs(ctx, repoRoot, defaultRef)
 	refs := durableWorktreeProbeRefs(ctx, repoRoot, row)
-	if defaultRef != "" {
-		refs = appendUniqueString(refs, defaultRef)
+	for _, ref := range defaultRefList {
+		refs = appendUniqueString(refs, ref)
 	}
 	if artifactContentMatchesAnyRef(ctx, repoRoot, repoPath, expected, refs) {
 		return true
@@ -380,7 +430,12 @@ func artifactContentPreserved(ctx context.Context, row map[string]any, defaultRe
 	// Rule A: also consult default-branch history, not only ref tips, so a
 	// legacy artifact merged then deleted/rewritten is still recognized as
 	// preserved (legacy warning) rather than reported as missing metadata.
-	return defaultRef != "" && artifactContentInDefaultRefHistory(ctx, repoRoot, defaultRef, repoPath, expected, historyCache)
+	for _, ref := range defaultRefList {
+		if artifactContentInDefaultRefHistory(ctx, repoRoot, ref, repoPath, expected, pass.historyByKey) {
+			return true
+		}
+	}
+	return false
 }
 
 // artifactContentInDefaultRefHistory reports whether expectedSHA equals the

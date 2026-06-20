@@ -34,8 +34,20 @@ func HandleWhy(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (ma
 	if err != nil {
 		return nil, err
 	}
+	// #477: a needs_operator run's "what do I do" surface must be non-empty.
+	// Project the open blockers reachable from this target (run/job/session/
+	// blocker id) into actionable entries that name the blocker_id, the
+	// escalation_id, and the literal resolve command, so `why <run_id>` answers
+	// the question instead of returning only the events that happen to ILIKE-match.
+	blockers, err := targetBlockerActions(ctx, runner, repositoryID, targetID)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"target_id": targetID,
-		"events":    events,
+		"target_id":       targetID,
+		"events":          events,
+		"active_blockers": blockers,
+		// alias kept so callers reading either key see the same actionable list.
+		"blockers": blockers,
 	}, nil
 }
