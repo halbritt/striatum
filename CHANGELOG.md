@@ -127,6 +127,17 @@
 
 ### Changed
 
+- **Docs/grooming (D245, RSA-007 currency pass): RFC 0061/0062/0069/0070
+  re-statused to `implemented (residual: optional polish)`.** Their load-bearing
+  daemon/web/service boundary has shipped (daemon-first web routes + `/v1/invoke`,
+  the real escalation inbox, PG-only daemon-global surfaces, the daemon-client
+  boundary); the recorded `partially`/`mostly implemented` statuses understated
+  delivered work. The promote was gated on a verifying grep for any live
+  registry/Python fallback in error paths, which came back clean (no `CLI_ROUTES`
+  identifier, no Python runtime tree — retired under RFC 0078, only parity-comment
+  and token/wake-timeout `fallback` mentions). RFC headers, the
+  `docs/rfcs/README.md` index, and the decision log updated; each named remainder
+  is kept documented as optional polish. Docs-only.
 - **RFC 0134 (executable verification gate + claim status-provenance) graduated to
   `implemented` (D237).** Both build halves were already on `main` under D227's
   validate-not-execute accepted form (the daemon NEVER executes a check; the

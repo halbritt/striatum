@@ -1,7 +1,12 @@
 # RFC 0062: Real Escalation Inbox
 
 ## Status
-Implemented core projection; blocker payload hardening remains follow-up
+implemented (residual: optional polish) — the load-bearing escalation inbox
+shipped (D130): `escalation.list`/`show`/`resolve`, `striatum inbox`, the typed
+`striatumd.escalation_inbox` table, the `striatum.escalation.v1` artifact schema,
+and artifact linkage. D130 closed the artifact-only-creation question link-only.
+The residual is optional schema strictness (tighter blocker-payload shape for
+escalation-class blockers). Currency-promoted in D245 (2026-06-20, RSA-007).
 
 ## Summary
 Escalations now have daemon-backed projection routes and an operator inbox:
@@ -24,7 +29,8 @@ creation question as link-only: publishing an escalation artifact may link to
 an existing escalation-class blocker, but it does not synthesize blocker rows
 or escalation inbox rows.
 
-Remaining work is narrower schema hardening: tighten the blocker payload
-shape for escalation-class blockers, and consider a dedicated create/update
-method only if future product work needs direct escalation creation outside
-the existing blocker lifecycle. The typed table itself is no longer missing.
+The only residual is optional polish — narrower schema strictness: tighten
+the blocker payload shape for escalation-class blockers, and consider a
+dedicated create/update method only if future product work needs direct
+escalation creation outside the existing blocker lifecycle. The typed table
+itself is no longer missing, and the load-bearing inbox has shipped.

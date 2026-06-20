@@ -1,6 +1,6 @@
 # RFC 0069: PostgreSQL-Only Daemon Global Surfaces
 
-Status: partially implemented
+Status: implemented (residual: optional polish) — PG-backed daemon-global reads/sweeps are in place (startup bootstrap, health, audit, doctor, `dashboard.all`, Go `status`, daemon MCP resources, the Go resident recovery scheduler) and the SQLite registry is fail-closed; the residual is the optional Open-Question polish below (generating registry-probe/diagnostic paths from the method contract). Currency-promoted in D245 (2026-06-20, RSA-007) after a verifying grep found no live registry/Python fallback in error paths.
 Date: 2026-05-17
 Context: [RFC 0043](0043-postgres-as-sole-substrate-and-daemon-required-runtime.md), [RFC 0059](../records/_frozen/rfcs/0059-eradicate-legacy-sqlite-fallbacks.md), [RFC 0060](0060-single-daemon-method-contract-source.md), [RFC 0068](0068-go-production-daemon-port.md), [REMEDIATION_SYNTHESIS_2026-05-17](../architecture/REMEDIATION_SYNTHESIS_2026-05-17.md)
 
@@ -16,7 +16,9 @@ Known surfaces included daemon startup bootstrap, `dashboard.all`, the Python
 daemon lifecycle helpers, daemon health, and daemon audit/doctor probes.
 Startup bootstrap, dashboard-all subset, daemon MCP resources,
 PostgreSQL-backed daemon lifecycle/health/audit/doctor reads, and the Go
-resident recovery scheduler have landed; residual work is tracked below.
+resident recovery scheduler have landed. The load-bearing PG-only daemon-global
+surface has shipped; the only residual is optional polish (the Open Question
+below on generating registry-probe/diagnostic paths from the method contract).
 
 ## Goals
 

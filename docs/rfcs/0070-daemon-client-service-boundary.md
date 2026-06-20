@@ -1,24 +1,25 @@
 # RFC 0070: Daemon Client and Service Boundary Completion
 
-Status: mostly implemented
+Status: implemented (residual: optional polish) — the load-bearing daemon-client/service boundary shipped: daemon-side `repo.resolve`, `/v1/invoke` daemon routing for mapped reads/mutations, local API/MCP CLI-alias quarantine, and dogfood-composite disposition. The named remainder (legacy Python CLI/web/service cleanup) is resolved by the RFC 0078 Python-runtime retirement; only optional legacy-fixture polish remains. Currency-promoted in D245 (2026-06-20, RSA-007) after a verifying grep found no live `CLI_ROUTES`/registry/Python fallback in error paths.
 Date: 2026-05-17
 Context: [RFC 0030](0030-daemon-rpc-server-and-version-skew-protocol.md), [RFC 0040](0040-mcp-driven-dogfood-harness.md), [RFC 0061](0061-daemon-first-web-service.md), [RFC 0068](0068-go-production-daemon-port.md), [RFC 0069](0069-pg-only-daemon-global-surfaces.md)
 
 Successor note:
-[`RFC 0078`](0078-go-only-runtime-and-python-removal.md), if accepted and
-completed, supersedes this RFC's non-goal of keeping the Python CLI outside
-the removal scope. Until then, this RFC remains the live daemon-client
-boundary: clients must not become alternate live-state authorities, and the
-remaining Python CLI/web/service surfaces are RFC 0078 cutover blockers rather
-than accepted long-term architecture.
+[`RFC 0078`](0078-go-only-runtime-and-python-removal.md) has been accepted and
+completed, so it now supersedes this RFC's non-goal of keeping the Python CLI
+outside the removal scope: the Python CLI/web/service surfaces this RFC tracked
+as cutover blockers have been removed. The durable rule this RFC established
+still holds — clients must not become alternate live-state authorities.
 
 ## Problem
 
-The CLI and web service are mostly daemon clients. Repo resolution, daemon
-mapped `/v1/invoke` paths, and local stdio MCP alias disabling have landed.
-Remaining work is mostly legacy composite/tooling cleanup: clients should not
-gain new PostgreSQL topology knowledge, and old local authoring/test surfaces
-must stay clearly outside live workflow authority.
+The CLI and web service are daemon clients. Repo resolution, daemon-mapped
+`/v1/invoke` paths, and local stdio MCP alias disabling have landed. The
+load-bearing boundary has shipped; the only residual is optional legacy
+composite/tooling polish, and the Python-surface cleanup it called for is
+resolved by the RFC 0078 retirement. The durable invariant remains: clients
+must not gain PostgreSQL topology knowledge, and local authoring/test surfaces
+stay clearly outside live workflow authority.
 
 ## Goals
 
