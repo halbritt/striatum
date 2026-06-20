@@ -104,6 +104,71 @@ func runtimeMigrationOwnerDDLViolations(migration Migration, runtimeOwned map[st
 	return violations
 }
 
+// runtimeMigrationOwnerFKPattern matches an inbound foreign-key reference to a
+// striatumd.* table, in either the inline-column form
+// (`... REFERENCES striatumd.<table>`) or the table-constraint form
+// (`FOREIGN KEY (...) REFERENCES striatumd.<table>`). Both spellings contain the
+// `REFERENCES striatumd.<table>` token, so one pattern captures the FK target.
+var runtimeMigrationOwnerFKPattern = regexp.MustCompile(`(?is)\bREFERENCES\s+(striatumd\.[a-z_][a-z0-9_]*)`)
+
+// runtimeMigrationCreateTablePattern captures every striatumd.* table a single
+// migration CREATEs; a brand-new runtime table is striatumd_rw-owned at create
+// time on a two-role deploy, so a foreign key into it (including a
+// self-reference) is legitimately runtime-applyable.
+var runtimeMigrationCreateTablePattern = regexp.MustCompile(`(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(striatumd\.[a-z_][a-z0-9_]*)`)
+
+// sqlLineCommentPattern strips `-- …` to end-of-line so comment prose (every
+// above-floor runtime migration documents "NO foreign key into the owner-held …"
+// in a comment) is never mistaken for real FK DDL. The runtime migration SQL set
+// uses only `--` line comments — there are no `/* … */` block comments — so this
+// is sufficient.
+var sqlLineCommentPattern = regexp.MustCompile(`(?m)--.*$`)
+
+// runtimeMigrationOwnerFKViolations is the GENERIC complement to the owner-DDL
+// guard (issue #508): for a runtime migration it returns every inbound foreign
+// key whose target table is NOT runtime-owned — i.e. an FK into an owner-held
+// table. On a two-role production deploy (RFC 0110 / D215) runtime migrations are
+// applied as striatumd_rw, which has no REFERENCES privilege on owner-held
+// tables, so such an FK fails with `permission denied for table <owner table>`
+// (SQLSTATE 42501) at migrate time and crash-loops the daemon (the migration 0041
+// / D242 incident, fixed for that instance in D248 / #507; pgtest's single-role
+// DB masked it).
+//
+// The owner-held determination is DERIVED from the same authoritative ownership
+// split the owner-DDL guard uses: a table is runtime-owned only when an owner
+// bundle has transferred its ownership to striatumd_rw (runtimeOwned), or when
+// THIS migration itself CREATEs it (a fresh runtime-role-owned table). Anything
+// else a runtime migration references is owner-held — so this guard needs no
+// hand-maintained per-migration `forbidden` list (the hole 0041 fell through),
+// and the whole class is impossible to reintroduce above the floor.
+func runtimeMigrationOwnerFKViolations(migration Migration, runtimeOwned map[string]bool) []string {
+	body := sqlLineCommentPattern.ReplaceAllString(migration.SQL, "")
+
+	createdHere := map[string]bool{}
+	for _, match := range runtimeMigrationCreateTablePattern.FindAllStringSubmatch(body, -1) {
+		createdHere[strings.ToLower(match[1])] = true
+	}
+
+	violations := make([]string, 0)
+	seen := map[string]bool{}
+	for _, match := range runtimeMigrationOwnerFKPattern.FindAllStringSubmatch(body, -1) {
+		target := strings.ToLower(match[1])
+		if runtimeOwned[target] || createdHere[target] {
+			// A runtime-owned table (owner-bundle-transferred) or one created by
+			// this same migration: striatumd_rw owns it, so an inbound FK applies
+			// cleanly under the runtime role.
+			continue
+		}
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		violations = append(violations, "REFERENCES "+target)
+	}
+	sort.Strings(violations)
+	return violations
+}
+
 type fakeRow struct {
 	value string
 	err   error
@@ -720,6 +785,106 @@ func TestFutureRuntimeMigrationsDoNotCarryOwnerDDL(t *testing.T) {
 		}
 		if violations := runtimeMigrationOwnerDDLViolations(migration, runtimeOwned); len(violations) > 0 {
 			t.Fatalf("migration %d carries owner-table DDL forbidden in regular runtime migrations: %v", migration.Version, violations)
+		}
+	}
+}
+
+// TestFutureRuntimeMigrationsDoNotFKOwnerHeldTables is the GENERIC build guard
+// for issue #508: NO above-floor runtime migration may declare a foreign key into
+// an owner-held table. It replaces the per-migration hand-written
+// `REFERENCES striatumd.<owner table>` forbidden lists (whose hole let migration
+// 0041 / D242 ship the `REFERENCES striatumd.repositories` FK that crash-looped
+// the live two-role daemon, D248 / #507) with a single derivation: a table is
+// runtime-applyable as an FK target only when an owner bundle transferred its
+// ownership to striatumd_rw, or the same migration CREATEs it; everything else is
+// owner-held and forbidden. Because the owner-held set is derived from the
+// authoritative ownership split (owner bundle transfers) rather than a name list,
+// the whole "FK into an owner-held table" class is impossible to reintroduce
+// above the floor without this guard going red.
+func TestFutureRuntimeMigrationsDoNotFKOwnerHeldTables(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
+	for _, migration := range migrations {
+		if migration.Version < futureRuntimeMigrationOwnerDDLFloor {
+			// Pre-split runtime migrations were applied as the owner at bootstrap;
+			// their grandfathered FKs are out of scope for the two-role guard.
+			continue
+		}
+		if violations := runtimeMigrationOwnerFKViolations(migration, runtimeOwned); len(violations) > 0 {
+			t.Fatalf("migration %d declares a foreign key into an owner-held table (striatumd_rw has no REFERENCES privilege there → 42501 crash-loop on a two-role deploy, the #508 class): %v; enforce that referential integrity in Go, or move the migration to an owner bundle", migration.Version, violations)
+		}
+	}
+}
+
+// TestRuntimeMigrationOwnerFKGuardDetectsForbiddenFK is the deliberately-bad
+// fixture proving the #508 guard FIRES on the exact 0041 / D242 regression — a
+// runtime migration that CREATEs a table with an inbound FK into the owner-held
+// `repositories` table — and does NOT fire on FKs into a runtime-owned table or
+// into a table the same migration creates. It also proves comment prose that
+// merely mentions a foreign key (every above-floor migration documents "NO
+// foreign key into the owner-held …") is not mistaken for real FK DDL.
+func TestRuntimeMigrationOwnerFKGuardDetectsForbiddenFK(t *testing.T) {
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
+
+	// The pre-#507 0041 form: an FK into the owner-held repositories table, plus a
+	// table-constraint FK into the owner-held events table. Both must be caught.
+	bad := Migration{
+		Version: futureRuntimeMigrationOwnerDDLFloor,
+		SQL: `
+			-- This migration carries NO foreign key into the owner-held jobs table.
+			CREATE TABLE IF NOT EXISTS striatumd.bad_ledger (
+			  id text PRIMARY KEY,
+			  repository_id text NOT NULL REFERENCES striatumd.repositories(repository_id),
+			  last_event_id bigint,
+			  FOREIGN KEY (repository_id, last_event_id) REFERENCES striatumd.events(repository_id, event_id)
+			);
+		`,
+	}
+	got := runtimeMigrationOwnerFKViolations(bad, runtimeOwned)
+	want := []string{"REFERENCES striatumd.events", "REFERENCES striatumd.repositories"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FK guard on the 0041 regression fixture = %#v, want %#v", got, want)
+	}
+
+	// A migration whose only FK targets are a runtime-owned (owner-bundle
+	// transferred) table and a table it CREATEs itself must pass clean.
+	if !runtimeOwned["striatumd.job_recovery_state"] {
+		t.Fatal("precondition: owner bundle 0018 must transfer job_recovery_state to striatumd_rw")
+	}
+	good := Migration{
+		Version: futureRuntimeMigrationOwnerDDLFloor,
+		SQL: `
+			-- NO foreign key into any owner-held table; this comment must be ignored.
+			CREATE TABLE IF NOT EXISTS striatumd.good_child (
+			  id text PRIMARY KEY,
+			  parent_id text REFERENCES striatumd.good_child(id),
+			  recovery_id text REFERENCES striatumd.job_recovery_state(id)
+			);
+		`,
+	}
+	if violations := runtimeMigrationOwnerFKViolations(good, runtimeOwned); len(violations) > 0 {
+		t.Fatalf("FK guard must not fire on FKs into a runtime-owned table or a self-created table; got %v", violations)
+	}
+}
+
+// TestLiveRuntimeMigrationsHaveNoOwnerFK pins the live tree green: with the 0041
+// FK already dropped (D248 / #507) every above-floor migration is FK-clean, so
+// the generic #508 guard passes against the real embedded migration set.
+func TestLiveRuntimeMigrationsHaveNoOwnerFK(t *testing.T) {
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	runtimeOwned := runtimeOwnedTablesAlterable(t)
+	for _, migration := range migrations {
+		if migration.Version < futureRuntimeMigrationOwnerDDLFloor {
+			continue
+		}
+		if violations := runtimeMigrationOwnerFKViolations(migration, runtimeOwned); len(violations) > 0 {
+			t.Fatalf("live migration %d unexpectedly carries an owner-held FK: %v", migration.Version, violations)
 		}
 	}
 }
