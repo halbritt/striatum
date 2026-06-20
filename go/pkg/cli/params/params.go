@@ -251,6 +251,13 @@ func positionalNames(group string) []string {
 		return []string{"session_id", "job_id", "decision_id"}
 	case "work_packet_show":
 		return []string{"packet_id"}
+	case "artifact_get_content":
+		// #506 part (b): `striatum artifact get-content <artifact-id>` exposes the
+		// read-only artifact.get_content RPC (already serving the web UI) so an
+		// operator can fetch a finding/artifact body by id — including a
+		// blob_exhaust REVIEW.md that evidence/corpus export only surface as
+		// metadata — instead of reconstructing it from PTY trajectory noise.
+		return []string{"artifact_id"}
 	case "ack", "release":
 		return []string{"session_id", "message_id", "lease_id"}
 	case "heartbeat":
