@@ -113,8 +113,176 @@ func TestBuiltinGoChecksRunOnValidModule(t *testing.T) {
 
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestGoModuleDirLocatesNestedModule is the #515 unit guard: the go builtins must
+// run `go ./...` in the directory that holds go.mod. A module at the worktree root
+// returns cwd (unchanged); a SINGLE nested module (striatum's `go/`) returns that
+// subdir; an absent or AMBIGUOUS module falls back to cwd (fail-legibly, never guess).
+func TestGoModuleDirLocatesNestedModule(t *testing.T) {
+	const modfile = "module x\n\ngo 1.21\n"
+
+	atRoot := t.TempDir()
+	mustWrite(t, filepath.Join(atRoot, "go.mod"), modfile)
+	if got := goModuleDir(atRoot); got != atRoot {
+		t.Fatalf("module at root must return cwd: got %q want %q", got, atRoot)
+	}
+
+	nested := t.TempDir()
+	mod := filepath.Join(nested, "go")
+	mustWrite(t, filepath.Join(mod, "go.mod"), modfile)
+	if got := goModuleDir(nested); got != mod {
+		t.Fatalf("single nested module must be located: got %q want %q", got, mod)
+	}
+
+	none := t.TempDir()
+	mustWrite(t, filepath.Join(none, "README.md"), "no module here\n")
+	if got := goModuleDir(none); got != none {
+		t.Fatalf("no module must fall back to cwd: got %q want %q", got, none)
+	}
+
+	ambiguous := t.TempDir()
+	mustWrite(t, filepath.Join(ambiguous, "a", "go.mod"), modfile)
+	mustWrite(t, filepath.Join(ambiguous, "b", "go.mod"), modfile)
+	if got := goModuleDir(ambiguous); got != ambiguous {
+		t.Fatalf("ambiguous (two modules) must fall back to cwd, not guess: got %q want %q", got, ambiguous)
+	}
+
+	// A go.mod buried under testdata/ is a fixture, not the repo's module — it must be
+	// skipped so the real nested module is found unambiguously.
+	withFixture := t.TempDir()
+	mustWrite(t, filepath.Join(withFixture, "testdata", "fix", "go.mod"), modfile)
+	real := filepath.Join(withFixture, "src")
+	mustWrite(t, filepath.Join(real, "go.mod"), modfile)
+	if got := goModuleDir(withFixture); got != real {
+		t.Fatalf("testdata go.mod must be skipped, real module found: got %q want %q", got, real)
+	}
+}
+
+// TestBuiltinGoChecksRunOnModuleInSubdirectory is the #515 end-to-end regression: a
+// repo whose Go module lives in a SUBDIRECTORY (exactly striatum's own `go/`) must
+// still PASS every go builtin. Running `go ./...` at the worktree root fails with
+// "directory prefix . does not contain main module"; the verifier must locate the
+// nested module, run the tool there, yet bind the WHOLE worktree — proven by a test
+// in the module that reads a file OUTSIDE the module (../sibling.txt). Capped at
+// ASSERTED, and the receipt must honestly record working_subdir=go.
+func TestBuiltinGoChecksRunOnModuleInSubdirectory(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not installed")
+	}
+	root := t.TempDir()
+	// A sibling OUTSIDE the module; the module's test reads it via ../sibling.txt, so a
+	// passing go-test proves the whole worktree (not just the module dir) is bound.
+	mustWrite(t, filepath.Join(root, "sibling.txt"), "outside the module\n")
+	mod := filepath.Join(root, "go")
+	mustWrite(t, filepath.Join(mod, "go.mod"), "module striatumverifiersubdir\n\ngo 1.21\n")
+	mustWrite(t, filepath.Join(mod, "main.go"), "package main\n\nfunc main() { _ = 1 }\n")
+	mustWrite(t, filepath.Join(mod, "main_test.go"),
+		"package main\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestReadsSibling(t *testing.T) {\n\tif _, err := os.ReadFile(\"../sibling.txt\"); err != nil {\n\t\tt.Fatalf(\"sibling not bound: %v\", err)\n\t}\n}\n")
+	scratch := t.TempDir()
+
+	for _, id := range []string{"builtin:go-vet", "builtin:go-build", "builtin:go-test"} {
+		res, err := ExecuteCheck(context.Background(), nil, RunRequest{CheckID: id, Cwd: root, ScratchDir: scratch})
+		if err != nil {
+			t.Fatalf("%s: ExecuteCheck: %v", id, err)
+		}
+		if res.Classification == classVerifiedEligible {
+			t.Fatalf("%s: a builtin must never be verified_eligible: %+v", id, res)
+		}
+		// The receipt must honestly state WHERE go ran, regardless of sandbox posture.
+		if res.Receipt.WorkingSubdir != "go" {
+			t.Fatalf("%s: receipt must record working_subdir=go, got %q", id, res.Receipt.WorkingSubdir)
+		}
+		if !res.Receipt.Posture.Strict {
+			// Degraded envelope (e.g. the CI runner) — the module-location fix is asserted
+			// above via WorkingSubdir; the real-run pass can only be asserted where the
+			// sandbox actually runs the check (strict bwrap). Skip rather than false-fail.
+			t.Logf("%s: non-strict posture %q (exit=%d) — real-run assertion skipped (degraded env)",
+				id, res.Receipt.Posture.Mechanism, res.Receipt.ExitCode)
+			continue
+		}
+		if res.Receipt.NegativeControlVoid {
+			t.Fatalf("%s: a real check must not void on its negative control: %+v", id, res)
+		}
+		if !res.Passed || res.Receipt.ExitCode != 0 {
+			t.Fatalf("%s: a module-in-subdir must pass under a strict sandbox (exit=%d class=%s); stderr tail:\n%s",
+				id, res.Receipt.ExitCode, res.Classification, res.StderrTail)
+		}
+		if res.Classification != classAsserted {
+			t.Fatalf("%s: a passing builtin must classify asserted, got %q", id, res.Classification)
+		}
+	}
+}
+
+// TestTailWriterKeepsLastBytes — the diagnostic stderr capture retains only the LAST
+// `limit` bytes (where a tool's real error sits) across many small writes and a
+// single oversized write.
+func TestTailWriterKeepsLastBytes(t *testing.T) {
+	w := &tailWriter{limit: 8}
+	for _, s := range []string{"abc", "def", "ghij"} { // "abcdefghij" → keep last 8
+		_, _ = w.Write([]byte(s))
+	}
+	if got := w.String(); got != "cdefghij" {
+		t.Fatalf("incremental tail: got %q want %q", got, "cdefghij")
+	}
+	w2 := &tailWriter{limit: 4}
+	_, _ = w2.Write([]byte("0123456789")) // single oversized write → keep last 4
+	if got := w2.String(); got != "6789" {
+		t.Fatalf("oversized tail: got %q want %q", got, "6789")
+	}
+}
+
+// TestExecuteResolvedSurfacesStderrTail — a failing check's stderr is surfaced on the
+// CheckResult for diagnosis (it is deliberately NOT in the sealed receipt). Forced
+// none-posture so the path is CI-deterministic (no sandbox primitive needed).
+func TestExecuteResolvedSurfacesStderrTail(t *testing.T) {
+	shBin := firstExisting("/bin/sh", "/usr/bin/sh")
+	falseBin := firstExisting("/bin/false", "/usr/bin/false")
+	if shBin == "" || falseBin == "" {
+		t.Skip("need /bin/sh and /bin/false")
+	}
+	orig := lookPath
+	defer func() { lookPath = orig }()
+	lookPath = func(string) (string, error) { return "", os.ErrNotExist } // → MechanismNone
+
+	res, err := executeResolved(context.Background(), ResolvedExec{
+		CheckID:         "noisy",
+		Argv:            []string{shBin, "-c", "echo BOOM-marker 1>&2; exit 1"},
+		BinarySHA256:    "x",
+		NegativeControl: &NegativeControl{Argv: []string{falseBin}}, // fails as required → check proceeds
+	}, RunRequest{Cwd: t.TempDir(), ScratchDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("executeResolved: %v", err)
+	}
+	if res.Passed {
+		t.Fatalf("a check exiting 1 must not pass: %+v", res)
+	}
+	if !strings.Contains(res.StderrTail, "BOOM-marker") {
+		t.Fatalf("stderr tail must surface the check's stderr for diagnosis, got %q", res.StderrTail)
+	}
+	// stderr is a DIAGNOSTIC on the CheckResult, never a sealed receipt field — the
+	// receipt records stdout_sha256 but carries no stderr at all (capturing it would
+	// make the environment-dependent stderr break the re-execution agreement / seal).
+	if doc := res.Receipt.MarshalFrontMatter(); strings.Contains(doc, "stderr") {
+		t.Fatalf("the receipt must carry no stderr field (stderr is a CheckResult-only diagnostic):\n%s", doc)
+	}
+}
+
+// TestSealCoversWorkingSubdir — the recorded working dir is part of WHERE the tool
+// ran; relocating it must change the seal (so a receipt cannot misstate that
+// `go ./...` ran at the root when it ran in a submodule).
+func TestSealCoversWorkingSubdir(t *testing.T) {
+	base := Receipt{CheckID: "c", Argv: []string{"go"}, BinarySHA256: "s", ExitCode: 0, CwdTreeSHA: "t"}
+	relocated := base
+	relocated.WorkingSubdir = "go"
+	if base.computeSeal() == relocated.computeSeal() {
+		t.Fatal("working_subdir must be covered by the seal (changing it must change the digest)")
 	}
 }
 

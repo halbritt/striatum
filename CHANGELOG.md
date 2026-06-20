@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a
+  SUBDIRECTORY (e.g. striatum's own `go/`), and a failing builtin surfaces its stderr
+  (#515).** `striatum verifier run --check-id builtin:go-* --cwd <repo-root>` ran
+  `go build|vet|test ./...` from the worktree root, which for a nested-module repo
+  fails with `directory prefix . does not contain main module` — a false-negative
+  exit-1 receipt. `executeResolved` now locates the single Go module (`goModuleDir`)
+  and runs the tool from the module dir while still binding the WHOLE worktree
+  read-only, so the module's tests can read sibling files (`../../VERSION`, `../../docs`)
+  and git discovery still resolves; the receipt seals `working_subdir`. Discovery is
+  conservative — for an absent or ambiguous (multi-module) tree it never guesses, it
+  falls back to cwd and fails legibly. Separately, a red `verifier run` now prints a
+  bounded stderr tail (and adds `stderr_tail` to `--json`) so diagnosing a failing
+  builtin no longer requires reproducing the sandbox argv by hand; stderr stays OUT of
+  the sealed receipt (it is environment-dependent and would break the agreement signal).
+  The three bugs the issue originally named (multi-main `go build -o`, newer-toolchain
+  offline, worktree `git fsck`) were already fixed in #494; this closes the remaining
+  nested-module gap that blocked verifying striatum's own repo.
 - **`striatum daemon install` no longer resurrects a `--user` unit on a system-managed
   host.** When the daemon is already installed as a SYSTEM unit
   (`/etc/systemd/system/striatumd.service` — a hardened/multi-user deployment), install

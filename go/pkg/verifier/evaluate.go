@@ -52,6 +52,11 @@ func (r Receipt) MarshalFrontMatter() string {
 		}
 	}
 	fmt.Fprintf(&b, "- negative_control_void: `%s`\n", strconv.FormatBool(r.NegativeControlVoid))
+	if r.WorkingSubdir != "" {
+		// Honest record of WHERE the tool ran: non-empty only for a go-* builtin whose
+		// module is in a subdirectory (e.g. striatum's `go/`). Seal-covered.
+		fmt.Fprintf(&b, "- working_subdir: `%s`\n", r.WorkingSubdir)
+	}
 	if len(r.Posture.Notes) > 0 {
 		fmt.Fprintf(&b, "- posture_notes: %s\n", strings.Join(r.Posture.Notes, "; "))
 	}

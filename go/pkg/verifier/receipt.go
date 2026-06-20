@@ -49,6 +49,14 @@ type Receipt struct {
 	// for the right reason. NegativeControlExit is the control's exit code. Sealed.
 	NegativeControlExit int
 	NegativeControlVoid bool
+	// WorkingSubdir is the directory the check process actually ran in, RELATIVE to
+	// the (whole-worktree) bound cwd — empty when the check ran at cwd itself. It is
+	// non-empty only for a go-* builtin whose Go module lives in a SUBDIRECTORY (e.g.
+	// striatum's own `go/`): the verifier binds the whole worktree read-only but runs
+	// `go ./...` from the module dir, because `go build ./...` at the worktree root
+	// fails with "directory prefix . does not contain main module". Recorded in the
+	// body and sealed so the receipt honestly states WHERE the tool ran.
+	WorkingSubdir string
 }
 
 // CheckResult is the per-check outcome the verifier lane derives mechanically.
@@ -67,6 +75,13 @@ type CheckResult struct {
 	Classification string
 	// VoidReason names why the receipt is void (Pillar 3), empty otherwise.
 	VoidReason string
+	// StderrTail is a bounded tail of the check's FIRST-execution stderr, captured
+	// for OPERATOR DIAGNOSIS only. It is deliberately NOT part of the sealed receipt
+	// (a check's stderr is environment-dependent and would break the independent
+	// re-execution agreement on a stable stdout); the lane surfaces it on a failing
+	// `verifier run` so diagnosing a red builtin no longer requires reproducing the
+	// sandbox argv by hand. Empty on success or when the check wrote nothing.
+	StderrTail string
 }
 
 const (
@@ -220,12 +235,32 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 	runEnv := checkRunEnv(rex, cwd, scratch)
 	rex.Argv = goBuildOutputRedirect(rex, scratch)
 
+	// A go-* builtin runs `go ./...`, which must execute in the MODULE directory. For
+	// the common case (module at the worktree root) that is cwd; for a repo whose
+	// module is NESTED (e.g. striatum's own `go/`) the verifier still binds the WHOLE
+	// worktree read-only but runs the tool from the module subdir — `go build ./...`
+	// at the worktree root fails with "directory prefix . does not contain main
+	// module", and binding only the subdir would hide sibling files the module's tests
+	// read (../../VERSION, ../../docs) and break git discovery. Only the process
+	// working dir moves; the bound tree, witnessed cwd_tree_sha, and scratch are
+	// unchanged. workSubdir is the relative form recorded in the body and sealed.
+	runDir := cwd
+	if isGoBuiltin(rex) {
+		runDir = goModuleDir(cwd)
+	}
+	workSubdir := ""
+	if runDir != cwd {
+		if rel, rerr := filepath.Rel(cwd, runDir); rerr == nil && rel != "." {
+			workSubdir = filepath.ToSlash(rel)
+		}
+	}
+
 	// Pillar 3: run the negative control FIRST. A control that PASSES (exit 0) — or
 	// could not even run its envelope — means the check does not discriminate the
 	// defect it claims to; void the receipt rather than trust a green it cannot earn.
 	var control *runOutcome
 	if rex.NegativeControl != nil && len(rex.NegativeControl.Argv) > 0 {
-		out, runErr := runOnce(ctx, wrapper, rex.NegativeControl.Argv, cwd, req.Limits, runEnv)
+		out, runErr := runOnce(ctx, wrapper, rex.NegativeControl.Argv, runDir, req.Limits, runEnv)
 		if runErr != nil {
 			return CheckResult{}, runErr
 		}
@@ -244,17 +279,18 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 				StriatumVersion:     rex.StriatumVersion,
 				NegativeControlExit: out.exitCode,
 				NegativeControlVoid: true,
+				WorkingSubdir:       workSubdir,
 			}
 			receipt.SealDigest = receipt.computeSeal()
-			return CheckResult{Receipt: receipt, Passed: false, Classification: classVoid, VoidReason: "negative_control_did_not_fail"}, nil
+			return CheckResult{Receipt: receipt, Passed: false, Classification: classVoid, VoidReason: "negative_control_did_not_fail", StderrTail: out.stderrTail}, nil
 		}
 	}
 
-	first, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits, runEnv)
+	first, err := runOnce(ctx, wrapper, rex.Argv, runDir, req.Limits, runEnv)
 	if err != nil {
 		return CheckResult{}, err
 	}
-	second, err := runOnce(ctx, wrapper, rex.Argv, cwd, req.Limits, runEnv)
+	second, err := runOnce(ctx, wrapper, rex.Argv, runDir, req.Limits, runEnv)
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -287,6 +323,7 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 		AgreementSignal: agreement,
 		BuiltinID:       rex.BuiltinID,
 		StriatumVersion: rex.StriatumVersion,
+		WorkingSubdir:   workSubdir,
 	}
 	if control != nil {
 		receipt.NegativeControlExit = control.exitCode
@@ -294,7 +331,7 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 	receipt.SealDigest = receipt.computeSeal()
 
 	classification := classifyResult(posture, first, agreement, treeStable, passed, rex.BuiltinID != "")
-	return CheckResult{Receipt: receipt, Passed: passed, Classification: classification}, nil
+	return CheckResult{Receipt: receipt, Passed: passed, Classification: classification, StderrTail: first.stderrTail}, nil
 }
 
 // classifyResult maps an execution to the lattice rung its receipt can EARN.
@@ -325,6 +362,9 @@ type runOutcome struct {
 	stdoutSHA         string
 	timedOut          bool
 	envelopeViolation bool
+	// stderrTail is a bounded tail of this run's stderr, for operator diagnosis. It
+	// is NOT sealed and NOT part of the agreement signal (see CheckResult.StderrTail).
+	stderrTail string
 }
 
 // checkRunEnv builds the process env for a sandboxed check run. The sandbox binds
@@ -372,6 +412,65 @@ func checkRunEnv(rex ResolvedExec, cwd, scratch string) []string {
 // isGoBuiltin reports whether the resolved check is one of the builtin:go-* checks.
 func isGoBuiltin(rex ResolvedExec) bool {
 	return strings.HasPrefix(rex.BuiltinID, "builtin:go-")
+}
+
+// goModuleDir returns the directory a go-* builtin should run `go ./...` in: the
+// directory containing go.mod.
+//
+//   - The COMMON case (a Go module at the worktree root) returns cwd unchanged.
+//   - A repo whose module lives in a SUBDIRECTORY (e.g. striatum's own `go/`) would
+//     otherwise fail EVERY go builtin — `go build ./...` at the worktree root errors
+//     "directory prefix . does not contain main module or its selected
+//     dependencies" — so this locates the single nested module and returns it. The
+//     caller still binds the WHOLE worktree read-only, so the module's tests can read
+//     sibling files (../../VERSION, ../../docs) and git discovery still resolves.
+//
+// Discovery is CONSERVATIVE and never guesses: cwd/go.mod wins; otherwise a bounded
+// walk collects module roots (dirs with a go.mod), skipping .git / vendor /
+// node_modules / testdata. It returns the nested module ONLY when EXACTLY ONE is
+// found — zero or several is ambiguous, so it falls back to cwd and the check fails
+// legibly (the honest "which module did you mean?" outcome) rather than silently
+// verifying an arbitrary one.
+func goModuleDir(cwd string) string {
+	if strings.TrimSpace(cwd) == "" {
+		return cwd
+	}
+	if fileExists(filepath.Join(cwd, "go.mod")) {
+		return cwd
+	}
+	const maxDepth = 4 // bound the walk; a deeply-buried module is not a flat single-module repo
+	var roots []string
+	_ = filepath.WalkDir(cwd, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // best-effort: an unreadable subtree is not fatal to discovery
+		}
+		if d.IsDir() {
+			if path != cwd {
+				switch d.Name() {
+				case ".git", "vendor", "node_modules", "testdata":
+					return filepath.SkipDir
+				}
+			}
+			if rel, rerr := filepath.Rel(cwd, path); rerr == nil && rel != "." && strings.Count(rel, string(os.PathSeparator)) >= maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "go.mod" {
+			roots = append(roots, filepath.Dir(path))
+		}
+		return nil
+	})
+	if len(roots) == 1 {
+		return roots[0]
+	}
+	return cwd
+}
+
+// fileExists reports whether path names an existing regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // goBuildOutputRedirect points `go build`'s output at the writable scratch dir.
@@ -440,29 +539,35 @@ func hostGoBinDir() string {
 }
 
 // runOnce executes the wrapped check once with a wall-clock deadline, hashing
-// stdout. A non-zero exit is a normal result (recorded), NOT a Go error; a Go
+// stdout. runDir is the process WORKING DIRECTORY (the module dir for a nested-module
+// go builtin; the bound cwd otherwise) — it is always inside the read-only-bound
+// worktree. A non-zero exit is a normal result (recorded), NOT a Go error; a Go
 // error is reserved for failures to launch the sandbox itself.
-func runOnce(ctx context.Context, wrapper, argv []string, cwd string, limits SandboxLimits, runEnv []string) (runOutcome, error) {
+func runOnce(ctx context.Context, wrapper, argv []string, runDir string, limits SandboxLimits, runEnv []string) (runOutcome, error) {
 	deadline := limits.withDefaults().WallClockSeconds
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(deadline)*time.Second)
 	defer cancel()
 
 	full := append(append([]string(nil), wrapper...), argv...)
 	cmd := exec.CommandContext(execCtx, full[0], full[1:]...) //nolint:gosec // argv is the allowlisted, hash-pinned command wrapped by the resolved sandbox
-	cmd.Dir = cwd
+	cmd.Dir = runDir
 	// Minimal, caller-built env: no inherited secrets. checkRunEnv supplies PATH +
 	// HOME (and the go-builtin cache vars when needed); the namespace blocks network.
 	if len(runEnv) == 0 {
-		runEnv = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + cwd}
+		runEnv = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + runDir}
 	}
 	cmd.Env = runEnv
 
 	var stdout hashingWriter
+	// stderr is NOT part of the sealed receipt or the agreement signal (it is
+	// environment-dependent); a bounded tail is kept purely so a failing run can be
+	// diagnosed without reproducing the sandbox argv by hand.
+	stderr := &tailWriter{limit: stderrTailLimit}
 	cmd.Stdout = &stdout
-	cmd.Stderr = &hashingWriter{} // stderr digest is not part of the receipt; discard
+	cmd.Stderr = stderr
 
 	runErr := cmd.Run()
-	out := runOutcome{stdoutSHA: stdout.sum()}
+	out := runOutcome{stdoutSHA: stdout.sum(), stderrTail: stderr.String()}
 	if execCtx.Err() == context.DeadlineExceeded {
 		out.timedOut = true
 		out.exitCode = -1
@@ -581,9 +686,41 @@ func (r Receipt) computeSeal() string {
 	// cap, or flipping the void, changes the seal.
 	write(r.BuiltinID, r.StriatumVersion)
 	write(strconv.Itoa(r.NegativeControlExit), strconv.FormatBool(r.NegativeControlVoid))
+	// The working subdir is part of WHERE the tool ran — sealed so a receipt cannot
+	// silently misstate that `go ./...` ran at the root when it ran in a submodule.
+	write(r.WorkingSubdir)
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum)
 }
+
+// stderrTailLimit bounds the diagnostic stderr tail kept per run (the LAST bytes,
+// where a tool's actual error usually is). Kept small: this is a diagnosis breadcrumb
+// surfaced on a failing `verifier run`, not a transcript.
+const stderrTailLimit = 4 << 10 // 4 KiB
+
+// tailWriter is an io.Writer that retains only the LAST `limit` bytes written, so a
+// noisy check's stderr is captured for diagnosis without buffering the whole stream.
+type tailWriter struct {
+	limit int
+	buf   []byte
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	if w.limit <= 0 {
+		return len(p), nil
+	}
+	if len(p) >= w.limit {
+		w.buf = append(w.buf[:0], p[len(p)-w.limit:]...)
+		return len(p), nil
+	}
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.limit {
+		w.buf = w.buf[len(w.buf)-w.limit:]
+	}
+	return len(p), nil
+}
+
+func (w *tailWriter) String() string { return string(w.buf) }
 
 // hashingWriter is an io.Writer that streams its bytes into a sha256, so the
 // receipt records a stdout digest without buffering the whole stream.

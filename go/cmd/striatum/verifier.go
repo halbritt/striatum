@@ -209,13 +209,31 @@ func runVerifier(args []string, stdout io.Writer, stderr io.Writer, repoRootOver
 			"agreement":         result.Receipt.AgreementSignal,
 			"receipt_path":      outPath,
 		}
+		if result.Receipt.WorkingSubdir != "" {
+			summary["working_subdir"] = result.Receipt.WorkingSubdir
+		}
+		// Surface the stderr tail so a red check is diagnosable from the summary alone
+		// (the sealed receipt deliberately omits stderr). Only on a non-pass, to keep a
+		// green summary terse.
+		if !result.Passed && strings.TrimSpace(result.StderrTail) != "" {
+			summary["stderr_tail"] = result.StderrTail
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(summary)
 	} else {
-		_, _ = fmt.Fprintf(stdout, "verifier run: check %q exit=%d passed=%t classification=%s mechanism=%s strict=%t agreement=%t\nreceipt: %s\n",
+		workNote := ""
+		if result.Receipt.WorkingSubdir != "" {
+			workNote = fmt.Sprintf(" workdir=%s", result.Receipt.WorkingSubdir)
+		}
+		_, _ = fmt.Fprintf(stdout, "verifier run: check %q exit=%d passed=%t classification=%s mechanism=%s strict=%t agreement=%t%s\nreceipt: %s\n",
 			result.Receipt.CheckID, result.Receipt.ExitCode, result.Passed, result.Classification,
-			result.Receipt.Posture.Mechanism, result.Receipt.Posture.Strict, result.Receipt.AgreementSignal, outPath)
+			result.Receipt.Posture.Mechanism, result.Receipt.Posture.Strict, result.Receipt.AgreementSignal, workNote, outPath)
+		// On a red check, print the stderr tail to OUR stderr so the operator can see why
+		// without reproducing the sandbox argv by hand (the sealed receipt omits stderr).
+		if !result.Passed && strings.TrimSpace(result.StderrTail) != "" {
+			_, _ = fmt.Fprintf(stderr, "verifier run: check stderr (tail):\n%s\n", strings.TrimRight(result.StderrTail, "\n"))
+		}
 	}
 	// The command's own exit code reflects the mechanical verdict so a lane can
 	// branch on it, but the DURABLE truth is the sealed receipt, not this code.
