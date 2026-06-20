@@ -19,7 +19,9 @@ import (
 // TestDaemonInstallRespectsExistingSystemUnit guards the "forever" fix: when the
 // daemon is already a SYSTEM unit, `striatum daemon install` must NOT write or enable
 // a competing per-user unit (which would resurrect the masked --user unit and fail
-// `make install` on `systemctl --user enable`).
+// `make install` on `systemctl --user enable`). Per #509 (#522) the user-scope unit
+// carries no owner-DB bootstrap env and would crash-loop, so install REFUSES with a
+// non-zero exit and a refusal message rather than silently skipping.
 func TestDaemonInstallRespectsExistingSystemUnit(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("daemon install systemd path is linux-only")
@@ -38,14 +40,16 @@ func TestDaemonInstallRespectsExistingSystemUnit(t *testing.T) {
 	defer restore()
 
 	var stdout, stderr bytes.Buffer
-	if code := runDaemonInstall([]string{"--no-start"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("install exit = %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	// #509/#522: a system unit owns striatumd → REFUSE the user-scope install (exit 1),
+	// rather than re-create the broken, conflicting unit.
+	if code := runDaemonInstall([]string{"--no-start"}, &stdout, &stderr); code == 0 {
+		t.Fatalf("install must refuse when a system unit is installed (want non-zero exit); got exit 0, stdout=%q", stdout.String())
 	}
 	if userUnit := filepath.Join(configHomeDir, "systemd", "user", unitName); fileExists(userUnit) {
 		t.Fatalf("per-user unit must NOT be created when a system unit is installed; found %s", userUnit)
 	}
-	if !strings.Contains(stdout.String(), "SYSTEM unit") {
-		t.Fatalf("expected system-managed notice; stdout=%q", stdout.String())
+	if !strings.Contains(stderr.String(), "a system unit already owns striatumd") {
+		t.Fatalf("expected the #509 refusal message on stderr; stderr=%q", stderr.String())
 	}
 }
 
