@@ -44,7 +44,16 @@
 -- refuse_closed_segment_change / audit_segments_no_delete.
 
 CREATE TABLE IF NOT EXISTS striatumd.event_chain_segments (
-  repository_id text NOT NULL REFERENCES striatumd.repositories(repository_id),
+  -- NO foreign key to the owner-held `repositories` table. This migration is
+  -- applied by the runtime role striatumd_rw (D215 / RFC 0110), which has no
+  -- REFERENCES privilege on owner-held tables, so an inbound FK to
+  -- `repositories` fails with "permission denied for table repositories"
+  -- (SQLSTATE 42501) on a two-role production daemon — a failure pgtest's
+  -- single-role DB cannot surface. Repository existence is enforced in Go in the
+  -- sealing path (a segment can only be sealed for a repository that already has
+  -- an event chain head), exactly as the boundary-event RI against owner-held
+  -- `events` is Go-enforced. (D248 / fix of D242.)
+  repository_id text NOT NULL,
   segment_id bigint NOT NULL,
   opened_at timestamptz NOT NULL DEFAULT now(),
   sealed_at timestamptz,
@@ -114,8 +123,8 @@ FOR EACH ROW EXECUTE FUNCTION striatumd.refuse_event_segment_delete();
 -- (0006_events_chain_anchors.sql) grants its runtime DML surface. The sealing
 -- path INSERTs the successor open segment and UPDATEs the open segment's
 -- boundaries; DELETE is denied (append-only, enforced both by the trigger and the
--- absence of the grant). A repository removal cascades segment rows via the
--- repository foreign key, never a standalone DELETE.
+-- absence of the grant). Segment rows are durable append-only provenance with no
+-- inbound FK, so they are never cascade-deleted by a repository removal.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'striatumd_rw') THEN

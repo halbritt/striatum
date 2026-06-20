@@ -982,14 +982,18 @@ func TestMigration41EventChainSegmentsIsOwnershipSafe(t *testing.T) {
 			t.Fatalf("migration 41 missing %q", needle)
 		}
 	}
-	// D215 / RFC 0136: a runtime ledger carries NO foreign key into owner-held
-	// events, and no owner-table DDL. Its only REFERENCES is the repositories FK
-	// (the standard runtime-table parent, applied as the owner role at bootstrap
-	// like every other runtime CREATE TABLE), so we forbid the specific
-	// owner-append-only-table references rather than the bare word REFERENCES.
+	// D215 / RFC 0110 (D248 fix): a runtime ledger carries NO foreign key into ANY
+	// owner-held table and no owner-table DDL — including no FK to `repositories`.
+	// striatumd_rw applies this migration and has no REFERENCES privilege on
+	// owner-held tables, so an inbound FK fails with "permission denied for table
+	// <owner table>" (SQLSTATE 42501) on a two-role production daemon (the original
+	// D242 ship added a `REFERENCES striatumd.repositories` FK that broke prod
+	// migrate; pgtest's single-role DB masked it). Repository existence + boundary
+	// RI are enforced in Go in the sealing path instead.
 	for _, forbidden := range []string{
 		"ALTER TABLE",
 		"DROP TABLE",
+		"REFERENCES striatumd.repositories",
 		"REFERENCES striatumd.events",
 		"REFERENCES striatumd.audit_log",
 		"REFERENCES striatumd.audit_segments",

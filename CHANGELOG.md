@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+
+- **RFC 0136 P1 migration `0041` two-role crash-loop fixed (D248, fix of D242).**
+  The `event_chain_segments` runtime migration created `repository_id` with a
+  `REFERENCES striatumd.repositories` foreign key. Runtime migrations apply as
+  `striatumd_rw`, which has no REFERENCES privilege on owner-held tables, so the
+  new daemon binary failed migration with `permission denied for table
+  repositories` (SQLSTATE 42501) and crash-looped at schema 40 on the live
+  two-role daemon (pgtest's single-role DB masked it). The owner-table FK is
+  removed — repository existence is enforced in Go in the sealing path, as the
+  migration's own D215 comments already specified — and the `0041` ownership test
+  now forbids the owner-table FK like every other runtime migration.
+
 ### Security
 
 - **RFC 0141 graduated experimental→supported: gate-side, daemon-authoritative
