@@ -16,7 +16,7 @@ func writeIntent(t *testing.T, dir, bin string) {
 	}
 	body := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
 		`{"id":"probe","argv":["` + bin + `"],"backs_claim":"present",` +
-		`"negative_control":{"argv":["` + bin + `","--definitely-not-a-flag"]}}]}`
+		`"negative_control":{"argv":["` + bin + `","--definitely-not-a-flag"],"mutation_of":"fixtures/passing"}}]}`
 	if err := os.WriteFile(filepath.Join(dir, "verification", "allowlist.intent.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -105,6 +105,7 @@ var methodEntries = []MethodEntry{
 	{Method: "review.override", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "decision.record", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "checkpoint.resolve", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
+	{Method: "verifier.attest", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "branch.confirm", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "run.prepare", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "run.start", RequiredCapability: CapPtr(CapabilityAdmin), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},

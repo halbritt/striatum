@@ -1,6 +1,6 @@
 # RFC 0141: Generatable verification_gate workflow shape
 
-Status: implemented (D239)
+Status: implemented (D243; security/attestation tier graduated experimental→supported)
 Date: 2026-06-19
 author: proposer-claude-opus-4-8
 
@@ -280,7 +280,9 @@ verification_gate` and decide whether to regenerate it from the shape or retire 
   given it reintroduces a lane-computed per-host hash — or do external checks via
   the operator allowlist remain the only honest road to VERIFIED?
 - **Negative-control rigor.** Is the mutation-of-a-paired-fixture requirement
-  mandatory at graduation, or an opt-in `experimental`→`supported` bar?
+  mandatory at graduation, or an opt-in `experimental`→`supported` bar? **RESOLVED
+  (D243, #482): mandatory at the supported tier** — `ParseIntent` rejects a
+  `negative_control` that omits `mutation_of`.
 - **Cross-host pins.** A `verifier pin --from-receipt <seal>` fast-path (same sha
   across hosts ⇒ attestable; divergent ⇒ flagged) for homelab/CI matrices —
   in-scope here or a separate follow-up?
@@ -375,3 +377,47 @@ self-pin/pin-drift classes + version-skew resweep — GH #483; and an RFC 0105
 unattended-reliability fixture, after which the interim
 `examples/verification-gate-flow/` is regenerated or retired. D227 preserved: the
 daemon executes nothing; `evaluateRunClaimVerification` still shells out to nothing.
+
+## Graduation (D243, GH #482) — security/attestation tier: experimental → supported
+
+The forge-able experimental-tier gap is closed: **attestation is now authoritative
+at the gate, fail-closed.** This graduation is about the FEATURE's
+security/attestation tier (the #482 graduation blocker). The separate RFC 0106
+SHAPE support tier (`workflowtemplates.supportedShapes` / `SupportTierForShape`,
+which the experimental-shape lint warning consults) stays **experimental** until a
+green RFC 0105 unattended-reliability fixture lands — that fixture is the explicit
+remaining follow-up below, and the shape-tier guard (`shape_tier_guard_test.go`)
+forbids flipping it without one ("the tier cannot lie").
+
+- **Daemon-owned PG attestation store.** Migration 0041 adds
+  `striatumd.verifier_attestations (repository_id, check_id, binary_sha256,
+  attested_by, attested_at, revoked_at, …)` with a partial unique index on the
+  active `(repository_id, check_id, binary_sha256)`. This is the product-boundary
+  live state (RFC 0033 / D094); the repo-file `allowlist.pins.<fp>.attest.json`
+  sidecar is now a **cache/projection** that still drives the lane-side
+  intent⋈pins⋈attest join at `verifier run`, not the trust source.
+- **Operator-token RPC `verifier.attest`** (CapabilityAdmin, `single_repo`).
+  Minting an attestation REFUSES any session-bound capability token
+  (`capability_denied`) — the daemon-enforced equivalent of the verb's
+  `STRIATUM_SESSION_ID` refusal, now backed by the DB session_id flag (RFC 0096 V2
+  / #135) rather than an env var a lane could unset. The `striatum verifier attest`
+  verb resolves the pinned sha locally and dispatches this RPC to record the
+  authoritative row; an unreachable daemon / no-token / unregistered-repo degrades
+  to a LOUD warning (sidecar cache only, not gate-authoritative), but a daemon
+  REFUSAL fails the verb closed.
+- **Gate enforcement (the security fix).** `evaluateRunClaimVerification` now
+  REFUSES VERIFIED for an external (non-builtin) claim whose backing receipt
+  `(check_id, binary_sha256)` lacks an **un-revoked** attestation row for the
+  run's repository, fail-closed to ASSERTED (basis `attestation_missing`). The
+  attestation binds the EXACT pinned bytes, so a re-pin of different bytes (or a
+  revoked blessing) silently invalidates it. Builtins were already capped at
+  ASSERTED, so they never reach the attestation check. D227 is preserved: the gate
+  read consults PG and sealed receipt bytes; it executes nothing.
+- **Negative-control rigor is now MANDATORY.** A sanctioned check's
+  `negative_control` must name the paired passing fixture it mutates
+  (`mutation_of`); `ParseIntent` rejects a bare known-bad. (At experimental tier
+  this was the opt-in stretch form; the basic known-bad was already mandatory.)
+
+What the supported tier does NOT yet include (still open): the doctor self-pin /
+pin-drift classes (#483), the daemon-restart attestation-cache rehydrate, and the
+RFC 0105 unattended-reliability fixture noted above.

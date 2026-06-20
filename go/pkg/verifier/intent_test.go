@@ -9,7 +9,7 @@ const intentOK = `{
   "schema_version": "striatum.verifier_allowlist_intent.v1",
   "checks": [
     {"id": "mypy", "argv": ["mypy", "src"], "backs_claim": "types_sound",
-     "negative_control": {"argv": ["mypy", "fixtures/known_type_error.py"]}}
+     "negative_control": {"argv": ["mypy", "fixtures/known_type_error.py"], "mutation_of": "fixtures/passing.py"}}
   ]
 }`
 
@@ -19,7 +19,7 @@ const intentOK = `{
 func TestParseIntentRejectsHash(t *testing.T) {
 	withHash := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
 		`{"id":"mypy","argv":["mypy","src"],"backs_claim":"t","binary_sha256":"deadbeef",` +
-		`"negative_control":{"argv":["mypy","bad.py"]}}]}`
+		`"negative_control":{"argv":["mypy","bad.py"],"mutation_of":"f"}}]}`
 	_, err := ParseIntent([]byte(withHash))
 	if err == nil {
 		t.Fatal("intent carrying a binary_sha256 must be rejected (the hashless layer must stay hashless)")
@@ -40,11 +40,32 @@ func TestParseIntentRequiresNegativeControl(t *testing.T) {
 	}
 }
 
+// TestParseIntentRequiresNegativeControlMutationOf is the RFC 0141 supported-tier
+// graduation rigor (D243 / #482): the negative_control must be a one-line MUTATION
+// of a paired passing fixture (mutation_of). At experimental tier this was opt-in;
+// the supported tier makes it MANDATORY, so a bare known-bad that exercises a
+// different code path than the real check can no longer pass the vacuity guard
+// vacuously. A control with an argv but no mutation_of must be rejected.
+func TestParseIntentRequiresNegativeControlMutationOf(t *testing.T) {
+	noMutation := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
+		`{"id":"mypy","argv":["mypy","src"],"backs_claim":"t","negative_control":{"argv":["mypy","bad.py"]}}]}`
+	_, err := ParseIntent([]byte(noMutation))
+	if err == nil || !strings.Contains(err.Error(), "mutation_of") {
+		t.Fatalf("a negative_control without mutation_of must be rejected at the supported tier, got: %v", err)
+	}
+	// The same intent WITH a mutation_of must parse.
+	withMutation := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
+		`{"id":"mypy","argv":["mypy","src"],"backs_claim":"t","negative_control":{"argv":["mypy","bad.py"],"mutation_of":"fixtures/passing.py"}}]}`
+	if _, err := ParseIntent([]byte(withMutation)); err != nil {
+		t.Fatalf("a negative_control WITH a mutation_of must parse, got: %v", err)
+	}
+}
+
 // TestParseIntentRequiresBacksClaim — a sanctioned check exists to substantiate a
 // specific claim; the reviewable intent must say which one.
 func TestParseIntentRequiresBacksClaim(t *testing.T) {
 	noBacks := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
-		`{"id":"mypy","argv":["mypy","src"],"negative_control":{"argv":["mypy","bad.py"]}}]}`
+		`{"id":"mypy","argv":["mypy","src"],"negative_control":{"argv":["mypy","bad.py"],"mutation_of":"f"}}]}`
 	if _, err := ParseIntent([]byte(noBacks)); err == nil || !strings.Contains(err.Error(), "backs_claim") {
 		t.Fatalf("a check without backs_claim must be rejected, got: %v", err)
 	}
@@ -55,7 +76,7 @@ func TestParseIntentRequiresBacksClaim(t *testing.T) {
 // (the two roads must not collide on one id).
 func TestParseIntentRejectsBuiltinID(t *testing.T) {
 	builtin := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
-		`{"id":"builtin:go-test","argv":["go","test"],"backs_claim":"t","negative_control":{"argv":["go","test","./bad"]}}]}`
+		`{"id":"builtin:go-test","argv":["go","test"],"backs_claim":"t","negative_control":{"argv":["go","test","./bad"],"mutation_of":"f"}}]}`
 	if _, err := ParseIntent([]byte(builtin)); err == nil || !strings.Contains(err.Error(), "builtin") {
 		t.Fatalf("a builtin id in the intent must be rejected, got: %v", err)
 	}
@@ -66,9 +87,9 @@ func TestParseIntentRejectsBuiltinID(t *testing.T) {
 // pinned and attested — executing NOTHING.
 func TestJoinIntentPinsThreeValued(t *testing.T) {
 	intent, err := ParseIntent([]byte(`{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[
-		{"id":"named_only","argv":["a"],"backs_claim":"c1","negative_control":{"argv":["a","bad"]}},
-		{"id":"pinned_only","argv":["b"],"backs_claim":"c2","negative_control":{"argv":["b","bad"]}},
-		{"id":"pinned_attested","argv":["c"],"backs_claim":"c3","negative_control":{"argv":["c","bad"]}}
+		{"id":"named_only","argv":["a"],"backs_claim":"c1","negative_control":{"argv":["a","bad"],"mutation_of":"f"}},
+		{"id":"pinned_only","argv":["b"],"backs_claim":"c2","negative_control":{"argv":["b","bad"],"mutation_of":"f"}},
+		{"id":"pinned_attested","argv":["c"],"backs_claim":"c3","negative_control":{"argv":["c","bad"],"mutation_of":"f"}}
 	]}`))
 	if err != nil {
 		t.Fatalf("parse intent: %v", err)
@@ -125,7 +146,7 @@ func TestJoinIntentPinsThreeValued(t *testing.T) {
 // to PINNED-but-unattested. Nobody stood behind THESE bytes.
 func TestJoinAttestationBindsToSha(t *testing.T) {
 	intent, _ := ParseIntent([]byte(`{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[
-		{"id":"c","argv":["c"],"backs_claim":"x","negative_control":{"argv":["c","bad"]}}]}`))
+		{"id":"c","argv":["c"],"backs_claim":"x","negative_control":{"argv":["c","bad"],"mutation_of":"f"}}]}`))
 	// pin now records sha "new" but the attestation blessed "old".
 	pins, _ := ParseAllowlist([]byte(`{"schema_version":"striatum.verifier_allowlist.v1","checks":[
 		{"id":"c","argv":["c"],"binary_sha256":"new"}]}`))
@@ -141,8 +162,8 @@ func TestJoinAttestationBindsToSha(t *testing.T) {
 // hard-block reads. With no pins, every external check is unpinned (TEMPLATE_UNFILLED).
 func TestPinsAreFilledUnpinned(t *testing.T) {
 	intent, _ := ParseIntent([]byte(`{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[
-		{"id":"a","argv":["a"],"backs_claim":"x","negative_control":{"argv":["a","bad"]}},
-		{"id":"b","argv":["b"],"backs_claim":"y","negative_control":{"argv":["b","bad"]}}]}`))
+		{"id":"a","argv":["a"],"backs_claim":"x","negative_control":{"argv":["a","bad"],"mutation_of":"f"}},
+		{"id":"b","argv":["b"],"backs_claim":"y","negative_control":{"argv":["b","bad"],"mutation_of":"f"}}]}`))
 	if filled, unpinned := PinsAreFilled(intent, nil); filled || len(unpinned) != 2 {
 		t.Fatalf("no pins → not filled, both unpinned; got filled=%v unpinned=%v", filled, unpinned)
 	}

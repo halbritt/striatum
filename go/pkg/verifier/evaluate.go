@@ -70,6 +70,12 @@ type ReceiptSignals struct {
 	Strict      bool
 	Agreement   bool
 	BodyPresent bool
+	// BinarySHA256 is the sha256 of the resolved binary the check ran (argv[0]),
+	// sealed into the transcript. The gate reads it to bind a daemon-owned operator
+	// attestation to the EXACT bytes (RFC 0141 / D243 / #482): VERIFIED requires an
+	// un-revoked attestation row for (repository, check_id, binary_sha256). Empty for
+	// a malformed receipt → no attestation can match → fail-closed to ASSERTED.
+	BinarySHA256 string
 	// BuiltinID is non-empty for a RFC 0141 builtin receipt (self-pinned to the
 	// striatum binary). It CAPS the gate read at ASSERTED — a self-pin attests which
 	// harness invoked the tool, never which tool ran.
@@ -97,6 +103,7 @@ func ReceiptSignalsFromDocument(doc string) (ReceiptSignals, error) {
 		CheckID:             stringField(parsed["check_id"]),
 		SealDigest:          stringField(parsed["seal_digest"]),
 		CwdTreeSHA:          stringField(parsed["cwd_tree_sha"]),
+		BinarySHA256:        strings.ToLower(stringField(parsed["binary_sha256"])),
 		Strict:              bodyMarker(doc, "sandbox_strict"),
 		Agreement:           bodyMarker(doc, "independent_reexecution_agreement"),
 		BuiltinID:           bodyStringMarker(doc, "builtin_id"),

@@ -126,7 +126,12 @@ var writeAuthorityInventory = map[string]WriteAuthorityClass{
 	// DML, not an append-only provenance surface.
 	"supervisor_buffered_packets": ClassRuntimeDML,
 	"trajectory_segments":         ClassRuntimeDML,
-	"verdicts":                    ClassRuntimeDML,
+	// verifier_attestations (RFC 0141 / D243 / #482, migration 0041): the
+	// daemon-owned operator attestation store the run-completion gate consults. The
+	// verifier.attest RPC INSERTs a row and UPDATEs (refresh/revoke) it. Live trust
+	// state, direct runtime DML — not an append-only provenance surface.
+	"verifier_attestations": ClassRuntimeDML,
+	"verdicts":              ClassRuntimeDML,
 	"work_packets":                ClassRuntimeDML,
 	"workflow_accepted_risks":     ClassRuntimeDML,
 	"workflow_snapshots":          ClassRuntimeDML,

@@ -404,8 +404,13 @@ func verificationIntentTemplate(spec Spec) (string, error) {
 			PassWhen:   "exit_zero",
 			BacksClaim: id + "-claim",
 			NegativeControl: &verifier.NegativeControl{
-				Argv:        []string{id, "--striatum-negative-control"},
-				Description: "TEMPLATE: a known-bad the check MUST fail on; replace with a one-line mutation of a paired passing fixture so it exercises the same code path.",
+				Argv: []string{id, "--striatum-negative-control"},
+				// mutation_of is MANDATORY at the supported tier (RFC 0141 / D243 / #482):
+				// the control must mutate a paired passing fixture so it provably exercises
+				// the same code path. This is a TEMPLATE placeholder the operator replaces
+				// with the real fixture path before pinning (the gate stays UNFILLED until).
+				MutationOf:  "TEMPLATE-replace-with-paired-passing-fixture-path",
+				Description: "TEMPLATE: a known-bad the check MUST fail on; replace with a one-line mutation of a paired passing fixture (mutation_of) so it exercises the same code path.",
 			},
 			Description: "TEMPLATE: replace argv with the real command for '" + id + "', set backs_claim to the claim_ledger claim it substantiates, and give a discriminating negative control. Then `striatum verifier pin --host-here` (never hand-type a sha) and `striatum verifier attest`.",
 		})
@@ -420,8 +425,10 @@ func verificationIntentTemplate(spec Spec) (string, error) {
 			PassWhen:   "exit_zero",
 			BacksClaim: "example-claim",
 			NegativeControl: &verifier.NegativeControl{
-				Argv:        []string{"false"},
-				Description: "A known-bad invocation the check MUST fail on; replace it with a one-line mutation of a paired passing fixture so it exercises the same code path.",
+				Argv: []string{"false"},
+				// mutation_of is MANDATORY at the supported tier (RFC 0141 / D243 / #482).
+				MutationOf:  "fixtures/passing-example",
+				Description: "A known-bad invocation the check MUST fail on; replace it with a one-line mutation of the paired passing fixture (mutation_of) so it exercises the same code path.",
 			},
 			Description: "TEMPLATE: replace with a real external check (argv), the claim_ledger claim id it backs, and a discriminating negative control. Pin its bytes with `striatum verifier pin --host-here` (never hand-type a sha). Builtin checks (builtin:go-test/vet/build) need no entry here.",
 		}}

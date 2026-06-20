@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Security
+
+- **RFC 0141 graduated experimental→supported: gate-side, daemon-authoritative
+  attestation enforcement, fail-closed (D243, #482).** Closes the documented
+  forge-able gap — at experimental tier the PINNED→VERIFIABLE attestation hinge was
+  enforced only at the `striatum verifier attest` VERB level (it refused a
+  lane/session context and wrote a per-host `allowlist.pins.<fp>.attest.json`
+  sidecar), and the run-completion gate never re-verified it, so a non-compliant lane
+  could forge that sidecar, join→VERIFIABLE, run the real pinned external check under
+  a strict two-signal envelope, author the claim VERIFIED, and the daemon gate would
+  honor it. Now:
+  - **Daemon-owned PG attestation store** (migration **0041**,
+    `striatumd.verifier_attestations`, partial unique index on the active
+    `(repository_id, check_id, binary_sha256)`) is the authoritative live state; the
+    repo-file sidecar is now a cache/projection that still drives the lane-side
+    intent⋈pins⋈attest join, not the trust source.
+  - **Operator-token RPC `verifier.attest`** (CapabilityAdmin) mints the row and
+    REFUSES any session-bound capability token (`capability_denied`) — the
+    daemon-enforced equivalent of the verb's session-context refusal, now backed by
+    the DB session_id flag (RFC 0096 V2 / #135). The `verifier attest` verb dispatches
+    it to record the authoritative row; an unreachable daemon/no-token/unregistered
+    repo degrades to a LOUD warning (sidecar cache only, NOT gate-authoritative), but
+    a daemon refusal fails the verb closed.
+  - **The run-completion gate** (`evaluateRunClaimVerification`) now refuses VERIFIED
+    for an external (non-builtin) claim whose backing receipt
+    `(check_id, binary_sha256)` lacks an un-revoked attestation row for the run's
+    repository — fail-closed to ASSERTED (basis `attestation_missing`); a re-pin of
+    different bytes or a revoked blessing silently invalidates it. D227 preserved: the
+    gate reads PG rows + sealed bytes and executes nothing.
+  - **Negative-control rigor is now mandatory:** `ParseIntent` rejects a
+    `negative_control` that omits `mutation_of` (the mutation-of-a-paired-passing-
+    fixture form).
+
 ### Fixed
 
 - **RFC 0141 `verifier run` builtins are now actually runnable end-to-end** (the

@@ -166,6 +166,7 @@ delivery bridge or the supervisor is restarted.
 | `review.override` | `override-verdict` | admin | single_repo | pg | real | no | no | stable |
 | `decision.record` | `decision record` | admin | single_repo | pg | real | no | no | stable |
 | `checkpoint.resolve` | `checkpoint resolve` | admin | single_repo | pg | real | no | no | stable |
+| `verifier.attest` | `verifier attest` (after local pin resolution) | admin | single_repo | pg | real | no | no | RFC 0141 / D243 (#482) operator-token attestation minter — the daemon-owned, gate-enforced PINNED→VERIFIABLE trust boundary. Writes the authoritative `striatumd.verifier_attestations` row binding (repository_id, check_id, binary_sha256). REFUSES any session-bound token (`capability_denied`): the verified lane can never bless its own pins. The run-completion gate (`evaluateRunClaimVerification`) refuses VERIFIED for an external claim whose backing receipt lacks an un-revoked attestation row, fail-closed to ASSERTED. The repo-file `allowlist.pins.<fp>.attest.json` sidecar is now a cache/projection, not the trust source |
 | `escalation.list` | `escalation list`; `inbox` without `--session-id` | read | single_repo | pg | real | no | no | stable |
 | `escalation.show` | `escalation show` | read | single_repo | pg | real | no | no | stable |
 | `escalation.resolve` | `escalation resolve` | admin | single_repo | pg | real | no | no | stable |

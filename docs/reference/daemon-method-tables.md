@@ -108,6 +108,7 @@
 | `review.override` | `admin` | `single_repo` | 1 | 1 | no |
 | `decision.record` | `admin` | `single_repo` | 1 | 1 | no |
 | `checkpoint.resolve` | `admin` | `single_repo` | 1 | 1 | no |
+| `verifier.attest` | `admin` | `single_repo` | 1 | 1 | no |
 | `branch.confirm` | `admin` | `single_repo` | 1 | 1 | no |
 | `run.prepare` | `admin` | `single_repo` | 1 | 1 | no |
 | `run.start` | `admin` | `single_repo` | 1 | 1 | no |

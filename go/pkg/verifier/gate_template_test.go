@@ -13,10 +13,10 @@ func seedIntent(t *testing.T, repoRoot string, external bool) {
 		t.Fatal(err)
 	}
 	body := `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
-		`{"id":"ext","argv":["mypy","src"],"backs_claim":"types","negative_control":{"argv":["mypy","bad.py"]}}]}`
+		`{"id":"ext","argv":["mypy","src"],"backs_claim":"types","negative_control":{"argv":["mypy","bad.py"],"mutation_of":"f"}}]}`
 	if !external {
 		body = `{"schema_version":"striatum.verifier_allowlist_intent.v1","checks":[` +
-			`{"id":"only","argv":["a"],"backs_claim":"x","negative_control":{"argv":["a","bad"]}}]}`
+			`{"id":"only","argv":["a"],"backs_claim":"x","negative_control":{"argv":["a","bad"],"mutation_of":"f"}}]}`
 	}
 	if err := os.WriteFile(filepath.Join(dir, "allowlist.intent.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)

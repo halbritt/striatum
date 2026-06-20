@@ -158,6 +158,17 @@ func ParseIntent(raw []byte) (*AllowlistIntent, error) {
 		if entry.NegativeControl == nil || len(entry.NegativeControl.Argv) == 0 || strings.TrimSpace(entry.NegativeControl.Argv[0]) == "" {
 			return nil, fmt.Errorf("verifier allowlist intent check %q must declare a non-empty negative_control.argv (a known-bad the check MUST fail on); a sanctioned check with no negative control can be vacuous and lie green", id)
 		}
+		// RFC 0141 graduation (D243 / #482): the negative_control MUST be a one-line
+		// MUTATION of a paired passing fixture (mutation_of). At experimental tier this
+		// was the opt-in "stretch" rigor; the supported tier makes it MANDATORY. A bare
+		// known-bad (e.g. `false`) can pass the vacuity guard while exercising a
+		// DIFFERENT code path than the real check — it proves the binary can exit
+		// non-zero, not that THIS check discriminates THIS defect. Requiring the control
+		// to name the passing fixture it mutates forces it through the same code path, so
+		// a green is earned for the right reason.
+		if strings.TrimSpace(entry.NegativeControl.MutationOf) == "" {
+			return nil, fmt.Errorf("verifier allowlist intent check %q negative_control must name the paired passing fixture it mutates (mutation_of); a bare known-bad can exercise a different code path than the real check and pass the vacuity guard vacuously (RFC 0141 supported-tier rigor)", id)
+		}
 		entry.ID = id
 		entry.PassWhen = passWhen
 		entries[id] = entry

@@ -104,7 +104,11 @@ var readAuthorityInventory = map[string]ReadAuthorityClass{
 	// work_packets.
 	"supervisor_buffered_packets": ReadClassRuntimeSensitive,
 	"trajectory_segments":         ReadClassRuntimeSensitive,
-	"verdicts":                    ReadClassRuntimeSensitive,
+	// verifier_attestations (RFC 0141 / D243 / #482): sensitive trust state the
+	// run-completion gate SELECTs to decide whether an external claim may reach
+	// VERIFIED — like verdicts/spawn_authorization_grants.
+	"verifier_attestations": ReadClassRuntimeSensitive,
+	"verdicts":              ReadClassRuntimeSensitive,
 	"work_packets":                ReadClassRuntimeSensitive,
 	"workflow_accepted_risks":     ReadClassRuntimeSensitive,
 	"workflow_snapshots":          ReadClassRuntimeSensitive,

@@ -1023,6 +1023,15 @@
       "deprecated": false
     },
     {
+      "method": "verifier.attest",
+      "required_capability": "admin",
+      "repository_scope_mode": "single_repo",
+      "params_schema_version": 1,
+      "audit_class": "metadata",
+      "min_envelope": 1,
+      "deprecated": false
+    },
+    {
       "method": "branch.confirm",
       "required_capability": "admin",
       "repository_scope_mode": "single_repo",

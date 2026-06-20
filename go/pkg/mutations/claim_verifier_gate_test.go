@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/pgtest"
 	"github.com/halbritt/striatum/go/pkg/verifier"
 )
@@ -44,6 +45,23 @@ func writeReceiptFile(t *testing.T, repoRoot, receiptRel, checkID, treeSHA strin
 	return treeSHA
 }
 
+// seedAttestation inserts a daemon-owned operator attestation row binding
+// (repo_claim, checkID, binarySHA256). The gate (RFC 0141 / D243 / #482) requires
+// such an un-revoked row before an external two-signal receipt may read VERIFIED.
+// The fixtures mint receipts with binary_sha256 "abc" (writeReceiptFile), so the
+// genuine, operator-blessed path seeds the matching row here.
+func seedAttestation(t *testing.T, ctx context.Context, runner db.Runner, checkID, binarySHA256 string) {
+	t.Helper()
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.verifier_attestations (
+		  repository_id, attestation_id, check_id, binary_sha256, attested_by
+		) VALUES ('repo_claim', $1, $2, $3, 'operator-test')
+		ON CONFLICT DO NOTHING`,
+		"att_"+checkID+"_"+binarySHA256, checkID, binarySHA256); err != nil {
+		t.Fatalf("seed attestation: %v", err)
+	}
+}
+
 func claimVerificationEntry(t *testing.T, entries []map[string]any, claimID string) map[string]any {
 	t.Helper()
 	for _, e := range entries {
@@ -66,6 +84,10 @@ func TestRunClaimVerificationVerifiedWithTwoSignalReceipt(t *testing.T) {
 
 	const treeSHA = "treesha_verified"
 	writeReceiptFile(t, repoRoot, "docs/run/receipts/C1.md", "go-test", treeSHA, 0, true, true)
+	// RFC 0141 / D243 (#482): an external two-signal receipt now ALSO requires a
+	// daemon-owned operator attestation for (check_id, binary_sha256) before it may
+	// read VERIFIED. writeReceiptFile pins binary_sha256 "abc"; bless those bytes.
+	seedAttestation(t, ctx, runner, "go-test", "abc")
 
 	body := claimLedgerDoc("0", `  - id: C1
     status: VERIFIED
@@ -88,6 +110,116 @@ func TestRunClaimVerificationVerifiedWithTwoSignalReceipt(t *testing.T) {
 	}
 	if got := fmt.Sprint(entry["verification_basis"]); got != "two_signal_sealed_receipt" {
 		t.Fatalf("basis = %q, want two_signal_sealed_receipt", got)
+	}
+}
+
+// TestRunClaimVerificationDegradesWhenAttestationMissing is the RFC 0141 / D243
+// (#482) security regression: a genuine, strict, two-signal external receipt that
+// would otherwise read VERIFIED must FAIL CLOSED to ASSERTED when no daemon-owned
+// operator attestation blesses its (check_id, binary_sha256). This is the gap the
+// graduation closes — a non-compliant lane could forge the repo-file attest
+// sidecar, but the gate consults daemon PG, not the lane-writable sidecar. With no
+// attestation row, the forge buys nothing.
+func TestRunClaimVerificationDegradesWhenAttestationMissing(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := setupClaimLedgerRun(t, ctx, runner)
+
+	const treeSHA = "treesha_unattested"
+	writeReceiptFile(t, repoRoot, "docs/run/receipts/C1.md", "go-test", treeSHA, 0, true, true)
+	// Deliberately seed NO attestation (or, equivalently, the lane forged a sidecar
+	// the daemon never saw): the gate has no PG row to honor.
+
+	body := claimLedgerDoc("0", `  - id: C1
+    status: VERIFIED
+    text: "a strict two-signal receipt, but no operator ever blessed these bytes."
+    bound_input_digest: "`+treeSHA+`"
+    receipt_ref: "docs/run/receipts/C1.md"
+    evidence_digest: "`+treeSHA+`"
+`)
+	if _, err := publishClaimLedger(t, ctx, runner, repoRoot, "claims_0", "docs/run/CLAIMS_0.md", body); err != nil {
+		t.Fatalf("publish ledger: %v", err)
+	}
+
+	entry := claimVerificationEntry(t, mustEvaluate(t, ctx, runner), "C1")
+	if got := fmt.Sprint(entry["effective_status"]); got != "ASSERTED" {
+		t.Fatalf("an unattested external receipt must fail closed to ASSERTED, got %q (basis %v)", got, entry["verification_basis"])
+	}
+	if got := fmt.Sprint(entry["verification_basis"]); got != "attestation_missing" {
+		t.Fatalf("basis = %q, want attestation_missing", got)
+	}
+}
+
+// TestRunClaimVerificationDegradesWhenAttestationRevoked verifies a revoked
+// attestation is not honored: revocation is fail-closed at the gate (the unique
+// active index is partial WHERE revoked_at IS NULL, and the gate query filters on
+// it). A blessing the operator withdrew can no longer carry a claim to VERIFIED.
+func TestRunClaimVerificationDegradesWhenAttestationRevoked(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := setupClaimLedgerRun(t, ctx, runner)
+
+	const treeSHA = "treesha_revoked"
+	writeReceiptFile(t, repoRoot, "docs/run/receipts/C1.md", "go-test", treeSHA, 0, true, true)
+	seedAttestation(t, ctx, runner, "go-test", "abc")
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.verifier_attestations
+		   SET revoked_at = now(), revoke_reason = 'test revoke'
+		 WHERE repository_id = 'repo_claim' AND check_id = 'go-test'`); err != nil {
+		t.Fatalf("revoke attestation: %v", err)
+	}
+
+	body := claimLedgerDoc("0", `  - id: C1
+    status: VERIFIED
+    text: "blessed once, then revoked."
+    bound_input_digest: "`+treeSHA+`"
+    receipt_ref: "docs/run/receipts/C1.md"
+    evidence_digest: "`+treeSHA+`"
+`)
+	if _, err := publishClaimLedger(t, ctx, runner, repoRoot, "claims_0", "docs/run/CLAIMS_0.md", body); err != nil {
+		t.Fatalf("publish ledger: %v", err)
+	}
+
+	entry := claimVerificationEntry(t, mustEvaluate(t, ctx, runner), "C1")
+	if got := fmt.Sprint(entry["effective_status"]); got != "ASSERTED" {
+		t.Fatalf("a revoked attestation must fail closed to ASSERTED, got %q (basis %v)", got, entry["verification_basis"])
+	}
+	if got := fmt.Sprint(entry["verification_basis"]); got != "attestation_missing" {
+		t.Fatalf("basis = %q, want attestation_missing", got)
+	}
+}
+
+// TestRunClaimVerificationAttestationBoundToExactBytes verifies an attestation for
+// a DIFFERENT sha does not satisfy the gate: the row is keyed by the exact bytes,
+// so a re-pin of different bytes (or an attestation of unrelated bytes) cannot
+// carry a receipt sealed to the real bytes to VERIFIED.
+func TestRunClaimVerificationAttestationBoundToExactBytes(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := setupClaimLedgerRun(t, ctx, runner)
+
+	const treeSHA = "treesha_wrongbytes"
+	writeReceiptFile(t, repoRoot, "docs/run/receipts/C1.md", "go-test", treeSHA, 0, true, true)
+	// The receipt pins binary_sha256 "abc"; the operator blessed DIFFERENT bytes.
+	seedAttestation(t, ctx, runner, "go-test", "deadbeef")
+
+	body := claimLedgerDoc("0", `  - id: C1
+    status: VERIFIED
+    text: "attested, but for the wrong bytes."
+    bound_input_digest: "`+treeSHA+`"
+    receipt_ref: "docs/run/receipts/C1.md"
+    evidence_digest: "`+treeSHA+`"
+`)
+	if _, err := publishClaimLedger(t, ctx, runner, repoRoot, "claims_0", "docs/run/CLAIMS_0.md", body); err != nil {
+		t.Fatalf("publish ledger: %v", err)
+	}
+
+	entry := claimVerificationEntry(t, mustEvaluate(t, ctx, runner), "C1")
+	if got := fmt.Sprint(entry["effective_status"]); got != "ASSERTED" {
+		t.Fatalf("an attestation of different bytes must not satisfy the gate, got %q (basis %v)", got, entry["verification_basis"])
+	}
+	if got := fmt.Sprint(entry["verification_basis"]); got != "attestation_missing" {
+		t.Fatalf("basis = %q, want attestation_missing", got)
 	}
 }
 
@@ -286,6 +418,11 @@ func TestRunClaimVerificationEndToEndRealReceiptMint(t *testing.T) {
 	if res.Receipt.SealDigest == "" || res.Receipt.CwdTreeSHA == "" {
 		t.Fatalf("a real mint must carry a seal and a tree-sha: %+v", res.Receipt)
 	}
+	// RFC 0141 / D243 (#482): the gate requires a daemon-owned operator attestation
+	// for the external check's exact bytes. mintRealReceipt pins the real /bin/true
+	// sha as check "always-pass"; bless those exact bytes so the strict-host arm can
+	// still read VERIFIED through the full executable path.
+	seedAttestation(t, ctx, runner, "always-pass", res.Receipt.BinarySHA256)
 
 	const receiptRel = "docs/run/receipts/C1.md"
 	full := filepath.Join(repoRoot, receiptRel)

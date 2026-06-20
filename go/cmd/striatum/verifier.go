@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
 	"github.com/halbritt/striatum/go/pkg/verifier"
 )
 
@@ -390,10 +392,14 @@ func runVerifierPin(args []string, stdout io.Writer, stderr io.Writer, repoRootO
 // verified lane cannot impersonate. It binds an attestation to the EXACT pinned
 // sha, so a later re-pin of different bytes silently invalidates the blessing.
 //
-// (Graduation hardening, tracked as a follow-up: make the run-completion gate
-// consult a daemon-owned/PG attestation store so a non-compliant lane that writes a
-// forged sidecar cannot reach VERIFIED. At experimental tier the operator-token
-// verb gate plus the forbidden_paths/gitignore boundary is the enforcement.)
+// RFC 0141 / D243 (#482) — graduation hardening LANDED: this verb now ALSO records
+// the AUTHORITATIVE attestation in daemon-owned PG via the operator-token
+// `verifier.attest` RPC (recordDaemonAttestations), which the run-completion gate
+// consults (mutations.attestationCovers). The repo-file sidecar this verb writes is
+// now a CACHE/projection (it still drives the lane-side intent⋈pins⋈attest join at
+// `verifier run`), not the trust source — a non-compliant lane that forges the
+// sidecar can no longer reach VERIFIED, because the gate reads PG, not the
+// lane-writable file.
 func runVerifierAttest(args []string, stdout io.Writer, stderr io.Writer, repoRootOverride string) int {
 	// The operator-token gate: a supervised lane is exactly a process the daemon
 	// launched with these markers. The operator shell has none of them.
@@ -530,14 +536,112 @@ func runVerifierAttest(args []string, stdout io.Writer, stderr io.Writer, repoRo
 		return 1
 	}
 	sort.Strings(attested)
+
+	// RFC 0141 / D243 (#482): record the AUTHORITATIVE attestation in daemon-owned PG
+	// via the operator-token `verifier.attest` RPC. This — not the sidecar above — is
+	// what the run-completion gate consults. The sidecar is now a cache/projection
+	// (it still drives the lane-side intent⋈pins⋈attest join at `verifier run`). A
+	// daemon REFUSAL (e.g. a session-bound token) is fatal: the blessing is not
+	// gate-authoritative without it. A daemon that is simply UNREACHABLE degrades to a
+	// LOUD warning rather than a hard failure, so offline pin-then-attest still writes
+	// the sidecar — but the operator is told the attestation is not yet enforced.
+	daemonRecorded, daemonRefusal := recordDaemonAttestations(repoRoot, byID, attested, jsonOut, stdout, stderr)
+	if daemonRefusal != nil {
+		_, _ = fmt.Fprintf(stderr, "verifier attest: daemon refused the authoritative attestation: %v\n", daemonRefusal)
+		return 3
+	}
 	if jsonOut {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(map[string]any{"host_fingerprint": fp, "attest_path": attestPath, "attested": attested, "attested_by": principal})
+		_ = enc.Encode(map[string]any{
+			"host_fingerprint": fp, "attest_path": attestPath, "attested": attested,
+			"attested_by": principal, "daemon_recorded": daemonRecorded,
+		})
 	} else {
-		_, _ = fmt.Fprintf(stdout, "verifier attest: blessed %d pin(s) by %q → %s\n  %s\n", len(attested), principal, attestPath, strings.Join(attested, ", "))
+		_, _ = fmt.Fprintf(stdout, "verifier attest: blessed %d pin(s) by %q → %s (daemon-recorded: %d)\n  %s\n",
+			len(attested), principal, attestPath, len(daemonRecorded), strings.Join(attested, ", "))
 	}
 	return 0
+}
+
+// recordDaemonAttestations records the AUTHORITATIVE attestation rows in daemon-owned
+// PG via the operator-token `verifier.attest` RPC (RFC 0141 / D243 / #482), one per
+// blessed (check_id, binary_sha256). It returns the ids the daemon recorded and a
+// non-nil refusal error if the daemon ACTIVELY refused (e.g. a session-bound token,
+// capability_denied, or any RPC error) — that is fatal, because the sidecar alone is
+// not gate-authoritative. A daemon that is merely UNREACHABLE (no socket / no token)
+// is NOT a refusal: it returns (recorded-so-far, nil) after a loud warning, so an
+// offline pin-then-attest still writes the cache sidecar and tells the operator the
+// blessing is not yet enforced at the gate.
+func recordDaemonAttestations(repoRoot string, byID map[string]verifier.AttestEntry, attested []string, jsonOut bool, stdout, stderr io.Writer) (recorded []string, refusal error) {
+	config, err := rpcclient.ResolveConfig(os.Environ(), "", "", "", 0)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "verifier attest: WARNING daemon unreachable (%v) — wrote the sidecar CACHE only; the attestation is NOT gate-authoritative until recorded in the daemon (re-run with a reachable daemon + operator token)\n", err)
+		return nil, nil
+	}
+	client := rpcclient.Client{Config: config}
+	ctx := context.Background()
+
+	repositoryID := envLookup(os.Environ(), "STRIATUM_REPOSITORY_ID")
+	if repositoryID == "" {
+		resolved, rerr := client.Invoke(ctx, "repo.resolve", map[string]any{"path": repoRoot})
+		if rerr != nil {
+			// A failure to RESOLVE the repository (unreachable, no token, or the path is
+			// not a registered repo) is "could not record" — warn and keep the sidecar
+			// cache. It is NOT the security boundary: only the daemon ACTIVELY refusing
+			// the verifier.attest WRITE (capability_denied for a session-bound token) is
+			// fatal. The operator re-runs from a registered repo with an operator token.
+			_, _ = fmt.Fprintf(stderr, "verifier attest: WARNING could not resolve the repository against the daemon (%v) — wrote the sidecar CACHE only; the attestation is NOT gate-authoritative until recorded in the daemon\n", rerr)
+			return nil, nil
+		}
+		repositoryID, _ = resolved["repository_id"].(string)
+	}
+	if repositoryID == "" {
+		_, _ = fmt.Fprintln(stderr, "verifier attest: WARNING could not resolve repository_id — wrote the sidecar CACHE only; the attestation is NOT gate-authoritative")
+		return nil, nil
+	}
+
+	for _, id := range attested {
+		entry := byID[id]
+		res, rerr := client.Invoke(ctx, "verifier.attest", map[string]any{
+			"repository_id": repositoryID,
+			"check_id":      id,
+			"binary_sha256": entry.BinarySHA256,
+		})
+		if rerr != nil {
+			if daemonAttestRefusal(rerr) {
+				return recorded, rerr // a security refusal must fail loud
+			}
+			// Non-fatal "could not record" (unreachable, no token, repo not registered).
+			_, _ = fmt.Fprintf(stderr, "verifier attest: WARNING could not record the authoritative attestation in the daemon (%v) — wrote the sidecar CACHE only; the attestation is NOT gate-authoritative until recorded in the daemon\n", rerr)
+			return recorded, nil
+		}
+		if status, _ := res["status"].(string); status == "attested" {
+			recorded = append(recorded, id)
+		}
+	}
+	return recorded, nil
+}
+
+// daemonAttestRefusal reports whether an RPC error from the verifier.attest dispatch
+// is an active daemon-side SECURITY REFUSAL that must fail the verb LOUD — chiefly
+// capability_denied (the session-bound-token refusal: the verified lane can never
+// bless its own pins). Everything else (daemon unreachable, no operator token wired,
+// or the path is not a registered repo) is a non-fatal "could not record" condition:
+// the verb warns and keeps the sidecar cache, telling the operator the blessing is
+// not yet gate-authoritative. This keeps offline pin-then-attest working while making
+// a forged-context attest fail closed.
+func daemonAttestRefusal(err error) bool {
+	var clientErr *rpcclient.Error
+	if !errors.As(err, &clientErr) {
+		return false
+	}
+	switch clientErr.Code {
+	case "capability_denied", "forbidden", "permission_denied":
+		return true
+	default:
+		return false
+	}
 }
 
 // equalArgv reports whether two argv slices are identical.
