@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,39 @@ import (
 	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
+
+// TestDaemonInstallRespectsExistingSystemUnit guards the "forever" fix: when the
+// daemon is already a SYSTEM unit, `striatum daemon install` must NOT write or enable
+// a competing per-user unit (which would resurrect the masked --user unit and fail
+// `make install` on `systemctl --user enable`).
+func TestDaemonInstallRespectsExistingSystemUnit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("daemon install systemd path is linux-only")
+	}
+	runtimeDir := t.TempDir()
+	configHomeDir := t.TempDir()
+	t.Setenv("STRIATUM_DAEMON_RUNTIME_DIR", runtimeDir)
+	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, "")
+
+	restore := stubSystemctl(t, map[string]string{
+		"show striatumd.service --property=FragmentPath --value": "/etc/systemd/system/striatumd.service",
+		"is-enabled striatumd.service":                           "enabled",
+		"is-active striatumd.service":                            "active",
+	})
+	defer restore()
+
+	var stdout, stderr bytes.Buffer
+	if code := runDaemonInstall([]string{"--no-start"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("install exit = %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if userUnit := filepath.Join(configHomeDir, "systemd", "user", unitName); fileExists(userUnit) {
+		t.Fatalf("per-user unit must NOT be created when a system unit is installed; found %s", userUnit)
+	}
+	if !strings.Contains(stdout.String(), "SYSTEM unit") {
+		t.Fatalf("expected system-managed notice; stdout=%q", stdout.String())
+	}
+}
 
 func TestDaemonSubcommandsAreLocal(t *testing.T) {
 	for _, sub := range []string{"install", "uninstall", "status"} {

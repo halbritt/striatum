@@ -280,6 +280,47 @@ func runDaemonInstall(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// When the daemon is already managed as a SYSTEM unit (a hardened or multi-user
+	// deployment moves it to /etc/systemd/system), do NOT create or enable a per-user
+	// unit. Doing so would resurrect the very --user unit a system install deliberately
+	// replaced, and `systemctl --user enable` against it fails when that unit is masked
+	// or absent (the failure that broke `make install`). Respect the system unit, sweep
+	// away any stale per-user unit so it can never shadow it, and leave lifecycle to the
+	// operator (sudo systemctl ...).
+	if sys := inspectDaemonUnitScope(systemdScopeSystem, systemUnitPath); sys.Installed {
+		removedUserUnit := false
+		if fileExists(layout.unitPath) {
+			if rmErr := os.Remove(layout.unitPath); rmErr == nil {
+				removedUserUnit = true
+				_ = systemctl(stderr, "daemon-reload")
+			}
+		}
+		if flags.json {
+			return writeDaemonJSON(stdout, stderr, map[string]any{
+				"ok": true,
+				"data": map[string]any{
+					"systemd":           true,
+					"scope":             string(systemdScopeSystem),
+					"unit_path":         sys.Path,
+					"managed":           "system",
+					"user_unit_removed": removedUserUnit,
+					"daemon_toml":       layout.configTOML,
+					"daemon_toml_new":   tomlCreated,
+					"socket":            layout.socket,
+				},
+			})
+		}
+		_, _ = fmt.Fprintf(stdout, "daemon is managed as a SYSTEM unit (%s); skipping per-user install.\n", sys.Path)
+		if removedUserUnit {
+			_, _ = fmt.Fprintf(stdout, "removed stale per-user unit: %s\n", layout.unitPath)
+		}
+		_, _ = fmt.Fprintf(stdout, "manage it with: sudo systemctl {restart|status} %s\n", unitName)
+		if tomlCreated {
+			_, _ = fmt.Fprintf(stdout, "scaffolded config: %s (set postgres_url before first start)\n", layout.configTOML)
+		}
+		return 0
+	}
+
 	if err := os.MkdirAll(filepath.Dir(layout.unitPath), 0o755); err != nil {
 		_, _ = fmt.Fprintf(stderr, "create unit directory: %v\n", err)
 		return 1
