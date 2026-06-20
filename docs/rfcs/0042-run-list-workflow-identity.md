@@ -1,6 +1,6 @@
 # RFC 0042: Run-List Workflow Identity and Graph Viewer Ergonomics
 
-Status: proposed (re-scoped to the live Go SSE UI per D224, closes #400) — the original Phase A targeted the now-deleted Python UI; the run-list problem is still real (`go/pkg/webassets/templates/page.html` renders only `run_id` + `branch_name`, no `workflow.name`). Surfacing `workflow.name` + a workflow link in the Go UI is this RFC's open implementation work.
+Status: implemented (re-scoped to the live Go SSE UI per D224, closes #400) — the original Phase A targeted the now-deleted Python UI; the run-list problem was still real (`go/pkg/webassets/templates/page.html` rendered only `run_id` + `branch_name`, no workflow identity). The Go SSE dashboard now surfaces a curated `workflow_name` on every run row: the `status` read folds `workflow_snapshots.workflow_id` (and `workflow_version` when present) onto each run, the selected-run card shows a `Workflow:` line, and the sidebar run list shows + filters on the workflow name. A clickable workflow link is not added (no stable per-workflow route exists today); the link affordance is noted as residual future work.
 Date: 2026-05-12
 Context:
 [`RFC 0013`](0013-local-web-ui.md),

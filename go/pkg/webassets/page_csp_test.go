@@ -48,6 +48,44 @@ func TestRenderPageHasNoCSPBlockedInlineScript(t *testing.T) {
 	}
 }
 
+// TestRenderPageSurfacesWorkflowName is the RFC 0042 regression: a selected
+// run's card must show the workflow identity (workflow_name), not just the run
+// id and branch, so an operator can tell which workflow a run belongs to.
+func TestRenderPageSurfacesWorkflowName(t *testing.T) {
+	page, err := RenderPage("Striatum", map[string]any{
+		"selected_run_id": "run_abc123",
+		"runs": []map[string]any{{
+			"run_id": "run_abc123", "state": "active", "branch_name": "main",
+			"workflow_name": "refactoring-campaign @ v3",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RenderPage: %v", err)
+	}
+	html := string(page)
+	if !strings.Contains(html, "Workflow: refactoring-campaign @ v3") {
+		t.Errorf("selected run card does not surface the workflow name; got page without 'Workflow: refactoring-campaign @ v3'")
+	}
+}
+
+// TestRenderPageOmitsWorkflowLineWhenAbsent confirms the workflow line is only
+// rendered when a workflow_name is present (a left-join miss leaves it blank,
+// not a dangling 'Workflow:' label).
+func TestRenderPageOmitsWorkflowLineWhenAbsent(t *testing.T) {
+	page, err := RenderPage("Striatum", map[string]any{
+		"selected_run_id": "run_abc123",
+		"runs": []map[string]any{{
+			"run_id": "run_abc123", "state": "active", "branch_name": "main",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RenderPage: %v", err)
+	}
+	if strings.Contains(string(page), "Workflow:") {
+		t.Errorf("page rendered a 'Workflow:' label with no workflow_name")
+	}
+}
+
 // TestAppJSCarriesDashboardLogic confirms the load-bearing logic actually moved
 // into the served-from-'self' app.js (so it runs under the CSP), rather than the
 // page going dark.

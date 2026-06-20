@@ -39,6 +39,15 @@
   Corrects the RFC's stale P2/P3 owner-bundle reference `0016`→`0020`. P2–P5 are
   NOT implemented; #387 stays open as their tracker. No owner-bundle, RPC, or
   daemon restart.
+- **RFC 0042 run-list workflow identity in the Go SSE dashboard (D224, #400).**
+  The `status` read now folds a curated `workflow_name` onto every run row
+  (`workflow_snapshots.workflow_id`, suffixed `@ <workflow_version>` when a
+  version is recorded) via a left join, so the live web dashboard can tell which
+  workflow a run belongs to. The selected-run card renders a `Workflow:` line and
+  the sidebar run list shows + filters on the workflow name (HTML-escaped). The
+  raw snapshot columns are folded away, leaving one stable field. A clickable
+  per-workflow link is not added — no stable per-workflow route exists yet — and
+  is noted as residual future work in the RFC.
 - **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
   `collaboration_ledger` contract gains the residual adjudication shape deferred by
   PR #432: a **Check-B correspondence rubric** (per-`challenge`

@@ -95,6 +95,9 @@ document.documentElement.dataset.striatumWeb = "go";
         window.location.href = `/run?id=${run.run_id}`;
       };
 
+      const workflowLine = run.workflow_name
+        ? `<span class="run-workflow-label">${escapeHTML(run.workflow_name)}</span>`
+        : "";
       item.innerHTML = `
         <div class="run-item-header">
           <span class="run-id-label">${run.run_id.substring(0, 12)}...</span>
@@ -102,6 +105,7 @@ document.documentElement.dataset.striatumWeb = "go";
             ${run.state === "active" ? '<span class="dot-pulsing"></span>' : ""}${run.state}
           </span>
         </div>
+        ${workflowLine}
         <span class="run-branch-label">${run.branch_name || "no branch"}</span>
       `;
       sidebarList.appendChild(item);
@@ -116,7 +120,8 @@ document.documentElement.dataset.striatumWeb = "go";
     const filtered = runs.filter(
       (run) =>
         run.run_id.toLowerCase().includes(query.toLowerCase()) ||
-        (run.branch_name && run.branch_name.toLowerCase().includes(query.toLowerCase()))
+        (run.branch_name && run.branch_name.toLowerCase().includes(query.toLowerCase())) ||
+        (run.workflow_name && run.workflow_name.toLowerCase().includes(query.toLowerCase()))
     );
     renderSidebarItems(filtered);
   }

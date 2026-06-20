@@ -56,6 +56,7 @@ func (r statusFakeRunner) Query(_ context.Context, sql string, args ...any) (pgx
 	case strings.Contains(sql, "SELECT r.run_id, r.state, r.branch_name"):
 		return dashboardAllRowsFromMaps([]map[string]any{{
 			"run_id": "run_a", "state": "running", "branch_name": "main",
+			"workflow_id": "refactoring-campaign", "workflow_version": "v3",
 		}}), nil
 	case strings.Contains(sql, "SELECT j.state, COUNT(*) AS count"):
 		return dashboardAllRowsFromMaps([]map[string]any{
@@ -212,6 +213,20 @@ func TestHandleStatusBuildsPythonShapedRunProjection(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("HandleStatus: %v", err)
+	}
+
+	// RFC 0042: each run row carries a human-facing workflow_name folded from
+	// the joined workflow_snapshots identity (workflow_id [@ workflow_version]).
+	runs := result["runs"].([]map[string]any)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %#v", runs)
+	}
+	if runs[0]["workflow_name"] != "refactoring-campaign @ v3" {
+		t.Fatalf("run workflow_name = %#v", runs[0]["workflow_name"])
+	}
+	// The raw snapshot columns are folded away, leaving only workflow_name.
+	if _, leaked := runs[0]["workflow_id"]; leaked {
+		t.Fatalf("run row leaked raw workflow_id column: %#v", runs[0])
 	}
 
 	jobs := result["jobs"].(map[string]int)

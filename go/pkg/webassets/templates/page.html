@@ -24,7 +24,7 @@
       <!-- Sidebar containing all runs -->
       <div class="sidebar">
         <h2>Workflow Runs</h2>
-        <input type="text" id="run-search" class="search-box" placeholder="Search by run ID or branch...">
+        <input type="text" id="run-search" class="search-box" placeholder="Search by run ID, workflow, or branch...">
         <div class="runs-list" id="runs-sidebar-list">
           <div class="muted" style="text-align: center; padding: 12px; font-size: 0.85rem;">Loading runs...</div>
         </div>
@@ -39,6 +39,7 @@
           <div class="card-header">
             <div>
               <span class="run-id-label" style="font-size: 1.2rem; display: block; margin-bottom: 4px;">Run: {{.run_id}}</span>
+              {{if .workflow_name}}<span class="run-workflow-label" style="display: block; margin-bottom: 4px; color: var(--text-secondary);">Workflow: {{.workflow_name}}</span>{{end}}
               <span class="run-branch-label">Branch: {{.branch_name}}</span>
             </div>
             <span class="pill {{if eq .state "active"}}pill-active{{else if eq .state "completed"}}pill-completed{{else if eq .state "paused"}}pill-paused{{else}}pill-error{{end}}">

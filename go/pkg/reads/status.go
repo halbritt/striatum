@@ -255,8 +255,12 @@ func statusRuns(ctx context.Context, runner db.Runner, repositoryID string, scop
 	switch {
 	case scope.runID != "":
 		args = append(args, scope.runID)
-		query = `SELECT r.run_id, r.state, r.branch_name, r.repo_root
+		query = `SELECT r.run_id, r.state, r.branch_name, r.repo_root,
+		                w.workflow_id, w.workflow_version
 		           FROM striatumd.runs r
+		           LEFT JOIN striatumd.workflow_snapshots w
+		             ON w.repository_id = r.repository_id
+		            AND w.workflow_snapshot_id = r.workflow_snapshot_id
 		          WHERE r.repository_id = $1 AND r.run_id = $2
 		          ORDER BY r.created_at, r.run_id`
 	case scope.repoWideBounded():
@@ -265,14 +269,17 @@ func statusRuns(ctx context.Context, runner db.Runner, repositoryID string, scop
 		// the always-included non-terminal runs.
 		args = append(args, scope.runLimit)
 		query = `WITH bounded AS (
-		            SELECT r.run_id, r.state, r.branch_name, r.repo_root, r.created_at
+		            SELECT r.run_id, r.state, r.branch_name, r.repo_root,
+		                   r.workflow_snapshot_id, r.created_at
 		              FROM striatumd.runs r
 		             WHERE r.repository_id = $1
 		               AND r.state NOT IN ` + statusTerminalRunStatesSQL + `
 		             UNION ALL
-		            SELECT t.run_id, t.state, t.branch_name, t.repo_root, t.created_at
+		            SELECT t.run_id, t.state, t.branch_name, t.repo_root,
+		                   t.workflow_snapshot_id, t.created_at
 		              FROM (
-		                SELECT r.run_id, r.state, r.branch_name, r.repo_root, r.created_at
+		                SELECT r.run_id, r.state, r.branch_name, r.repo_root,
+		                       r.workflow_snapshot_id, r.created_at
 		                  FROM striatumd.runs r
 		                 WHERE r.repository_id = $1
 		                   AND r.state IN ` + statusTerminalRunStatesSQL + `
@@ -280,12 +287,20 @@ func statusRuns(ctx context.Context, runner db.Runner, repositoryID string, scop
 		                 LIMIT $2
 		              ) t
 		          )
-		          SELECT run_id, state, branch_name, repo_root
-		            FROM bounded
-		           ORDER BY created_at, run_id`
+		          SELECT b.run_id, b.state, b.branch_name, b.repo_root,
+		                 w.workflow_id, w.workflow_version
+		            FROM bounded b
+		            LEFT JOIN striatumd.workflow_snapshots w
+		              ON w.repository_id = $1
+		             AND w.workflow_snapshot_id = b.workflow_snapshot_id
+		           ORDER BY b.created_at, b.run_id`
 	default: // --all-runs: legacy full-history behavior
-		query = `SELECT r.run_id, r.state, r.branch_name, r.repo_root
+		query = `SELECT r.run_id, r.state, r.branch_name, r.repo_root,
+		                w.workflow_id, w.workflow_version
 		           FROM striatumd.runs r
+		           LEFT JOIN striatumd.workflow_snapshots w
+		             ON w.repository_id = r.repository_id
+		            AND w.workflow_snapshot_id = r.workflow_snapshot_id
 		          WHERE r.repository_id = $1
 		          ORDER BY r.created_at, r.run_id`
 	}
@@ -294,9 +309,32 @@ func statusRuns(ctx context.Context, runner db.Runner, repositoryID string, scop
 		return nil, err
 	}
 	for _, row := range rows {
+		decorateRunWorkflowIdentity(row)
 		decorateBranchDivergence(row)
 	}
 	return rows, nil
+}
+
+// decorateRunWorkflowIdentity (RFC 0042) surfaces a stable human-facing
+// workflow name on each run row so the SSE dashboard run list can show which
+// workflow a run belongs to. The workflow_snapshots.workflow_id column is the
+// canonical workflow identity; workflow_version (when present) disambiguates
+// repeated runs of an evolving workflow. The joined columns are removed after
+// folding so the run payload carries one curated `workflow_name` field rather
+// than the raw snapshot columns.
+func decorateRunWorkflowIdentity(row map[string]any) {
+	workflowID := strings.TrimSpace(stringFrom(row, "workflow_id"))
+	version := strings.TrimSpace(stringFrom(row, "workflow_version"))
+	delete(row, "workflow_id")
+	delete(row, "workflow_version")
+	if workflowID == "" {
+		return
+	}
+	name := workflowID
+	if version != "" {
+		name = workflowID + " @ " + version
+	}
+	row["workflow_name"] = name
 }
 
 // decorateBranchDivergence implements #71: when branch.mode=auto sets
