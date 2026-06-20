@@ -927,9 +927,36 @@ func anchorActiveWorktreeForJob(ctx context.Context, runner any, repositoryID st
 	if runBranch == "" || runBranch == "<nil>" || nullable(run["branch_confirmed_at"]) == nil {
 		return nil, rpc.NewError("invalid_transition", "repo-write worktree commits require a confirmed run branch before completion", nil)
 	}
-	payload, err := anchorWorktreeCommitStack(ctx, repoRoot, fmt.Sprint(job["run_id"]), fmt.Sprint(job["job_id"]), runBranch, worktree, intValue(job["attempt"]))
+	runID := fmt.Sprint(job["run_id"])
+	jobID := fmt.Sprint(job["job_id"])
+	attempt := intValue(job["attempt"])
+	payload, err := anchorWorktreeCommitStack(ctx, repoRoot, runID, jobID, runBranch, worktree, attempt)
 	if err != nil {
 		return nil, err
+	}
+	// RFC 0135 P1 (#354, D246) — the staging-at-completion hook. SHADOW: it is a
+	// strict no-op unless the fan-in fold is opted in (STRIATUM_BARRIER_FANIN=1) AND
+	// the completing seat is a declared in-edge of a recorded fan-in freeze point.
+	// Until recordFaninFreezePoint is wired into a live fan-out, no run declares a
+	// fan-in, so this never stages on any current run and the default per-completion
+	// merge (done above by anchorWorktreeCommitStack) remains the sole fan-in path.
+	// It is ADDITIVE to the merge: it records the durable staging witness without
+	// changing how the run branch advanced. The per-job worktree HEAD the anchor
+	// recorded (payload["head"]) is the staged contribution commit.
+	if barrierFaninAssemblyEnabled() {
+		if tx, ok := runner.(db.TxRunner); ok {
+			workflowJobID := strings.TrimSpace(fmt.Sprint(job["workflow_job_id"]))
+			head := strings.TrimSpace(fmt.Sprint(payload["head"]))
+			if workflowJobID != "" && workflowJobID != "<nil>" && isFullGitSHA(head) {
+				stagedRef, serr := stageFaninContributionAtCompletion(ctx, tx, repoRoot, repositoryID, runID, workflowJobID, jobID, head, attempt)
+				if serr != nil {
+					return nil, serr
+				}
+				if stagedRef != "" {
+					payload["fanin_staged_ref"] = stagedRef
+				}
+			}
+		}
 	}
 	return payload, nil
 }

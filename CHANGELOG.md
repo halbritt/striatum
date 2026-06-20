@@ -48,6 +48,25 @@
   raw snapshot columns are folded away, leaving one stable field. A clickable
   per-workflow link is not added — no stable per-workflow route exists yet — and
   is noted as residual future work in the RFC.
+- **RFC 0133 `barrier_assembly` dispatcher + staging-at-completion landed in
+  shadow (#354, D246).** Completes the implementation of the fan-in leg of the
+  `(entity, seal)` barrier fold: the previously dead-code fan-in barrier machinery
+  (`recordFaninFreezePoint`/`stageFaninContribution`/`runBarrierAssembly` + the
+  two-phase journal + doctor checks) now has two production seams — a
+  staging-at-completion hook (`stageFaninContributionAtCompletion`, additive to and
+  never replacing the legacy per-completion merge) and the `barrier_assembly` job
+  dispatcher (`DispatchBarrierAssembly`, the sole production caller of
+  `runBarrierAssembly`, locking the run + asserting readiness + owner-bundle-0013
+  permission). Both gate on a NEW opt-in flag **`STRIATUM_BARRIER_FANIN` (default
+  OFF / shadow)**, so **default behavior is unchanged** (the D206 per-completion
+  merge stays the sole fan-in path). A new end-to-end equivalence fixture
+  (`TestFaninAssemblyDispatchSameFinalTreeAsPerCompletion`) proves the wired
+  stage→dispatch→assemble path produces the byte-identical run-branch tree the
+  legacy per-completion merge produces; a shadow-default no-op fixture proves the
+  flag-off path stages nothing and refuses dispatch. No new migration or owner
+  bundle (owner bundle 0013 already exists — applying it is an operator deploy
+  step). #354 stays open: the go-live flip and wiring `recordFaninFreezePoint` into
+  a live fan-out remain.
 - **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
   `collaboration_ledger` contract gains the residual adjudication shape deferred by
   PR #432: a **Check-B correspondence rubric** (per-`challenge`

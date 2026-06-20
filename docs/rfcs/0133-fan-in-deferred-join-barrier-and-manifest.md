@@ -1,6 +1,6 @@
 # RFC 0133: Fan-in deferred join barrier and join manifest
 
-Status: accepted / implemented (D213; folded into RFC 0135 P1, opt-in/shadow)
+Status: accepted / implemented (D213; folded into RFC 0135 P1; barrier_assembly dispatcher + staging-at-completion wired in shadow behind `STRIATUM_BARRIER_FANIN`, D246/#354)
 Date: 2026-06-17
 author: proposer-claude-opus-4-8-001
 Context:
