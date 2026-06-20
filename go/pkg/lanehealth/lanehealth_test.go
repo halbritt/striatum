@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/sessionliveness"
 	gosupervisor "github.com/halbritt/striatum/go/pkg/supervisor"
 )
 
@@ -435,5 +436,142 @@ func TestLegacyMapCompatibility(t *testing.T) {
 				t.Errorf("LegacyMap() = %#v, expected %#v", got, tt.expected)
 			}
 		})
+	}
+}
+
+// wedgedToolProgressFacts returns Facts for a fully attached, bound lane that is
+// holding an active lease, is still PTY-fresh (working_local), but has issued no
+// tool call for well over ToolProgressSeconds (600s) — so sessionliveness.Classify
+// reclassifies it wedged_no_tool_progress (#324). The active PID probe is
+// parameterized so the same fixture exercises both the alive-and-identity-matched
+// (RFC 0140 alive_but_silent) case and the confirmed-dead forgery-guard case.
+func wedgedToolProgressFacts(now time.Time, probeAlive bool, probeClass string) Facts {
+	// Lease heartbeat is inside the lease-heartbeat window (LeaseHeartbeatSeconds+
+	// slack = 330s) so the lease is NOT stalled, but past ProtocolFreshSeconds (60s)
+	// so the lane is NOT working_protocol — leaving the fresh PTY frame as the only
+	// fresh signal, i.e. working_local, which is exactly where the #324 tool-progress
+	// wedge fires.
+	leaseHB := now.Add(-120 * time.Second)  // lease fresh but not protocol-fresh
+	ptyFresh := now.Add(-5 * time.Second)   // PTY frames fresh => working_local
+	staleTool := now.Add(-20 * time.Minute) // last tool call long past 600s
+	// Protocol signals are stale (well past ProtocolFreshSeconds=60s) so the lane
+	// is NOT working_protocol; an await_packet recorded AFTER tools/list keeps the
+	// classifier off the await-packet rung and onto the active-lease rung, where
+	// the #324 tool-progress wedge fires on the stale tool-call timeline.
+	staleProto := now.Add(-10 * time.Minute)
+	awaitAfter := now.Add(-9 * time.Minute) // after tools/list, still stale
+	return Facts{
+		SupervisorRecorded:        true,
+		SupervisorState:           "attached",
+		PID:                       123,
+		HasPointer:                true,
+		PointerDaemonSupervisorID: "dsup_1",
+		PointerState:              "attached",
+		HasDaemonSupervisor:       true,
+		DaemonSupervisorID:        "dsup_1",
+		DaemonState:               "attached",
+		PointerPID:                123,
+		ProbePerformed:            true,
+		ProbeResult:               gosupervisor.LaneLiveness{Alive: probeAlive, Class: probeClass},
+		LivenessPolicy:            sessionliveness.DefaultPolicy(),
+		SessionActivity: sessionliveness.Activity{
+			SessionState:           "active",
+			LastMCPRequestAt:       &staleProto,
+			LastToolsListAt:        &staleTool,
+			LastAwaitPacketAt:      &awaitAfter,
+			LastToolCallStartedAt:  &staleTool,
+			LastToolCallFinishedAt: &staleTool,
+			LastPTYActivityAt:      &ptyFresh,
+			ActiveLeaseID:          "lease_1",
+			ActiveLeaseAcquiredAt:  &leaseHB,
+			ActiveLeaseHeartbeatAt: &leaseHB,
+			LastWorkHeartbeatAt:    &leaseHB,
+			Transport:              sessionliveness.TransportPTYHelper,
+		},
+	}
+}
+
+// TestClassifyAliveButSilentKeepsAttestation is the RFC 0140 part B fix: a lane
+// doing honest long local work — an active + identity-matched PID (active probe
+// Alive == true), but no tool call for >= ToolProgressSeconds — must classify as
+// alive_but_silent and KEEP attestation, rather than dropping it on the
+// wedged_no_tool_progress stall. Without the fix step 6 sets
+// ReasonSupervisorStalled and returns Attested=false.
+func TestClassifyAliveButSilentKeepsAttestation(t *testing.T) {
+	now := time.Now().UTC()
+	f := wedgedToolProgressFacts(now, true, "alive")
+
+	// Precondition: the underlying liveness verdict really is the #324 wedge,
+	// so this test exercises the seam the RFC describes (not some other path).
+	if got := sessionliveness.Classify(f.SessionActivity, f.LivenessPolicy, now).StallClass; got != sessionliveness.StallToolProgress {
+		t.Fatalf("fixture precondition: stall class = %q, want %q", got, sessionliveness.StallToolProgress)
+	}
+
+	got := Classify(f, now)
+	if !got.Alive {
+		t.Fatalf("expected Alive=true (active PID probe positive), got %#v", got)
+	}
+	if !got.Attested {
+		t.Fatalf("RFC 0140: a PID-alive, identity-matched, tool-call-silent lane must KEEP attestation; got Attested=false reason=%q", got.Reason)
+	}
+	if got.Reason == ReasonSupervisorStalled {
+		t.Fatalf("alive_but_silent must not be a ReasonSupervisorStalled attestation drop; got reason=%q", got.Reason)
+	}
+	if got.LivenessClass != LivenessAliveButSilent {
+		t.Fatalf("LivenessClass = %q, want %q", got.LivenessClass, LivenessAliveButSilent)
+	}
+	// The byline derivation reads LegacyMap(attested) -> the role byline.
+	if LegacyMap(got)["attested"] != true {
+		t.Fatalf("LegacyMap must report attested=true for alive_but_silent; got %#v", LegacyMap(got))
+	}
+}
+
+// TestClassifyWedgedDeadLaneLosesAttestation is the RFC 0026 / D080 forgery-guard
+// regression: the SAME tool-call-silent wedge on a lane whose active PID probe
+// FAILS (PID gone / identity mismatch) must STILL be unattested and reaped — the
+// alive_but_silent exemption must never rescue a genuinely dead lane. A dead probe
+// is caught at step 5 (before stall classification), so this also proves the
+// exemption keys on the same forgery-resistant PID oracle, not on PTY freshness.
+func TestClassifyWedgedDeadLaneLosesAttestation(t *testing.T) {
+	now := time.Now().UTC()
+	f := wedgedToolProgressFacts(now, false, "pid_gone")
+
+	got := Classify(f, now)
+	if got.Alive {
+		t.Fatalf("expected Alive=false for a confirmed-dead PID probe, got %#v", got)
+	}
+	if got.Attested {
+		t.Fatalf("forgery guard: a confirmed-dead lane must lose attestation regardless of PTY freshness; got Attested=true")
+	}
+	if got.Reason != ReasonPIDGone {
+		t.Fatalf("expected ReasonPIDGone (dead probe caught before stall), got %q", got.Reason)
+	}
+	if got.LivenessClass == LivenessAliveButSilent {
+		t.Fatalf("a dead lane must never be classified alive_but_silent")
+	}
+}
+
+// TestClassifyWedgedPipeLaneStaysUnattested guards RFC 0140 acceptance criterion
+// 6 (pipe transport stays degrade-safe): a wedged_no_tool_progress lane with NO
+// positive active PID probe (ProbePerformed=false — the pipe/no-oracle case) does
+// NOT get the alive_but_silent exemption and keeps today's behavior
+// (ReasonSupervisorStalled, Attested=false). The exemption keys on the PID probe,
+// never on PTY freshness or the liveness verdict alone.
+func TestClassifyWedgedPipeLaneStaysUnattested(t *testing.T) {
+	now := time.Now().UTC()
+	f := wedgedToolProgressFacts(now, true, "alive")
+	// No PID oracle available for this lane (pipe transport / probe not performed).
+	f.ProbePerformed = false
+	f.ProbeResult = gosupervisor.LaneLiveness{}
+
+	got := Classify(f, now)
+	if got.Attested {
+		t.Fatalf("a wedged lane with no positive PID probe must stay unattested (degrade-safe); got Attested=true")
+	}
+	if got.Reason != ReasonSupervisorStalled {
+		t.Fatalf("expected ReasonSupervisorStalled for the no-oracle wedge, got %q", got.Reason)
+	}
+	if got.LivenessClass == LivenessAliveButSilent {
+		t.Fatalf("a no-PID-oracle lane must never be classified alive_but_silent")
 	}
 }

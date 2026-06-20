@@ -369,6 +369,29 @@ flowchart TD
   n2 -.->|needs_revision| n1
 ```
 
+### Verification gate (`verification_gate`)
+
+Make completion a CHECKED property, not a word a producer types. The builder ships a claim ledger; a real type:verify job runs `striatum verifier run` against sanctioned checks (builtin go-test/vet/build run with zero operator JSON, capped at ASSERTED) and mints receipts; the adjudicator gates the cleared release on the receipts. The sanctioned-check intent is in the verify lane's forbidden_paths (separation of duties), and VERIFIED is reserved for an external, operator-pinned-and-attested check (RFC 0141).
+
+- Recommended for: gating a release on machine-checked claims; completion provenance; stopping ideation/doc stages from claiming features the build never delivered
+- Default lane sets: `author_reviewer`, `multi_review`, `local`
+- Required options: `workflow_id`, `artifact_root`
+**Support tier:** `experimental` — no unattended-reliability gate yet (RFC 0105); expect to supervise.
+
+```mermaid
+flowchart TD
+  n0["Build + claim ledger"]
+  n1["Verify (run checks, mint receipts)"]
+  n2["Adjudicate vs receipts"]
+  n3["Commit cleared release"]
+  n4["Finalize"]
+  n0 --> n1
+  n1 --> n2
+  n2 --> n3
+  n3 --> n4
+  n2 -.->|needs_revision| n0
+```
+
 ## Lane Sets
 
 ### Separate author and reviewer (`author_reviewer`)

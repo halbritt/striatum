@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,6 +98,43 @@ func TestDispatchRoutesReadThroughRPC(t *testing.T) {
 	}
 	if invoker.calls[1].method != "status" || invoker.calls[1].params["repository_id"] != "repo_resolved" || invoker.calls[1].params["run_id"] != "run_1" {
 		t.Fatalf("status call = %#v", invoker.calls[1])
+	}
+}
+
+func TestDispatchResolvesRelativeRepoPathBeforeDaemonRPC(t *testing.T) {
+	cwd := t.TempDir()
+	invoker := &fakeInvoker{}
+	var stdout, stderr bytes.Buffer
+	exit := Run(context.Background(), []string{"--repo", ".", "status"}, &stdout, &stderr, Options{
+		Invoker:     invoker,
+		ResolveRepo: true,
+		Cwd:         cwd,
+		Env:         []string{},
+	})
+	if exit != 0 {
+		t.Fatalf("exit = %d stderr=%s", exit, stderr.String())
+	}
+	if got := invoker.calls[0].params["path"]; got != filepath.Clean(cwd) {
+		t.Fatalf("repo.resolve path = %#v, want client cwd %q", got, filepath.Clean(cwd))
+	}
+}
+
+func TestDispatchResolvesNestedRelativeRepoPathBeforeDaemonRPC(t *testing.T) {
+	cwd := t.TempDir()
+	invoker := &fakeInvoker{}
+	var stdout, stderr bytes.Buffer
+	exit := Run(context.Background(), []string{"--repo", "child/repo", "status"}, &stdout, &stderr, Options{
+		Invoker:     invoker,
+		ResolveRepo: true,
+		Cwd:         cwd,
+		Env:         []string{},
+	})
+	if exit != 0 {
+		t.Fatalf("exit = %d stderr=%s", exit, stderr.String())
+	}
+	want := filepath.Join(cwd, "child", "repo")
+	if got := invoker.calls[0].params["path"]; got != want {
+		t.Fatalf("repo.resolve path = %#v, want %q", got, want)
 	}
 }
 

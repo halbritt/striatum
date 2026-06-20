@@ -27,6 +27,22 @@ const EnvDaemonAdminDBURL = "STRIATUM_DAEMON_ADMIN_DB_URL"
 var systemdUnitTemplate string
 
 const unitName = "striatumd.service"
+const systemUnitPath = "/etc/systemd/system/" + unitName
+
+type systemdScope string
+
+const (
+	systemdScopeUser   systemdScope = "user"
+	systemdScopeSystem systemdScope = "system"
+)
+
+var (
+	systemctlLookPath = exec.LookPath
+	systemctlOutputFn = func(args ...string) string {
+		out, _ := exec.Command("systemctl", args...).Output()
+		return strings.TrimSpace(string(out))
+	}
+)
 
 // daemonTomlScaffold is written to ~/.config/striatum/daemon.toml only when the
 // file is absent. It documents the single required key without committing the
@@ -383,13 +399,7 @@ func runDaemonStatus(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	unitInstalled := fileExists(layout.unitPath)
-	enabled := ""
-	active := ""
-	if systemdAvailable() {
-		enabled = systemctlOutput("is-enabled", unitName)
-		active = systemctlOutput("is-active", unitName)
-	}
+	unit := inspectDaemonUnit(layout)
 	socketPresent := fileExists(layout.socket)
 	configURL := db.ResolveConfig("")
 	dsnConfigured := strings.TrimSpace(configURL.URL) != ""
@@ -406,10 +416,11 @@ func runDaemonStatus(args []string, stdout, stderr io.Writer) int {
 			"ok": true,
 			"data": map[string]any{
 				"systemd":               systemdAvailable(),
-				"unit_path":             layout.unitPath,
-				"unit_installed":        unitInstalled,
-				"enabled":               enabled,
-				"active":                active,
+				"unit_path":             unit.Path,
+				"unit_scope":            string(unit.Scope),
+				"unit_installed":        unit.Installed,
+				"enabled":               unit.Enabled,
+				"active":                unit.Active,
 				"socket":                layout.socket,
 				"socket_present":        socketPresent,
 				"token":                 layout.token,
@@ -433,7 +444,7 @@ func runDaemonStatus(args []string, stdout, stderr io.Writer) int {
 
 	_, _ = fmt.Fprintln(stdout, "striatum daemon status")
 	if systemdAvailable() {
-		_, _ = fmt.Fprintf(stdout, "  unit:    %s (installed=%t, enabled=%s, active=%s)\n", layout.unitPath, unitInstalled, orDash(enabled), orDash(active))
+		_, _ = fmt.Fprintf(stdout, "  unit:    %s (scope=%s, installed=%t, enabled=%s, active=%s)\n", unit.Path, unit.Scope, unit.Installed, orDash(unit.Enabled), orDash(unit.Active))
 	} else {
 		_, _ = fmt.Fprintf(stdout, "  unit:    systemd not detected (foreground mode; unit path %s)\n", layout.unitPath)
 	}
@@ -476,6 +487,14 @@ type layout struct {
 	mcpEndpoint string
 }
 
+type daemonUnitInspection struct {
+	Path      string
+	Scope     systemdScope
+	Installed bool
+	Enabled   string
+	Active    string
+}
+
 func resolveLayout() (layout, error) {
 	runtimeDir, err := admin.RuntimeDir()
 	if err != nil {
@@ -489,13 +508,56 @@ func resolveLayout() (layout, error) {
 	if err != nil {
 		return layout{}, err
 	}
+	socket := strings.TrimSpace(os.Getenv(rpcclient.EnvDaemonSocket))
+	if socket == "" {
+		socket = filepath.Join(runtimeDir, "daemon-go.sock")
+	} else {
+		socket = filepath.Clean(socket)
+	}
 	return layout{
 		unitPath:    filepath.Join(configHome(), "systemd", "user", unitName),
 		configTOML:  db.DefaultConfigPath(),
-		socket:      filepath.Join(runtimeDir, "daemon-go.sock"),
+		socket:      socket,
 		token:       token,
 		mcpEndpoint: endpoint,
 	}, nil
+}
+
+func inspectDaemonUnit(layout layout) daemonUnitInspection {
+	if !systemdAvailable() {
+		return daemonUnitInspection{Path: layout.unitPath, Scope: systemdScopeUser, Installed: fileExists(layout.unitPath)}
+	}
+	user := inspectDaemonUnitScope(systemdScopeUser, layout.unitPath)
+	system := inspectDaemonUnitScope(systemdScopeSystem, systemUnitPath)
+	if user.Active == "active" {
+		return user
+	}
+	if system.Active == "active" {
+		return system
+	}
+	if user.Installed {
+		return user
+	}
+	if system.Installed {
+		return system
+	}
+	return user
+}
+
+func inspectDaemonUnitScope(scope systemdScope, fallbackPath string) daemonUnitInspection {
+	path := strings.TrimSpace(systemctlOutputForScope(scope, "show", unitName, "--property=FragmentPath", "--value"))
+	installed := path != "" && path != "/dev/null"
+	if !installed {
+		path = fallbackPath
+		installed = fileExists(fallbackPath)
+	}
+	return daemonUnitInspection{
+		Path:      path,
+		Scope:     scope,
+		Installed: installed,
+		Enabled:   systemctlOutputForScope(scope, "is-enabled", unitName),
+		Active:    systemctlOutputForScope(scope, "is-active", unitName),
+	}
 }
 
 func configHome() string {
@@ -526,7 +588,7 @@ func systemdAvailable() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	_, err := exec.LookPath("systemctl")
+	_, err := systemctlLookPath("systemctl")
 	return err == nil
 }
 
@@ -539,9 +601,18 @@ func systemctl(stderr io.Writer, args ...string) error {
 }
 
 func systemctlOutput(args ...string) string {
-	full := append([]string{"--user"}, args...)
-	out, _ := exec.Command("systemctl", full...).Output()
-	return strings.TrimSpace(string(out))
+	return systemctlOutputForScope(systemdScopeUser, args...)
+}
+
+func systemctlOutputForScope(scope systemdScope, args ...string) string {
+	return systemctlOutputFn(systemctlArgs(scope, args...)...)
+}
+
+func systemctlArgs(scope systemdScope, args ...string) []string {
+	if scope == systemdScopeUser {
+		return append([]string{"--user"}, args...)
+	}
+	return append([]string(nil), args...)
 }
 
 func runDoctorStatus() doctorStatus {

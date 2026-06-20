@@ -187,7 +187,10 @@ func TestEvidenceExportRendersProvenanceSections(t *testing.T) {
 		 WHERE repository_id = $2 AND run_id = $3`,
 		`{"terminal_state":"completed",
 		  "sessions":[{"session_id":"sess_run_evidence","state":"active","close_reason":"run_completed"}],
-		  "provenance_gate":[{"workflow_job_id":"review","basis":"override","override_decision_id":"dec_evidence"}]}`,
+		  "provenance_gate":[{"workflow_job_id":"review","basis":"override","override_decision_id":"dec_evidence"}],
+		  "claim_verification":[
+		    {"claim_id":"C1","authored_status":"VERIFIED","effective_status":"VERIFIED","verification_basis":"two_signal_sealed_receipt"},
+		    {"claim_id":"C2","authored_status":"VERIFIED","effective_status":"ASSERTED","verification_basis":"receipt_seal_mismatch"}]}`,
 		repoID, runID); err != nil {
 		t.Fatalf("freeze record: %v", err)
 	}
@@ -207,13 +210,20 @@ func TestEvidenceExportRendersProvenanceSections(t *testing.T) {
 		t.Fatalf("read exported markdown: %v", err)
 	}
 	text := string(body)
-	for _, section := range []string{"## Sessions", "## Provenance Gate", "## Operator Overrides"} {
+	for _, section := range []string{"## Sessions", "## Provenance Gate", "## Operator Overrides", "## Claim Verification"} {
 		if !strings.Contains(text, section) {
 			t.Fatalf("exported markdown missing %q section:\n%s", section, text)
 		}
 	}
 	if !strings.Contains(text, "sess_run_evidence") || !strings.Contains(text, "dec_evidence") {
 		t.Fatalf("sections missing frozen session / override decision:\n%s", text)
+	}
+	// RFC 0134: the claim-verification ledger renders authored vs. effective status
+	// and the degrade basis (a VERIFIED claim that decayed to ASSERTED is legible).
+	for _, want := range []string{"claim `C1`", "effective=`VERIFIED`", "basis=`two_signal_sealed_receipt`", "claim `C2`", "basis=`receipt_seal_mismatch`"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("claim-verification section missing %q:\n%s", want, text)
+		}
 	}
 	if fmt.Sprint(result["status"]) != "exported" {
 		t.Fatalf("status = %v, want exported", result["status"])

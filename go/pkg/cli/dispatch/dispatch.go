@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -353,18 +354,15 @@ func buildParams(route routes.Route, args []string, repositoryID string) (map[st
 }
 
 func resolveRepository(ctx context.Context, invoker Invoker, repoPath string, options Options) (string, error) {
-	if repoPath == "" {
-		if options.Cwd != "" {
-			repoPath = options.Cwd
-		} else if cwd, err := os.Getwd(); err == nil {
-			repoPath = cwd
-		}
+	resolvedPath, err := clientAbsoluteRepoPath(repoPath, options.Cwd)
+	if err != nil {
+		return "", err
 	}
 	route := options.ResolveRepoRoute
 	if route == "" {
 		route = "repo.resolve"
 	}
-	data, err := invoker.Invoke(ctx, route, map[string]any{"path": repoPath})
+	data, err := invoker.Invoke(ctx, route, map[string]any{"path": resolvedPath})
 	if err != nil {
 		return "", err
 	}
@@ -373,6 +371,27 @@ func resolveRepository(ctx context.Context, invoker Invoker, repoPath string, op
 		return "", fmt.Errorf("repo.resolve response did not include repository_id")
 	}
 	return repositoryID, nil
+}
+
+func clientAbsoluteRepoPath(repoPath, cwd string) (string, error) {
+	if repoPath == "" {
+		if cwd != "" {
+			repoPath = cwd
+		} else {
+			var err error
+			repoPath, err = os.Getwd()
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	if filepath.IsAbs(repoPath) {
+		return filepath.Clean(repoPath), nil
+	}
+	if cwd != "" {
+		return filepath.Abs(filepath.Join(cwd, repoPath))
+	}
+	return filepath.Abs(repoPath)
 }
 
 func writeError(stderr io.Writer, err error, options Options) int {

@@ -139,6 +139,83 @@ func TestStatusBoundsRepoWideRunsAndExcludesTerminalWork(t *testing.T) {
 	}
 }
 
+func TestStatusRunLimitZeroExcludesTerminalNonAcceptingVerdicts(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_status_bounded_verdicts"
+	now := time.Now().UTC()
+
+	crSeedRepo(t, ctx, runner, repoID, now)
+
+	liveRun := "run_live_verdicts"
+	crSeedRunState(t, ctx, runner, repoID, liveRun, "main", now, "running")
+	seedReviewJobWithVerdict(t, ctx, runner, statusVerdictFixture{
+		repoID:        repoID,
+		runID:         liveRun,
+		jobID:         "job_live_review",
+		workflowJobID: "review_live",
+		sessionID:     "sess_live_review",
+		verdictID:     "verdict_live_needs_revision",
+		verdict:       "needs_revision",
+		createdAt:     now,
+	})
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.sessions (
+		  repository_id, session_id, run_id, role_id, lane_id, slug, ordinal,
+		  capabilities_json, state, operator_label, registered_at
+		) VALUES ($1,'sess_live_closed',$2,'reviewer','agy','sess_live_closed',99,
+		         '["review"]'::jsonb,'closed','codex',$3)`,
+		repoID, liveRun, now.Add(time.Second)); err != nil {
+		t.Fatalf("seed closed live session: %v", err)
+	}
+
+	for i := 0; i < 30; i++ {
+		runID := fmt.Sprintf("run_terminal_verdict_%02d", i)
+		created := now.Add(time.Duration(i+1) * time.Minute)
+		crSeedRunState(t, ctx, runner, repoID, runID, "main", created, "completed")
+		seedReviewJobWithVerdict(t, ctx, runner, statusVerdictFixture{
+			repoID:        repoID,
+			runID:         runID,
+			jobID:         fmt.Sprintf("job_terminal_review_%02d", i),
+			workflowJobID: "review_terminal",
+			sessionID:     fmt.Sprintf("sess_terminal_review_%02d", i),
+			verdictID:     fmt.Sprintf("verdict_terminal_needs_revision_%02d", i),
+			verdict:       "needs_revision",
+			createdAt:     created,
+		})
+	}
+
+	rows, err := statusLatestNonAccepting(ctx, runner, repoID, statusRunScope{runLimit: 0})
+	if err != nil {
+		t.Fatalf("statusLatestNonAccepting: %v", err)
+	}
+	if len(rows) != 1 || fmt.Sprint(rows[0]["run_id"]) != liveRun {
+		t.Fatalf("bounded repo-wide non-accepting verdicts = %#v, want only live run", rows)
+	}
+	sessions, err := statusSessions(ctx, runner, repoID, statusRunScope{runLimit: 0})
+	if err != nil {
+		t.Fatalf("statusSessions: %v", err)
+	}
+	if len(sessions) != 1 || fmt.Sprint(sessions[0]["run_id"]) != liveRun {
+		t.Fatalf("bounded repo-wide sessions = %#v, want only live run", sessions)
+	}
+
+	allRows, err := statusLatestNonAccepting(ctx, runner, repoID, statusRunScope{allRuns: true, runLimit: 0})
+	if err != nil {
+		t.Fatalf("statusLatestNonAccepting --all-runs: %v", err)
+	}
+	if len(allRows) != 31 {
+		t.Fatalf("--all-runs non-accepting verdicts = %d, want 31", len(allRows))
+	}
+	allSessions, err := statusSessions(ctx, runner, repoID, statusRunScope{allRuns: true, runLimit: 0})
+	if err != nil {
+		t.Fatalf("statusSessions --all-runs: %v", err)
+	}
+	if len(allSessions) != 32 {
+		t.Fatalf("--all-runs sessions = %d, want 32", len(allSessions))
+	}
+}
+
 func runIDSet(rows []map[string]any) map[string]bool {
 	set := map[string]bool{}
 	for _, r := range rows {

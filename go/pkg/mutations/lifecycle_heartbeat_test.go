@@ -134,6 +134,69 @@ func TestHeartbeatRenewsLeaseAndEmitsEvent(t *testing.T) {
 	}
 }
 
+// TestHeartbeatLocalWorkAdvancesToolProgress is the RFC 0140 part-A server seam:
+// a plain work.heartbeat advances only last_work_heartbeat_at (the lease rung),
+// but a heartbeat with local_work=true ALSO advances last_tool_call_finished_at
+// (the #324 tool-progress timeline) so an honest long-local-work lane never ages
+// into wedged_no_tool_progress and keeps its attested byline.
+func TestHeartbeatLocalWorkAdvancesToolProgress(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_heartbeat_localwork"
+	_, sessionID, leaseID := seedHeartbeatLease(t, ctx, runner, repoID)
+
+	// Stamp a STALE tool-call timeline (20m ago) to simulate a lane that has done
+	// tool calls but is now deep in tool-call-less local work.
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.sessions
+		   SET last_tool_call_started_at = NOW() - INTERVAL '20 minutes',
+		       last_tool_call_finished_at = NOW() - INTERVAL '20 minutes'
+		 WHERE repository_id=$1 AND session_id=$2`, repoID, sessionID); err != nil {
+		t.Fatalf("seed stale tool-call timeline: %v", err)
+	}
+	readToolFinished := func() time.Time {
+		row, err := oneRow(ctx, runner,
+			`SELECT last_tool_call_finished_at FROM striatumd.sessions WHERE repository_id=$1 AND session_id=$2`, repoID, sessionID)
+		if err != nil {
+			t.Fatalf("read last_tool_call_finished_at: %v", err)
+		}
+		ts, ok := asTime(row["last_tool_call_finished_at"])
+		if !ok {
+			t.Fatalf("could not parse last_tool_call_finished_at %#v", row["last_tool_call_finished_at"])
+		}
+		return ts.UTC()
+	}
+	staleToolFinished := readToolFinished()
+
+	// A PLAIN heartbeat must NOT advance the tool-progress timeline.
+	if _, err := HandleHeartbeat(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": sessionID, "lease_id": leaseID,
+	})); err != nil {
+		t.Fatalf("plain heartbeat: %v", err)
+	}
+	if afterPlain := readToolFinished(); !afterPlain.Equal(staleToolFinished) {
+		t.Fatalf("plain heartbeat must not touch last_tool_call_finished_at: was %v, now %v", staleToolFinished, afterPlain)
+	}
+
+	// A local_work heartbeat MUST advance last_tool_call_finished_at to ~now.
+	result, err := HandleHeartbeat(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": sessionID, "lease_id": leaseID, "local_work": true,
+	}))
+	if err != nil {
+		t.Fatalf("local_work heartbeat: %v", err)
+	}
+	if result["local_work"] != true {
+		t.Fatalf("local_work heartbeat result should echo local_work=true, got %#v", result)
+	}
+	advanced := readToolFinished()
+	if !advanced.After(staleToolFinished) {
+		t.Fatalf("local_work heartbeat must advance last_tool_call_finished_at off the stale value %v, got %v", staleToolFinished, advanced)
+	}
+	if advanced.Before(time.Now().UTC().Add(-2 * time.Minute)) {
+		t.Fatalf("local_work heartbeat advanced last_tool_call_finished_at to %v, want ~now", advanced)
+	}
+}
+
 func TestHeartbeatRequiresSessionAndLease(t *testing.T) {
 	ctx := context.Background()
 	runner := pgtest.Pool(t).Runner

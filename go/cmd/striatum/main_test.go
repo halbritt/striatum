@@ -283,7 +283,14 @@ func TestRunDriveDispatchesThroughRPC(t *testing.T) {
 	t.Setenv("STRIATUM_REPOSITORY_ID", "")
 	socket := filepath.Join(t.TempDir(), "daemon.sock")
 	server := rpc.NewServer()
+	wantRepoPath, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
 	server.Register("repo.resolve", func(_ context.Context, envelope rpc.Envelope) (map[string]any, error) {
+		if envelope.Params["path"] != wantRepoPath {
+			t.Fatalf("repo.resolve path = %#v, want %q", envelope.Params["path"], wantRepoPath)
+		}
 		return map[string]any{"repository_id": "repo_1", "repo_root": t.TempDir()}, nil
 	})
 	server.Register("run.detail", func(_ context.Context, envelope rpc.Envelope) (map[string]any, error) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/halbritt/striatum/go/pkg/cli/rundrive"
 	cliskills "github.com/halbritt/striatum/go/pkg/cli/skills"
 	"github.com/halbritt/striatum/go/pkg/laneproviderauth"
+	"github.com/halbritt/striatum/go/pkg/verifier"
 	"github.com/halbritt/striatum/go/pkg/workflowauthoring"
 	"github.com/halbritt/striatum/go/pkg/workflowgenerate"
 	"github.com/halbritt/striatum/go/pkg/workflowtemplates"
@@ -391,11 +393,12 @@ func runRunDrive(args []string, stdout io.Writer, stderr io.Writer, globals lead
 		repositoryID = envLookup(os.Environ(), "STRIATUM_REPOSITORY_ID")
 	}
 	if repositoryID == "" {
-		if repoRoot == "" {
-			if cwd, err := os.Getwd(); err == nil {
-				repoRoot = cwd
-			}
+		resolvedRoot, err := clientRepoRoot(repoRoot)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return 1
 		}
+		repoRoot = resolvedRoot
 		resolved, err := client.Invoke(ctx, "repo.resolve", map[string]any{"path": repoRoot})
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, err.Error())
@@ -454,6 +457,20 @@ func parseDriveInterval(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("--interval must be a positive duration or seconds value")
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func clientRepoRoot(repoRoot string) (string, error) {
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	if filepath.IsAbs(repoRoot) {
+		return filepath.Clean(repoRoot), nil
+	}
+	return filepath.Abs(repoRoot)
 }
 
 func printRunDriveHelp(out io.Writer) {
@@ -809,6 +826,12 @@ func runWorkflowValidate(args []string, stdout io.Writer, stderr io.Writer, repo
 		if err := refuseSameModelLint(workflow); err != nil {
 			return outputWorkflowValidateError(stdout, stderr, jsonOutput, "workflow_lint_refused", err, 8)
 		}
+	}
+	// RFC 0141 Pillar 3 (UNFILLED): a verification gate whose external checks are
+	// sanctioned-but-unpinned on this host reads RED here, naming the entries and
+	// the literal fix command — never a false green. Pure file read, no lane.
+	if tb := verifier.EvaluateAllowlistTemplate(repoRoot, workflow); tb != nil {
+		return outputWorkflowValidateError(stdout, stderr, jsonOutput, tb.Reason, fmt.Errorf("%s", tb.Message), 8)
 	}
 	if jsonOutput {
 		return writeJSON(stdout, map[string]any{

@@ -99,13 +99,21 @@ func seedQuorumDoctorVerdict(t *testing.T, ctx context.Context, runner db.Runner
 }
 
 func seedQuorumDoctorDissent(t *testing.T, ctx context.Context, runner db.Runner, repoID, runID, seatWF, jobID string, attempt int, verdict string) {
+	seedQuorumDoctorDissentForVerdict(t, ctx, runner, repoID, runID, seatWF, jobID, attempt, verdict, "")
+}
+
+func seedQuorumDoctorDissentForVerdict(t *testing.T, ctx context.Context, runner db.Runner, repoID, runID, seatWF, jobID string, attempt int, verdict, verdictID string) {
 	t.Helper()
 	now := time.Now().UTC()
+	var verdictRef any
+	if verdictID != "" {
+		verdictRef = verdictID
+	}
 	if err := runner.Exec(ctx, `
 		INSERT INTO striatumd.dissent_ledger (
-		  repository_id, dissent_id, run_id, workflow_job_id, attempt, job_id, verdict, recorded_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		repoID, "d_"+jobID, runID, seatWF, attempt, jobID, verdict, now); err != nil {
+		  repository_id, dissent_id, run_id, workflow_job_id, attempt, job_id, verdict_id, verdict, recorded_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		repoID, "d_"+jobID, runID, seatWF, attempt, jobID, verdictRef, verdict, now); err != nil {
 		t.Fatalf("insert dissent: %v", err)
 	}
 }
@@ -307,6 +315,38 @@ func TestDoctorDissentLedgerCompletenessFires(t *testing.T) {
 	_, problems2, _, _, _ := doctorQuorumIntegrity(ctx, runner, repoID)
 	if hasQuorumProblem(problems2, "dissent_ledger_incomplete.rev_g") {
 		t.Fatalf("dissent_ledger_incomplete must be silent once the ledger row exists, got: %v", problems2)
+	}
+}
+
+// TestDoctorDissentLedgerCompletenessUsesVerdictIDAcrossAttemptDrift is the #493
+// trap: a blocking verdict can write its dissent token, then revision/recovery can
+// advance the seat's live attempt. The forward-write is still valid because it is
+// tied to the recorded verdict_id; doctor must not misread the later attempt bump
+// as a missing token.
+func TestDoctorDissentLedgerCompletenessUsesVerdictIDAcrossAttemptDrift(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	runner := pool.Runner
+
+	repoID := "repo_qdoc_ledger_drift"
+	runID := "run_qdoc_ledger_drift"
+	seedQuorumDoctorRepoRun(t, ctx, runner, repoID, runID, panelSnapshot("gate", map[string]string{
+		"rev_g": "gating",
+	}))
+	seedQuorumDoctorJob(t, ctx, runner, repoID, runID, "job_gate", "gate", "synthesis", "blocked", 1)
+	seedQuorumDoctorJob(t, ctx, runner, repoID, runID, "job_g", "rev_g", "review", "completed", 1)
+	seedQuorumDoctorDep(t, ctx, runner, repoID, "job_gate", "job_g")
+	seedQuorumDoctorSession(t, ctx, runner, repoID, runID, "sess_g")
+	seedQuorumDoctorVerdict(t, ctx, runner, repoID, runID, "v_g", "job_g", "sess_g", "needs_revision")
+	seedQuorumDoctorDissentForVerdict(t, ctx, runner, repoID, runID, "rev_g", "job_g", 1, "needs_revision", "v_g")
+
+	if err := runner.Exec(ctx, `UPDATE striatumd.jobs SET attempt=2 WHERE repository_id=$1 AND job_id=$2`, repoID, "job_g"); err != nil {
+		t.Fatalf("advance job attempt: %v", err)
+	}
+
+	_, problems, _, _, _ := doctorQuorumIntegrity(ctx, runner, repoID)
+	if hasQuorumProblem(problems, "dissent_ledger_incomplete.rev_g") {
+		t.Fatalf("dissent_ledger_incomplete must be silent when the verdict_id token exists across attempt drift, got: %v", problems)
 	}
 }
 

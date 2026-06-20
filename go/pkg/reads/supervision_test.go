@@ -1117,7 +1117,7 @@ func (r *noSupervisorFakeRunner) Query(ctx context.Context, sql string, args ...
 
 func TestNoSupervisorRowDefaultsToNoneAndUnknown(t *testing.T) {
 	runner := &noSupervisorFakeRunner{}
-	sessions, err := statusSessions(context.Background(), runner, "repo_1", "run_1")
+	sessions, err := statusSessions(context.Background(), runner, "repo_1", statusRunScope{runID: "run_1"})
 	if err != nil {
 		t.Fatalf("statusSessions: %v", err)
 	}

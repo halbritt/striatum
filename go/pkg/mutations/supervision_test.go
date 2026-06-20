@@ -861,6 +861,14 @@ func (tx *superviseReportFakeTx) QueryRow(_ context.Context, sql string, _ ...an
 		if tx.supervisor.HasPID || tx.supervisor.PID > 0 {
 			pid = tx.supervisor.PID
 		}
+		// RFC 0139: findReportSupervisor now also reads p.updated_at (the prior
+		// pointer timestamp) so refreshReportSupervisorHeartbeat can compute the
+		// coalesce write-skip from the already-read row. Surface PointerUpdatedAt
+		// as that column; nil (empty) means "no stored timestamp" → always writes.
+		var pointerUpdatedAt any
+		if tx.supervisor.PointerUpdatedAt != "" {
+			pointerUpdatedAt = tx.supervisor.PointerUpdatedAt
+		}
 		return superviseReportFakeRow{values: []any{
 			tx.supervisor.SupervisorID,
 			tx.supervisor.RunID,
@@ -870,6 +878,7 @@ func (tx *superviseReportFakeTx) QueryRow(_ context.Context, sql string, _ ...an
 			tx.supervisor.PIDStartTime,
 			&dsup,
 			tx.supervisor.Metadata,
+			pointerUpdatedAt,
 		}}
 	case strings.Contains(sql, "repo_event_chain_heads"):
 		return superviseReportFakeRow{err: pgx.ErrNoRows}

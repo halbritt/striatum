@@ -1,0 +1,56 @@
+-- GH #421 / RFC 0139 Direction 2 — drop `state` from the non-partial run index on
+-- process_supervisor_pointers to stop the HOT-defeating index churn.
+--
+-- THE CHURN. The reconcile/heartbeat loop's `state` transitions
+-- (starting → attached → detached → stopped/lost) on process_supervisor_pointers
+-- are non-HOT updates because `state` is in TWO indexes: the partial-unique
+-- uq_active_daemon_supervisor_pointer_per_session and the non-partial
+-- idx_process_supervisor_pointers_run (repository_id, run_id, state). Every `state`
+-- write therefore rewrites a heap tuple AND two index entries — measured as ~20% of
+-- updates going to new pages (n_tup_newpage_upd) and a depressed 79.9% HOT ratio vs
+-- ~92% on the un-state-churned sibling tables (GH #421). Removing `state` from the
+-- non-partial run index turns the common intra-live transitions (which do NOT
+-- change partial-index membership) into single-index/HOT updates, cutting the
+-- new-page rate toward the ≤5% target and lifting HOT toward ≥92%.
+--
+-- WHY `state` IS NOT NEEDED ON THIS INDEX (RFC 0139 Open Question 1, verified).
+-- The run-scoped reads of process_supervisor_pointers key on (repository_id, run_id,
+-- session_id) and ORDER BY updated_at DESC — the recovery reconcile read
+-- (recovery.go) and the liveness oracle (recovery_liveness_oracle.go) — none filters
+-- on `state` VIA this index. The status / dashboard run views join the pointer on
+-- its PRIMARY KEY (repository_id, supervisor_id) and apply the `state='attached'`
+-- filter on process_supervisors, not on the pointer run index. So
+-- (repository_id, run_id) still serves every run-scoped lookup; `state` was an
+-- unused third key column here.
+--
+-- WHAT IS DELIBERATELY UNTOUCHED. The partial-unique
+-- uq_active_daemon_supervisor_pointer_per_session (WHERE state IN
+-- ('starting','attached','detached')) is the #417 phantom-supervisor stabilization
+-- (one live pointer per session; the attached-scoped status join and the reap
+-- depend on it). It stays exactly as is — a `state` transition that crosses the
+-- live↔terminal boundary correctly updates it (the row enters/leaves the partial
+-- index). The `state` column, its CHECK domain, and migration 0033's reap DML are
+-- unchanged.
+--
+-- OWNERSHIP-SAFETY (the owner-DDL trap). process_supervisor_pointers was CREATEd by
+-- runtime migration 0005, below the floor-27 owner-DDL guard and pre-dating the RFC
+-- 0110 two-role split, so on a two-role deploy it is owned by the bootstrap/owner
+-- role, not striatumd_rw. DROP INDEX / CREATE INDEX requires ownership of the
+-- underlying table, so this migration depends on owner bundle 0019 having
+-- transferred process_supervisor_pointers ownership to striatumd_rw FIRST (owner
+-- bundles apply before the runtime migrations in the deploy runbook). The
+-- migrations_test owner-DDL guard matches only ALTER/DROP TABLE, so this
+-- DROP INDEX / CREATE INDEX clears it without listing the table in
+-- runtimeOwnedTablesAlterable.
+--
+-- TRANSACTION NOTE. Runtime migrations run inside a transaction (applyOne →
+-- BeginTx), so a non-transactional concurrent index build is NOT permitted here
+-- (the TestRunnerMigrationsHaveNoNonTransactionalDDL guard enforces it). A plain
+-- DROP INDEX + CREATE INDEX briefly takes an exclusive lock, but
+-- process_supervisor_pointers is tiny (the issue measures it at low hundreds of
+-- live rows / ~150-255 MB of repackable bloat), so the rebuild is sub-second — a
+-- one-time cost.
+
+DROP INDEX IF EXISTS striatumd.idx_process_supervisor_pointers_run;
+CREATE INDEX IF NOT EXISTS idx_process_supervisor_pointers_run
+  ON striatumd.process_supervisor_pointers (repository_id, run_id);

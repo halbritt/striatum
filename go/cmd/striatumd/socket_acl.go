@@ -26,6 +26,7 @@ var (
 	removeDaemonSocketACL = func(spec, path string) error {
 		return exec.Command("setfacl", "-x", spec, path).Run()
 	}
+	statDaemonSocketACLPath = os.Stat
 )
 
 func clearDaemonSocketAccessFromLaneUser(socketPath string) {
@@ -47,7 +48,7 @@ func grantDaemonSocketAccessToLaneUser(socketPath string) error {
 	if _, err := lookupDaemonLaneUser(laneUser); err != nil {
 		return fmt.Errorf("%s=%s lookup: %w", daemonLaneOSUserEnv, laneUser, err)
 	}
-	entries := daemonSocketACLTargets(socketPath, laneUser)
+	entries := daemonSocketACLGrantTargets(socketPath, laneUser)
 	applied := make([]daemonSocketACLTarget, 0, len(entries))
 	for _, entry := range entries {
 		if err := setDaemonSocketACL(entry.spec, entry.path); err != nil {
@@ -83,6 +84,26 @@ func daemonSocketACLTargets(socketPath, laneUser string) []daemonSocketACLTarget
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func daemonSocketACLGrantTargets(socketPath, laneUser string) []daemonSocketACLTarget {
+	entries := daemonSocketACLTargets(socketPath, laneUser)
+	filtered := entries[:0]
+	for _, entry := range entries {
+		if entry.spec == "u:"+laneUser+":--x" && directoryAlreadyWorldTraversable(entry.path) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
+func directoryAlreadyWorldTraversable(path string) bool {
+	info, err := statDaemonSocketACLPath(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0o001 != 0
 }
 
 func clearDaemonSocketACLs(socketPath, laneUser string) {

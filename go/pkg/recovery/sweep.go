@@ -3,6 +3,8 @@ package recovery
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
@@ -14,9 +16,37 @@ type queryRunner interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// perRunSweepFunc is the per-run unit of work both background sweeps invoke
+// (mutations.SweepRun / mutations.SchedulerSpawnOnce share this signature). It
+// is a field on the sweep structs so a test can inject a panicking unit, and so
+// runPerRunSweep can wrap it in a recover.
+type perRunSweepFunc func(ctx context.Context, runner db.Runner, repositoryID, runID, author string) (map[string]any, error)
+
+// runPerRunSweep invokes one per-run sweep unit and converts a recovered panic
+// into an error so a single poison run degrades that run's cursor (the existing
+// error path) instead of unwinding past the sweep loop and crashing the single-
+// writer daemon (FMA-001 / issue #451). The recover is scoped to ONE run: a
+// panic degrades that run and the caller continues to the next run. The panic +
+// stack are logged loud at error level so the fault stays visible, mirroring the
+// daemon's prior goroutine-level panic log without the fatal re-raise.
+func runPerRunSweep(ctx context.Context, fn perRunSweepFunc, runner db.Runner, repositoryID, runID, author string) (result map[string]any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("recovery sweep panic recovered (repository_id=%s run_id=%s); degrading this run and continuing: panic=%v\n%s", repositoryID, runID, r, debug.Stack())
+			result = nil
+			err = fmt.Errorf("sweep panic recovered: %v", r)
+		}
+	}()
+	return fn(ctx, runner, repositoryID, runID, author)
+}
+
 type ActiveRunSweep struct {
 	Runner db.Runner
 	Author string
+
+	// sweepRun is the per-run unit; nil means use mutations.SweepRun. It is set
+	// only in tests to inject a panicking or failing unit.
+	sweepRun perRunSweepFunc
 }
 
 func (s ActiveRunSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
@@ -61,9 +91,14 @@ func (s ActiveRunSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 
+	sweepRun := s.sweepRun
+	if sweepRun == nil {
+		sweepRun = mutations.SweepRun
+	}
+
 	sweeps := []map[string]any{}
 	for _, run := range activeRuns {
-		result, err := mutations.SweepRun(ctx, s.Runner, run.repositoryID, run.runID, author)
+		result, err := runPerRunSweep(ctx, sweepRun, s.Runner, run.repositoryID, run.runID, author)
 		if err != nil {
 			result = map[string]any{"error": err.Error()}
 			if cursorErr := upsertSchedulerCursor(ctx, s.Runner, run.repositoryID, run.runID, result, "sweep_degraded"); cursorErr != nil {
@@ -99,6 +134,10 @@ func (s ActiveRunSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
 type AutoSpawnSweep struct {
 	Runner db.Runner
 	Author string
+
+	// spawnRun is the per-run unit; nil means use mutations.SchedulerSpawnOnce.
+	// It is set only in tests to inject a panicking or failing unit.
+	spawnRun perRunSweepFunc
 }
 
 func (s AutoSpawnSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
@@ -150,9 +189,14 @@ func (s AutoSpawnSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 
+	spawnRun := s.spawnRun
+	if spawnRun == nil {
+		spawnRun = mutations.SchedulerSpawnOnce
+	}
+
 	sweeps := []map[string]any{}
 	for _, c := range candidates {
-		result, err := mutations.SchedulerSpawnOnce(ctx, s.Runner, c.repositoryID, c.runID, author)
+		result, err := runPerRunSweep(ctx, spawnRun, s.Runner, c.repositoryID, c.runID, author)
 		if err != nil {
 			// A poisoned spawn (expired/missing grant, run-as failure) is recorded
 			// loud as a degraded cursor + surfaced in the sweep result; the scheduler

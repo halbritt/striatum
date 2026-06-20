@@ -989,7 +989,15 @@ func prevalidateSubmitReviewArtifactVerdict(ctx context.Context, runner any, rep
 	if !pathAllowed(repoRoot, pathText, asMap(job["write_scope_json"])) {
 		return rpc.NewError("artifact_error", "artifact path is outside the job write scope", nil)
 	}
-	path, err := repoRelativePath(repoRoot, pathText, false)
+	// #484: resolve through the job's active worktree (mirrors the worktree-aware
+	// publish + fresh-review re-read). review.submit of a worktree-isolated
+	// collaboration_ledger job otherwise fails with "artifact file does not exist"
+	// because the ledger lives in the per-job worktree, not repoRoot.
+	activeWorktree, err := activeWorktreeForJob(ctx, runner, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil {
+		return err
+	}
+	path, err := artifactSourcePath(repoRoot, pathText, activeWorktree)
 	if err != nil {
 		return rpc.NewError("artifact_error", err.Error(), nil)
 	}

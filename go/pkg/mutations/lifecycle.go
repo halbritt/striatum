@@ -840,6 +840,19 @@ func HandleHeartbeat(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	sessionID := stringParam(envelope, "session_id")
 	leaseID := stringParam(envelope, "lease_id")
 	extendSeconds := intParam(envelope, "extend_seconds", 1800)
+	// RFC 0140 (part A): local_work marks a keepalive issued by the agent loop
+	// during long, tool-call-less local work (a test suite, a browser-acceptance
+	// profile, a large repo scan). A plain work.heartbeat only stamps
+	// last_work_heartbeat_at, which keeps the LEASE rung satisfied but does NOT
+	// advance the tool-call timeline the #324 wedged_no_tool_progress rung reads —
+	// so an honest long-local-work lane still ages into that stall and loses its
+	// publishable byline mid-work. When local_work is set we ALSO advance the
+	// tool-progress base (last_tool_call_finished_at), so the lane never crosses
+	// ToolProgressSeconds and is never reclassified wedged_no_tool_progress. This is
+	// forgery-resistant exactly like every other tool-timeline stamp: only the live
+	// supervised process holds the session-bound token, so a dead agent cannot issue
+	// it (D080) — its timeline still ages out and recovery still reaps it.
+	localWork := boolParam(envelope, "local_work")
 	if sessionID == "" || leaseID == "" {
 		return nil, rpc.NewError("schema_invalid", "work.heartbeat requires session_id and lease_id", nil)
 	}
@@ -866,13 +879,17 @@ func HandleHeartbeat(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 			 WHERE repository_id = $3 AND lease_id = $4`, now, expiresAt, repositoryID, leaseID); err != nil {
 			return nil, err
 		}
-		if err := sessionliveness.Record(ctx, tx, repositoryID, sessionID, sessionliveness.LastWorkHeartbeatAt); err != nil {
+		activityColumns := []string{sessionliveness.LastWorkHeartbeatAt}
+		if localWork {
+			activityColumns = append(activityColumns, sessionliveness.LastToolCallFinishedAt)
+		}
+		if err := sessionliveness.Record(ctx, tx, repositoryID, sessionID, activityColumns...); err != nil {
 			return nil, err
 		}
-		if _, err := appendEvent(ctx, tx, repositoryID, lease["run_id"], "lease.heartbeat", sessionID, lease["resource_id"], nil, nil, leaseID, map[string]any{"expires_at": expiresAt}); err != nil {
+		if _, err := appendEvent(ctx, tx, repositoryID, lease["run_id"], "lease.heartbeat", sessionID, lease["resource_id"], nil, nil, leaseID, map[string]any{"expires_at": expiresAt, "local_work": localWork}); err != nil {
 			return nil, err
 		}
-		return map[string]any{"status": "heartbeat", "expires_at": expiresAt}, nil
+		return map[string]any{"status": "heartbeat", "expires_at": expiresAt, "local_work": localWork}, nil
 	})
 }
 

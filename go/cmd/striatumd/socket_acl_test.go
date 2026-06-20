@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/user"
 	"path/filepath"
 	"reflect"
@@ -75,6 +76,38 @@ func TestGrantDaemonSocketAccessToLaneUserAppliesParentDirSocketDirAndSocketACLs
 	}
 }
 
+func TestGrantDaemonSocketAccessToLaneUserSkipsWorldTraversableAncestor(t *testing.T) {
+	t.Setenv(daemonLaneOSUserEnv, "striatum-lane")
+	restore := stubDaemonSocketACL(t)
+	defer restore()
+	currentDaemonUser = func() string { return "daemonuser" }
+	statDaemonSocketACLPath = os.Stat
+
+	parentDir := t.TempDir()
+	if err := os.Chmod(parentDir, 0o755); err != nil {
+		t.Fatalf("chmod parent dir: %v", err)
+	}
+	socketDir := filepath.Join(parentDir, "striatum")
+	if err := os.Mkdir(socketDir, 0o700); err != nil {
+		t.Fatalf("mkdir socket dir: %v", err)
+	}
+	socketPath := filepath.Join(socketDir, "daemon-go.sock")
+	if err := os.WriteFile(socketPath, []byte{}, 0o600); err != nil {
+		t.Fatalf("write socket placeholder: %v", err)
+	}
+
+	if err := grantDaemonSocketAccessToLaneUser(socketPath); err != nil {
+		t.Fatalf("grantDaemonSocketAccessToLaneUser() error = %v", err)
+	}
+	want := []daemonSocketACLCall{
+		{op: "set", spec: "u:striatum-lane:--x", path: socketDir},
+		{op: "set", spec: "u:striatum-lane:rw-", path: socketPath},
+	}
+	if !reflect.DeepEqual(daemonSocketACLCalls, want) {
+		t.Fatalf("setfacl calls = %#v, want %#v", daemonSocketACLCalls, want)
+	}
+}
+
 func TestGrantDaemonSocketAccessToLaneUserSurfacesACLFailure(t *testing.T) {
 	t.Setenv(daemonLaneOSUserEnv, "striatum-lane")
 	restore := stubDaemonSocketACL(t)
@@ -133,6 +166,7 @@ func stubDaemonSocketACL(t *testing.T) func() {
 	origCurrent := currentDaemonUser
 	origSet := setDaemonSocketACL
 	origRemove := removeDaemonSocketACL
+	origStat := statDaemonSocketACLPath
 	daemonSocketACLCalls = nil
 	lookupDaemonLaneUser = func(name string) (*user.User, error) {
 		return &user.User{Username: name}, nil
@@ -146,11 +180,15 @@ func stubDaemonSocketACL(t *testing.T) func() {
 		daemonSocketACLCalls = append(daemonSocketACLCalls, daemonSocketACLCall{op: "remove", spec: spec, path: path})
 		return nil
 	}
+	statDaemonSocketACLPath = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
 	return func() {
 		lookupDaemonLaneUser = origLookup
 		currentDaemonUser = origCurrent
 		setDaemonSocketACL = origSet
 		removeDaemonSocketACL = origRemove
+		statDaemonSocketACLPath = origStat
 		daemonSocketACLCalls = nil
 	}
 }

@@ -52,10 +52,8 @@ func runRunStart(args []string, stdout, stderr io.Writer, globals leadingGlobals
 		return code
 	}
 	repo := globals.RepoPath
-	if repo == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			repo = cwd
-		}
+	if resolvedRepo, err := clientRepoRoot(repo); err == nil {
+		repo = resolvedRepo
 	}
 	if err := autoDriveLaunch(stderr, driverLaunch{
 		RunID:      runID,

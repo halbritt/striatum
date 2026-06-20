@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	LatestDaemonDBVersion = 37
+	LatestDaemonDBVersion = 40
 	MigrationLockKey      = 332933
 )
 
@@ -66,6 +66,9 @@ func Migrations() ([]Migration, error) {
 		34: "conversation post_dialog_hook declaration (RFC 0094 §1 / RFC 0095 Phase 3 / #402)",
 		35: "confidence-gated pipe-lane escalation state (RFC 0131 131-C / #336)",
 		37: "resolve blockers stranded open on terminal runs (#420)",
+		38: "durable buffer for no-reader supervised_push packets (FMA-006 / #456)",
+		39: "opt-in terminal-gap tolerance for a strict fan-in with a provably-dead required seat (RFC 0138 / #453)",
+		40: "drop `state` from non-partial idx_process_supervisor_pointers_run to cut HOT-defeating index churn (RFC 0139 Direction 2 / #421)",
 	}
 	entries, err := migrationFS.ReadDir("sql")
 	if err != nil {
@@ -240,8 +243,21 @@ CREATE TABLE IF NOT EXISTS striatumd.schema_meta (
 );`)
 }
 
+// scalarQuerier is the read surface shared by Runner and TxRunner that
+// verifyRecordedHash needs. Both PgxRunner/PgxTxRunner and the test fakes
+// satisfy it, so the hash check can run either against the pool (the <= current
+// pre-apply pass) or inside the apply transaction (the FMA-008 in-progress
+// version check) without duplicating the comparison.
+type scalarQuerier interface {
+	QueryScalar(ctx context.Context, sql string, args ...any) (string, error)
+}
+
 func verifyRecordedHash(ctx context.Context, runner Runner, migration Migration) error {
-	value, err := runner.QueryScalar(ctx, "SELECT sha256 FROM striatumd.schema_migrations WHERE version = $1", migration.Version)
+	return verifyRecordedHashTx(ctx, runner, migration)
+}
+
+func verifyRecordedHashTx(ctx context.Context, q scalarQuerier, migration Migration) error {
+	value, err := q.QueryScalar(ctx, "SELECT sha256 FROM striatumd.schema_migrations WHERE version = $1", migration.Version)
 	if err != nil || value == "" {
 		return nil
 	}
@@ -251,11 +267,40 @@ func verifyRecordedHash(ctx context.Context, runner Runner, migration Migration)
 	return nil
 }
 
+// applyOne runs a single migration's DDL and BOTH version stamps
+// (schema_migrations + schema_meta.substrate_version) inside ONE transaction so
+// that a crash either applies the migration AND records its version, or applies
+// nothing. This closes the FMA-002 crash window where the DDL committed in its
+// own implicit transaction but the version stamps were separate autocommit
+// writes: a crash in the gap left the schema DDL-applied yet version-unstamped,
+// the restart re-ran the same migration, and atomicity rested entirely on an
+// unenforced per-migration idempotency convention.
+//
+// CONSTRAINT: some PostgreSQL DDL cannot run inside a transaction block (notably
+// CREATE INDEX CONCURRENTLY and certain ALTER TYPE ... ADD VALUE forms). The
+// embedded runner migrations (sql/*.sql) are inventoried to contain NONE of
+// these — CONCURRENTLY is confined to the separate owner-bundle apply path
+// (sql/owner/*.sql via owner.go), which has its own deploy story — so this wrap
+// is unconditional and guarded by TestRunnerMigrationsHaveNoNonTransactionalDDL.
+// If a future runner migration ever needs non-transactional DDL, that guard
+// fails loudly and applyOne must grow an explicit, hash-asserted fallback for
+// the flagged migration rather than silently dropping the whole runner's
+// transactional atomicity.
 func applyOne(ctx context.Context, runner Runner, migration Migration, daemonVersion string) error {
-	if err := runner.Exec(ctx, migration.SQL); err != nil {
+	tx, err := runner.BeginTx(ctx)
+	if err != nil {
 		return err
 	}
-	if err := runner.Exec(
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(context.Background())
+		}
+	}()
+	if err := tx.Exec(ctx, migration.SQL); err != nil {
+		return err
+	}
+	if err := tx.Exec(
 		ctx,
 		`INSERT INTO striatumd.schema_migrations(version, label, sha256, daemon_version)
 VALUES ($1, $2, $3, $4)
@@ -267,11 +312,29 @@ ON CONFLICT (version) DO NOTHING`,
 	); err != nil {
 		return err
 	}
-	return runner.Exec(
+	if err := tx.Exec(
 		ctx,
 		`INSERT INTO striatumd.schema_meta(key, value)
 VALUES ('substrate_version', $1)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 		strconv.Itoa(migration.Version),
-	)
+	); err != nil {
+		return err
+	}
+	// FMA-008: the schema_migrations insert above is ON CONFLICT (version) DO
+	// NOTHING. If a pre-fix crashed deploy already stamped a DIFFERENT sha for
+	// this version (precisely the in-progress migration most likely to have
+	// drifted), the insert no-ops and the stale sha would persist silently —
+	// and the <= current verifyRecordedHash pass never reaches this version
+	// because it is not yet <= current. Verify the recorded hash inside the same
+	// transaction so a drifted stamp aborts the apply (rolling back the DDL)
+	// instead of committing over a mismatch.
+	if err := verifyRecordedHashTx(ctx, tx, migration); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

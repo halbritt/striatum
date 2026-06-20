@@ -647,6 +647,76 @@ func TestRecordVerdictAcceptsMatchingCollaborationLedgerVerdict(t *testing.T) {
 	}
 }
 
+// TestRecordVerdictReadsCollaborationLedgerFromActiveWorktree is the #484
+// regression: a worktree-isolated adjudicate job publishes its collaboration
+// ledger into the per-job worktree, not repo_root (which is checked out on the
+// default branch). The verdict-match re-read must resolve the ledger through the
+// active worktree (artifactSourcePath), mirroring the worktree-aware publish
+// path. Before the fix, enforceCollaborationLedgerVerdict read bare
+// repoRelativePath(repo_root, ...) and failed with "collaboration_ledger
+// artifact file does not exist", so the verdict could never be recorded and the
+// falsification_gate parked at the adjudicate gate.
+func TestRecordVerdictReadsCollaborationLedgerFromActiveWorktree(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID, sessionID, jobID, leaseID := seedCollaborationLedgerSubmitFixture(t, ctx, runner, "accept")
+	seedPublishedCollaborationLedgerArtifact(t, ctx, runner, repoID, sessionID, jobID)
+	// Reproduce worktree_isolation: per_job — the ledger lives ONLY in the active
+	// worktree, absent from repo_root.
+	moveLedgerToActiveWorktree(t, ctx, runner, repoID, jobID, leaseID, "artifacts/gate/LEDGER.md")
+
+	result, err := HandleRecordVerdict(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": sessionID,
+		"job_id":     jobID,
+		"lease_id":   leaseID,
+		"verdict":    "accept",
+	}))
+	if err != nil {
+		t.Fatalf("record verdict from worktree-resident ledger: %v", err)
+	}
+	if result["status"] != "completed" {
+		t.Fatalf("status = %#v; result=%#v", result["status"], result)
+	}
+}
+
+// moveLedgerToActiveWorktree relocates the seeded ledger from repo_root into a
+// per-job worktree and registers the active worktree row, reproducing the #484
+// worktree-isolation condition (ledger absent from repo_root).
+func moveLedgerToActiveWorktree(t *testing.T, ctx context.Context, runner db.Runner, repoID, jobID, leaseID, relPath string) {
+	t.Helper()
+	runID := "run_" + repoID
+	run, err := rowByID(ctx, runner, repoID, "runs", "run_id", runID, false)
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	repoRoot := fmt.Sprint(run["repo_root"])
+	worktreeRel := filepath.ToSlash(filepath.Join(".striatum", "worktrees", "wt_484"))
+	dst := filepath.Join(repoRoot, filepath.FromSlash(worktreeRel), filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(repoRoot, filepath.FromSlash(relPath))
+	body, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read seeded ledger: %v", err)
+	}
+	if err := os.WriteFile(dst, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(src); err != nil {
+		t.Fatalf("remove repo-root ledger: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.job_worktrees (
+		  repository_id, worktree_id, run_id, job_id, lease_id,
+		  base_branch, worktree_path, state, created_at
+		) VALUES ($1,$2,$3,$4,$5,'main',$6,'active',$7)`,
+		repoID, "wt_484_"+jobID, runID, jobID, leaseID, worktreeRel, now); err != nil {
+		t.Fatalf("insert job worktree: %v", err)
+	}
+}
+
 // seedPublishedCollaborationLedgerArtifact inserts the artifacts row that the
 // adjudicator's publish_artifact call would have created, so the primitive
 // verdict path's verifyRequiredArtifacts finds the expected ledger and

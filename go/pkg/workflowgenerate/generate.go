@@ -31,7 +31,7 @@ var (
 		"multi_phase", "custom", "conversation",
 		"falsification_gate", "cross_examination",
 		"adjudicated_constraint_extraction", "divergent_ideation",
-		"fog_of_war_review", "synaptic_prune",
+		"fog_of_war_review", "synaptic_prune", "verification_gate",
 	)
 	laneSets      = set("local", "single_agent", "author_reviewer", "multi_review", "custom")
 	laneModifiers = set("supervised", "worktree_isolated", "constrained", "harness_profiled")
@@ -45,6 +45,7 @@ var (
 		"branch_count", "ideas_per_branch", "deepen_count", "frame_pack",
 		"frame_packs", "score_weights", "problem_shape", "convergence_lane_id",
 		"reconstructor_count", "participant_count",
+		"gate_floor", "checks",
 	)
 	blockKinds = set(
 		"draft", "review", "synthesis", "implementation", "test",
@@ -378,7 +379,7 @@ func Generate(spec Spec) (Generated, error) {
 		parallelism = defaultParallelism(spec)
 	}
 	schemaVersion := WorkflowSchemaVersion
-	if spec.Shape == "multi_phase" || isCollaborationShape(spec.Shape) {
+	if isPhasedShape(spec.Shape) {
 		schemaVersion = WorkflowSchemaVersionV11
 	}
 	workflow := map[string]any{
@@ -396,7 +397,7 @@ func Generate(spec Spec) (Generated, error) {
 		"edges":            edges,
 		"cycles":           cycles,
 	}
-	if spec.Shape == "multi_phase" || isCollaborationShape(spec.Shape) {
+	if isPhasedShape(spec.Shape) {
 		workflow["phases"] = phases
 	}
 	if hasModifier(spec, "constrained") {
@@ -420,6 +421,15 @@ func Generate(spec Spec) (Generated, error) {
 	if spec.LaneSet == "single_agent" {
 		workflow["allow_same_model_review_pairing"] = true
 	}
+	// RFC 0141: stamp the verification_gate's allowlist_status (FILLED vs
+	// TEMPLATE_UNFILLED) so a downstream validator can tell a runnable builtin-only
+	// gate from one that still needs per-host pins. Done before ValidateWorkflow so
+	// the field is part of the validated, rendered workflow.json.
+	if spec.Shape == "verification_gate" {
+		if err := applyVerificationGateWorkflowFields(spec, workflow); err != nil {
+			return Generated{}, err
+		}
+	}
 	if hasModifier(spec, "harness_profiled") {
 		profiles, err := harnessProfiles(spec)
 		if err != nil {
@@ -434,6 +444,16 @@ func Generate(spec Spec) (Generated, error) {
 	files, err := renderFiles(spec, workflow, roles)
 	if err != nil {
 		return Generated{}, err
+	}
+	// RFC 0141: the verification_gate shape also emits the hashless intent template
+	// and a .gitignore for the per-host pins, beyond the workflow.json + role/prompt
+	// stubs renderFiles produces. Append them as shape-specific extras.
+	if spec.Shape == "verification_gate" {
+		extras, err := verificationGateExtras(spec)
+		if err != nil {
+			return Generated{}, err
+		}
+		files = append(files, extras...)
 	}
 	metadata := map[string]any{
 		"shape":             spec.Shape,
@@ -812,16 +832,19 @@ func renderFiles(spec Spec, workflow map[string]any, roles map[string]any) ([]ma
 	for _, role := range sortedMapKeys(roles) {
 		files = append(files, map[string]any{"path": spec.ScaffoldRoot + "/roles/" + role + ".md", "content": roleStub(role)})
 	}
-	prompts := map[string]struct{}{}
+	prompts := map[string]string{}
 	for _, item := range listFrom(workflow["jobs"]) {
 		job := mapFrom(item)
 		task := mapFrom(job["task_prompt"])
 		if p, ok := task["path"].(string); ok && strings.HasPrefix(p, "prompts/") {
-			prompts[strings.TrimPrefix(p, "prompts/")] = struct{}{}
+			name := strings.TrimPrefix(p, "prompts/")
+			if _, seen := prompts[name]; !seen {
+				prompts[name] = promptStubForJob(name, job, spec)
+			}
 		}
 	}
-	for _, prompt := range sortedKeys(prompts) {
-		files = append(files, map[string]any{"path": spec.ScaffoldRoot + "/prompts/" + prompt, "content": promptStub(prompt)})
+	for _, prompt := range sortedStringKeys(prompts) {
+		files = append(files, map[string]any{"path": spec.ScaffoldRoot + "/prompts/" + prompt, "content": prompts[prompt]})
 	}
 	return files, nil
 }
@@ -888,34 +911,36 @@ func FileHash(content string) string {
 
 func roleStub(role string) string {
 	panelRoles := map[string]string{
-		"problem_framer":    "# Problem Framer Role\n\nYou frame the implementation problem before proposals begin. Publish constraints, goals, non-goals, and decision criteria at the declared artifact path.\n",
-		"proposer_a":        "# Proposer A Role\n\nYou develop implementation option A independently from the other proposal roles. Stay inside the declared write scope.\n",
-		"proposer_b":        "# Proposer B Role\n\nYou develop implementation option B independently from the other proposal roles. Stay inside the declared write scope.\n",
-		"proposer_c":        "# Proposer C Role\n\nYou develop implementation option C independently from the other proposal roles. Stay inside the declared write scope.\n",
-		"scorekeeper":       "# Scorekeeper Role\n\nYou score one proposal against the selected adversary-pack dimensions. Publish only the review artifact at the declared path.\n",
-		"tradeoff_ledger":   "# Tradeoff Ledger Role\n\nYou normalize proposal and scorecard evidence into a tradeoff ledger at the declared artifact path.\n",
-		"arbitrator":        "# Arbitrator Role\n\nYou select or compose the preferred implementation path from the tradeoff ledger and supporting evidence.\n",
-		"dissent_reviewer":  "# Dissent Reviewer Role\n\nYou try to falsify the arbitration before final decision. Publish only the review artifact at the declared path.\n",
-		"principal_decider": "# Principal Decider Role\n\nYou record the final implementation decision and required follow-up work at the declared artifact path.\n",
-		"holder":            "# Holder Role\n\nYou publish the leading proposal as the claim falsifiers will challenge. Do not wait for live questions; the adjudicator ledger decides whether the static challenge/rebuttal gate clears.\n",
-		"falsifier":         "# Falsifier Role\n\nYou challenge the published holder artifact. Write a concrete falsifying gap, the strongest rebuttal you can justify from the available artifacts, and do not publish the collaboration ledger.\n",
-		"cross_examiner":    "# Cross-Examiner Role\n\nYou challenge the published finding or proposal before downstream publication. Record the challenge, the strongest rebuttal you can justify, and any unanswered gap in your declared artifact.\n",
-		"adjudicator":       "# Adjudicator Role\n\nYou read only the curated dialogue trajectory, never raw terminal output. Publish the collaboration ledger and verdict according to the substance rubric. The `verdict` field MUST be one of: accept, accept_with_findings, needs_revision, reject. A clearing verdict (the one that lets the downstream phase publish) is `accept` or `accept_with_findings` — do not write `clear` or any other value.\n",
-		"scribe":            "# Scribe Role\n\nYou record only the decision trail visible in the dialogue trajectory. Do not hypothesize, infer hidden reasoning, or add claims that are not present in the curated dialogue.\n",
-		"committer":         "# Committer Role\n\nYou publish the downstream proposal or finding only after the collaboration ledger verdict clears the phase gate.\n",
-		"convener":          "# Convener Role\n\nYou frame the problem, draft the candidate synthesis, and stay live for cross-examination. On a revision cycle you receive the prior cycle's constraints[] as binding input and must discharge each row explicitly. Do not treat dialogue completion as acceptance; the adjudicator ledger decides whether the gate clears.\n",
-		"revision_convener": "# Revision Convener Role\n\nYou republish the synthesis after an adjudicated needs_revision. You take the prior cycle's constraints[] as first-class input and discharge each row explicitly (answer / fold-in / reject-with-rationale / accept-as-risk / defer-with-successor). Republished artifacts use the cycle-templated logical name.\n",
-		"spec_author":       "# Spec Author Role\n\nYou write the RFC/spec using the latest cleared constraint ledger as binding input, not the original proposal. Every binding constraint must land in the spec as testable text or a gate.\n",
-		"final_reviewer":    "# Final Reviewer Role\n\nYou verify discharge, you do not re-run the forum. Emit a constraint_discharge table marking each binding constraint discharged / partial / missing / accepted_risk with evidence. Final review is a typecheck that fails closed on any undischarged binding constraint.\n",
-		"diverger":          "# Diverger Role\n\nYou generate ideas under one assigned cognitive frame, in DIVERGENT mode only. Produce short, distinct ideas; do not evaluate, rank, or hedge, and do not read other branches. The first three obvious answers are banned — push into the awkward middle. Publish only your branch artifact at the declared path.\n",
+		"problem_framer":     "# Problem Framer Role\n\nYou frame the implementation problem before proposals begin. Publish constraints, goals, non-goals, and decision criteria at the declared artifact path.\n",
+		"proposer_a":         "# Proposer A Role\n\nYou develop implementation option A independently from the other proposal roles. Stay inside the declared write scope.\n",
+		"proposer_b":         "# Proposer B Role\n\nYou develop implementation option B independently from the other proposal roles. Stay inside the declared write scope.\n",
+		"proposer_c":         "# Proposer C Role\n\nYou develop implementation option C independently from the other proposal roles. Stay inside the declared write scope.\n",
+		"scorekeeper":        "# Scorekeeper Role\n\nYou score one proposal against the selected adversary-pack dimensions. Publish only the review artifact at the declared path.\n",
+		"tradeoff_ledger":    "# Tradeoff Ledger Role\n\nYou normalize proposal and scorecard evidence into a tradeoff ledger at the declared artifact path.\n",
+		"arbitrator":         "# Arbitrator Role\n\nYou select or compose the preferred implementation path from the tradeoff ledger and supporting evidence.\n",
+		"dissent_reviewer":   "# Dissent Reviewer Role\n\nYou try to falsify the arbitration before final decision. Publish only the review artifact at the declared path.\n",
+		"principal_decider":  "# Principal Decider Role\n\nYou record the final implementation decision and required follow-up work at the declared artifact path.\n",
+		"holder":             "# Holder Role\n\nYou publish the leading proposal as the claim falsifiers will challenge. Do not wait for live questions; the adjudicator ledger decides whether the static challenge/rebuttal gate clears.\n",
+		"falsifier":          "# Falsifier Role\n\nYou challenge the published holder artifact. Write a concrete falsifying gap, the strongest rebuttal you can justify from the available artifacts, and do not publish the collaboration ledger.\n",
+		"cross_examiner":     "# Cross-Examiner Role\n\nYou challenge the published finding or proposal before downstream publication. Record the challenge, the strongest rebuttal you can justify, and any unanswered gap in your declared artifact.\n",
+		"adjudicator":        "# Adjudicator Role\n\nYou read only the curated dialogue trajectory, never raw terminal output. Publish the collaboration ledger and verdict according to the substance rubric. The `verdict` field MUST be one of: accept, accept_with_findings, needs_revision, reject. A clearing verdict (the one that lets the downstream phase publish) is `accept` or `accept_with_findings` — do not write `clear` or any other value.\n",
+		"scribe":             "# Scribe Role\n\nYou record only the decision trail visible in the dialogue trajectory. Do not hypothesize, infer hidden reasoning, or add claims that are not present in the curated dialogue.\n",
+		"committer":          "# Committer Role\n\nYou publish the downstream proposal or finding only after the collaboration ledger verdict clears the phase gate.\n",
+		"convener":           "# Convener Role\n\nYou frame the problem, draft the candidate synthesis, and stay live for cross-examination. On a revision cycle you receive the prior cycle's constraints[] as binding input and must discharge each row explicitly. Do not treat dialogue completion as acceptance; the adjudicator ledger decides whether the gate clears.\n",
+		"revision_convener":  "# Revision Convener Role\n\nYou republish the synthesis after an adjudicated needs_revision. You take the prior cycle's constraints[] as first-class input and discharge each row explicitly (answer / fold-in / reject-with-rationale / accept-as-risk / defer-with-successor). Republished artifacts use the cycle-templated logical name.\n",
+		"spec_author":        "# Spec Author Role\n\nYou write the RFC/spec using the latest cleared constraint ledger as binding input, not the original proposal. Every binding constraint must land in the spec as testable text or a gate.\n",
+		"final_reviewer":     "# Final Reviewer Role\n\nYou verify discharge, you do not re-run the forum. Emit a constraint_discharge table marking each binding constraint discharged / partial / missing / accepted_risk with evidence. Final review is a typecheck that fails closed on any undischarged binding constraint.\n",
+		"diverger":           "# Diverger Role\n\nYou generate ideas under one assigned cognitive frame, in DIVERGENT mode only. Produce short, distinct ideas; do not evaluate, rank, or hedge, and do not read other branches. The first three obvious answers are banned — push into the awkward middle. Publish only your branch artifact at the declared path.\n",
 		"convergence_critic": "# Convergence Critic Role\n\nYou are the critic. Read every divergence branch, score each idea on novelty/viability/fit, cluster by underlying angle, flag traps with reasons, and select the top picks by weighted score. Note ideas independently surfaced by branches on different model families (cross-model agreement). Publish only the convergence ledger at the declared path.\n",
-		"deepener":          "# Deepener Role\n\nYou take one surviving pick and connect the dots: a 4-8 sentence sketch of how it works, the load-bearing risk, the first concrete step a builder would take, and 3-5 child ideas. Publish only your deepened artifact at the declared path.\n\nYour artifact is a `striatum.synthesis.v1` document. Every deepen lane must emit identical front-matter shape so the artifacts are uniform across models: include an `author:` line (your `<role-name>-<model-name>-<ordinal>` byline) and a complete `inputs:` list naming BOTH upstream artifacts you consumed — the convergence ledger (`CONVERGENCE.md`) AND the problem brief (`PROBLEM_BRIEF.md`). Do not omit `author:` and do not list only the convergence ledger.\n",
-		"final_synthesizer": "# Final Synthesizer Role\n\nYou assemble the operator-facing result: the shortlist with rationale, the non-obvious-but-viable pick marked with a star, the trap list, and one wildcard provocation. Publish only the final synthesis at the declared path.\n",
-		"coordinator":       "# Coordinator Role\n\nYou orchestrate a collaboration shape (fog-of-war or synaptic-prune): you partition context, open and close the conversation/interrogation cycles, and stage the curated trajectory for the judge/adjudicator. For synaptic_prune you open the conversation with a post_dialog_hook so close emits the prune fan-out BEFORE participant teardown, then nominate against still-live participants. You do not score substance — the judge/adjudicator ledger decides whether the gate clears. Carry session ids and trajectory references, never raw provider output.\n",
-		"reconstructor":     "# Reconstructor Role\n\nYou hold exactly ONE disjoint fragment of the spec. You must interrogate your peers to recover the constraints you were NOT given, and record which constraints you reconstructed (citing the peer turn that revealed each) versus which you could not. Never invent a constraint you cannot source from a peer answer — the full-spec judge scores hallucinations as failures. Stay live for interrogation by the rollup.\n",
-		"judge":             "# Judge Role\n\nYou alone hold the FULL spec (the ground truth). You read only the curated reconstruction trajectory and score each hidden constraint reconstructed / hallucinated / missed; you publish the collaboration ledger verdict. A lane that claimed coverage it never reconstructed scores hallucinated/missed and you return needs_revision; the proposal stays withheld until your verdict clears. The `verdict` field MUST be one of: accept, accept_with_findings, needs_revision, reject.\n",
-		"proposer":          "# Proposer Role\n\nYou author the proposal — but only after the coverage gate cleared (the work-packet type sequencing withholds you until then). Build on the reconstructed constraints the judge confirmed, never on a constraint a reconstructor hallucinated.\n",
-		"pruner":            "# Pruner Role\n\nYou are a forum participant. While still live in your preserved-context window, you nominate exactly ONE claim from the forum to retire ('do not re-litigate'), with a coherent rationale. A claim is retired only if at least two participants independently nominate it. You do not tally — the adjudicator ledger records the ≥2-vote retirements.\n",
+		"deepener":           "# Deepener Role\n\nYou take one surviving pick and connect the dots: a 4-8 sentence sketch of how it works, the load-bearing risk, the first concrete step a builder would take, and 3-5 child ideas. Publish only your deepened artifact at the declared path.\n\nYour artifact is a `striatum.synthesis.v1` document. Every deepen lane must emit identical front-matter shape so the artifacts are uniform across models: include an `author:` line (your `<role-name>-<model-name>-<ordinal>` byline) and a complete `inputs:` list naming BOTH upstream artifacts you consumed — the convergence ledger (`CONVERGENCE.md`) AND the problem brief (`PROBLEM_BRIEF.md`). Do not omit `author:` and do not list only the convergence ledger.\n",
+		"final_synthesizer":  "# Final Synthesizer Role\n\nYou assemble the operator-facing result: the shortlist with rationale, the non-obvious-but-viable pick marked with a star, the trap list, and one wildcard provocation. Publish only the final synthesis at the declared path.\n",
+		"coordinator":        "# Coordinator Role\n\nYou orchestrate a collaboration shape (fog-of-war or synaptic-prune): you partition context, open and close the conversation/interrogation cycles, and stage the curated trajectory for the judge/adjudicator. For synaptic_prune you open the conversation with a post_dialog_hook so close emits the prune fan-out BEFORE participant teardown, then nominate against still-live participants. You do not score substance — the judge/adjudicator ledger decides whether the gate clears. Carry session ids and trajectory references, never raw provider output.\n",
+		"reconstructor":      "# Reconstructor Role\n\nYou hold exactly ONE disjoint fragment of the spec. You must interrogate your peers to recover the constraints you were NOT given, and record which constraints you reconstructed (citing the peer turn that revealed each) versus which you could not. Never invent a constraint you cannot source from a peer answer — the full-spec judge scores hallucinations as failures. Stay live for interrogation by the rollup.\n",
+		"judge":              "# Judge Role\n\nYou alone hold the FULL spec (the ground truth). You read only the curated reconstruction trajectory and score each hidden constraint reconstructed / hallucinated / missed; you publish the collaboration ledger verdict. A lane that claimed coverage it never reconstructed scores hallucinated/missed and you return needs_revision; the proposal stays withheld until your verdict clears. The `verdict` field MUST be one of: accept, accept_with_findings, needs_revision, reject.\n",
+		"proposer":           "# Proposer Role\n\nYou author the proposal — but only after the coverage gate cleared (the work-packet type sequencing withholds you until then). Build on the reconstructed constraints the judge confirmed, never on a constraint a reconstructor hallucinated.\n",
+		"pruner":             "# Pruner Role\n\nYou are a forum participant. While still live in your preserved-context window, you nominate exactly ONE claim from the forum to retire ('do not re-litigate'), with a coherent rationale. A claim is retired only if at least two participants independently nominate it. You do not tally — the adjudicator ledger records the ≥2-vote retirements.\n",
+		"builder":            "# Builder Role\n\nYou build the slice and publish a claim ledger naming every capability claim with a status (VERIFIED|ASSERTED|DESIGNED) and a stable id. You do NOT decide whether a claim is verified — the verify step runs the sanctioned checks and the adjudicator reads the receipts. Do not state a claim above the status its check can earn. You cannot author the sanctioned check set (the verifier intent is in your peer's forbidden_paths, not yours).\n",
+		"verifier":           "# Verifier Role\n\nYou run `striatum verifier run` against the sanctioned checks and publish the minted receipts as ground truth — never the builder's prose. The builtin checks (builtin:go-test/vet/build, artifact-anchor-integrity) need zero operator JSON and cap their claims at ASSERTED; VERIFIED is reserved for an external check the operator has pinned AND attested. You MUST NOT edit verification/allowlist.intent.json (it is in your forbidden_paths): a verified lane can never sanction its own checks. A check whose negative control unexpectedly passes voids the receipt — report it RED.\n",
 	}
 	if content, ok := panelRoles[role]; ok {
 		return content
@@ -1020,8 +1045,50 @@ func promptStub(prompt string) string {
 		return "Assemble the nominations for the prune tally. Stage the curated trajectory only.\n"
 	case "prune_tally.md":
 		return "Read only the curated nomination trajectory. Retire every claim nominated by ≥2 participants with coherent rationale as a nomination-kind entry in the collaboration_ledger (shape synaptic_prune); publish the verdict. The retired set is the durable NEGATIVE PREAMBLE ('do not re-litigate: …') injected into future runs on the same topic — provenance, not reputation.\n"
+	case "claim_build.md":
+		return "Build the slice and publish a claim_ledger. Give every capability claim a stable id, a status (VERIFIED|ASSERTED|DESIGNED), and (above DESIGNED) the id of the sanctioned check that substantiates it. Do not state a claim above the status its check can earn; deferral is a DESIGNED row, never hidden prose. You cannot author the sanctioned check set.\n"
+	case "verify_run.md":
+		return "Run `striatum verifier run` against the sanctioned checks and publish the minted receipts. The builtin checks (builtin:go-test/vet/build, artifact-anchor-integrity) run with no operator JSON and cap their claims at ASSERTED; VERIFIED needs an external check the operator has pinned (`striatum verifier pin --host-here`) AND attested. Receipts come from the engine's exit codes, not the builder's prose. Do NOT edit verification/allowlist.intent.json — it is in your forbidden_paths. A check whose negative control passes voids the receipt: report it RED.\n"
+	case "adjudicate.md":
+		return "Read the claim ledger and the minted receipts and publish the collaboration_ledger verdict. If ANY claim is stated above the status its receipt earns — VERIFIED over a missing/RED receipt, or completion language over an ASSERTED/DESIGNED row — record needs_revision and name the offending claims. Otherwise accept.\n"
+	case "commit_verified.md":
+		return "Publish the cleared release only after the collaboration ledger records an accepting verdict. Stamp every claim with its earned status and the receipt of record; no completion language survives above the receipted status.\n"
 	default:
 		return fmt.Sprintf("Complete the %s step declared by the workflow.\n", strings.ReplaceAll(strings.TrimSuffix(prompt, ".md"), "_", " "))
+	}
+}
+
+func promptStubForJob(prompt string, job map[string]any, spec Spec) string {
+	switch prompt {
+	case "collaboration_holder.md", "collaboration_falsifier.md", "collaboration_author_draft.md",
+		"collaboration_cross_examiner.md", "adjudicate_collaboration.md", "collaboration_commit.md",
+		"collaboration_final_summary.md":
+		return collaborationPromptStub(prompt, fmt.Sprint(job["objective"]), collaborationTopic(spec))
+	default:
+		return promptStub(prompt)
+	}
+}
+
+func collaborationPromptStub(prompt, objective, topic string) string {
+	if strings.TrimSpace(topic) == "" {
+		topic = "the workflow topic"
+	}
+	if strings.TrimSpace(objective) == "" {
+		objective = strings.TrimSpace(promptStub(prompt))
+	}
+	switch prompt {
+	case "collaboration_holder.md", "collaboration_author_draft.md":
+		return fmt.Sprintf("# Task\n\n%s\n\n## Deliverable\n\nPublish the declared artifact for %s as the claim the challenge lanes will test.\n\n## Claims To Make Falsifiable\n\nState each load-bearing claim with the evidence that would support it and the observation that would refute it.\n\n## Output Contract\n\nWrite only the expected artifact at the path declared in the work packet. Do not treat downstream challenge completion as acceptance; the collaboration ledger decides whether the gate clears.\n", objective, topic)
+	case "collaboration_falsifier.md", "collaboration_cross_examiner.md":
+		return fmt.Sprintf("# Task\n\n%s\n\n## Deliverable\n\nPublish one material challenge for %s against the upstream artifact.\n\n## Refutation Test\n\nName the claim challenged, the concrete evidence or counterexample, the strongest rebuttal you can justify, and any unanswered gap.\n\n## Output Contract\n\nWrite only the declared challenge artifact. Do not invent missing upstream content and do not decide gate acceptance.\n", objective, topic)
+	case "adjudicate_collaboration.md":
+		return fmt.Sprintf("# Task\n\n%s\n\n## Deliverable\n\nPublish the collaboration_ledger for %s from curated dialogue/artifact evidence only.\n\n## Verdict Basis\n\nRecord whether a material challenge landed, whether the holder answered it directly, and which constraints carry into a revision if the verdict is needs_revision.\n\n## Output Contract\n\nUse the declared collaboration_ledger schema and verdict vocabulary. Do not read raw provider logs or private diagnostics as evidence.\n", objective, topic)
+	case "collaboration_commit.md":
+		return fmt.Sprintf("# Task\n\n%s\n\n## Deliverable\n\nPublish the downstream proposal or finding for %s only after the collaboration ledger clears the gate.\n\n## Acceptance Link\n\nReference the clearing ledger and preserve any accepted constraints or findings from the challenge phase.\n\n## Output Contract\n\nWrite only the declared publication artifact and do not weaken constraints recorded by the adjudicator.\n", objective, topic)
+	case "collaboration_final_summary.md":
+		return fmt.Sprintf("# Task\n\n%s\n\n## Deliverable\n\nSummarize the cleared collaboration gate for %s and the downstream artifact that was published.\n\n## Evidence\n\nName the ledger verdict, the challenge result, and any residual follow-up.\n\n## Output Contract\n\nPublish only the declared final summary artifact.\n", objective, topic)
+	default:
+		return promptStub(prompt)
 	}
 }
 
@@ -1395,6 +1462,17 @@ func isCollaborationShape(shape string) bool {
 	return shape == "falsification_gate" || shape == "cross_examination" ||
 		shape == "adjudicated_constraint_extraction" ||
 		shape == "fog_of_war_review" || shape == "synaptic_prune"
+}
+
+// isPhasedShape reports whether a shape emits a phased striatum.workflow.v1.1
+// graph (phases[] + phase_synthesis gate jobs). The collaboration shapes and
+// multi_phase carry their collaboration-pack semantics through
+// isCollaborationShape; verification_gate (RFC 0141) is phased — its adjudicate
+// gate is a phase_synthesis job emitting a cycle-templated collaboration_ledger,
+// exactly like the hand-authored verification-gate-flow example — but it is NOT a
+// collaboration-pack shape, so it joins here rather than in isCollaborationShape.
+func isPhasedShape(shape string) bool {
+	return shape == "multi_phase" || isCollaborationShape(shape) || shape == "verification_gate"
 }
 
 func validatePosture(posture, fieldPath string) error {
@@ -1795,6 +1873,15 @@ func set(values ...string) map[string]struct{} {
 }
 
 func sortedKeys(values map[string]struct{}) []string {
+	keys := []string{}
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedStringKeys(values map[string]string) []string {
 	keys := []string{}
 	for key := range values {
 		keys = append(keys, key)

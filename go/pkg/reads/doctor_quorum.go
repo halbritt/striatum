@@ -528,9 +528,10 @@ func gateEverHadAdvisoryGuardBlocker(ctx context.Context, runner any, repository
 }
 
 // doctorDissentLedgerCompleteness (#339) flags a non-accepting, non-superseded
-// verdict at a seat's live attempt that has NO live dissent_ledger row at that
-// seat+attempt — the forward-write hole. Skipped when the dissent_ledger table is
-// absent (a daemon behind migration 0032).
+// verdict whose forward-written dissent token is absent. New rows are keyed by
+// verdict_id so later recovery/revision attempt drift does not create a false
+// positive; older/null-verdict_id rows fall back to the live seat+attempt check.
+// Skipped when the dissent_ledger table is absent (a daemon behind migration 0032).
 func doctorDissentLedgerCompleteness(ctx context.Context, runner any, repositoryID string) ([]string, []map[string]any) {
 	problems := []string{}
 	records := []map[string]any{}
@@ -564,7 +565,11 @@ func doctorDissentLedgerCompleteness(ctx context.Context, runner any, repository
 		   AND NOT EXISTS (
 		     SELECT 1 FROM striatumd.dissent_ledger d
 		      WHERE d.repository_id = v.repository_id AND d.run_id = v.run_id
-		        AND d.workflow_job_id = j.workflow_job_id AND d.attempt = j.attempt
+		        AND d.workflow_job_id = j.workflow_job_id
+		        AND (
+		          (d.verdict_id IS NOT NULL AND d.verdict_id = v.verdict_id)
+		          OR ((d.verdict_id IS NULL OR v.verdict_id IS NULL) AND d.attempt = j.attempt)
+		        )
 		   )
 		 ORDER BY v.run_id, j.workflow_job_id`,
 		repositoryID)

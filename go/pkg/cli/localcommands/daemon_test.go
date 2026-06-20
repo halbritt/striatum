@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/halbritt/striatum/go/pkg/admin"
+	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
 
@@ -108,6 +109,7 @@ func TestResolveLayoutUsesCanonicalSocket(t *testing.T) {
 	configHomeDir := t.TempDir()
 	t.Setenv("STRIATUM_DAEMON_RUNTIME_DIR", runtimeDir)
 	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, "")
 
 	l, err := resolveLayout()
 	if err != nil {
@@ -125,10 +127,50 @@ func TestResolveLayoutUsesCanonicalSocket(t *testing.T) {
 	}
 }
 
+func TestResolveLayoutUsesConfiguredDaemonSocket(t *testing.T) {
+	runtimeDir := t.TempDir()
+	configHomeDir := t.TempDir()
+	socket := filepath.Join(runtimeDir, "rpc", "daemon-go.sock")
+	t.Setenv("STRIATUM_DAEMON_RUNTIME_DIR", runtimeDir)
+	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, socket)
+
+	l, err := resolveLayout()
+	if err != nil {
+		t.Fatalf("resolveLayout: %v", err)
+	}
+	if l.socket != socket {
+		t.Fatalf("socket = %s, want configured %s", l.socket, socket)
+	}
+}
+
+func TestInspectDaemonUnitPrefersActiveSystemUnit(t *testing.T) {
+	restore := stubSystemctl(t, map[string]string{
+		"--user show striatumd.service --property=FragmentPath --value": "",
+		"--user is-enabled striatumd.service":                           "not-found",
+		"--user is-active striatumd.service":                            "inactive",
+		"show striatumd.service --property=FragmentPath --value":        "/etc/systemd/system/striatumd.service",
+		"is-enabled striatumd.service":                                  "enabled",
+		"is-active striatumd.service":                                   "active",
+	})
+	defer restore()
+
+	unit := inspectDaemonUnit(layout{unitPath: filepath.Join(t.TempDir(), "striatumd.service")})
+	if unit.Scope != systemdScopeSystem {
+		t.Fatalf("unit scope = %s, want system", unit.Scope)
+	}
+	if unit.Path != "/etc/systemd/system/striatumd.service" || !unit.Installed || unit.Active != "active" {
+		t.Fatalf("unit = %#v", unit)
+	}
+}
+
 func TestRunDaemonStatusUsesDiscoveryTokenWhenClientTokenMissing(t *testing.T) {
 	runtimeDir := t.TempDir()
 	configHomeDir := t.TempDir()
-	socket := filepath.Join(runtimeDir, "daemon-go.sock")
+	socket := filepath.Join(runtimeDir, "rpc", "daemon-go.sock")
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	token := "dtok_status.valid"
 	t.Setenv(admin.EnvRuntimeDir, runtimeDir)
 	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
@@ -180,8 +222,27 @@ func TestRunDaemonStatusUsesDiscoveryTokenWhenClientTokenMissing(t *testing.T) {
 	if data["doctor"] != "ok" {
 		t.Fatalf("doctor = %#v, want ok; payload=%s", data["doctor"], stdout.String())
 	}
+	if data["socket"] != socket || data["socket_present"] != true {
+		t.Fatalf("socket status = (%#v, %#v), want (%q, true); payload=%s", data["socket"], data["socket_present"], socket, stdout.String())
+	}
 	if data["token_source"] != "discovery.json" {
 		t.Fatalf("token_source = %#v, want discovery.json", data["token_source"])
+	}
+}
+
+func stubSystemctl(t *testing.T, outputs map[string]string) func() {
+	t.Helper()
+	origLookPath := systemctlLookPath
+	origOutput := systemctlOutputFn
+	systemctlLookPath = func(file string) (string, error) {
+		return "/bin/" + file, nil
+	}
+	systemctlOutputFn = func(args ...string) string {
+		return outputs[strings.Join(args, " ")]
+	}
+	return func() {
+		systemctlLookPath = origLookPath
+		systemctlOutputFn = origOutput
 	}
 }
 

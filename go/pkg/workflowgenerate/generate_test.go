@@ -336,6 +336,24 @@ func TestCollaborationShapesEmitSubstanceGateV11Graphs(t *testing.T) {
 					t.Fatalf("generated support file %q still promises live interrogation", path)
 				}
 			}
+			promptName := "collaboration_holder.md"
+			if shape == "cross_examination" {
+				promptName = "collaboration_author_draft.md"
+			}
+			promptPath := "workflows/" + shape + "/prompts/" + promptName
+			promptContent := ""
+			for _, file := range generated.Files {
+				if fmt.Sprint(mapFrom(file)["path"]) == promptPath {
+					promptContent = fmt.Sprint(mapFrom(file)["content"])
+					break
+				}
+			}
+			if !strings.Contains(promptContent, "substance gate") ||
+				!strings.Contains(promptContent, "## Deliverable") ||
+				!strings.Contains(promptContent, "## Claims To Make Falsifiable") ||
+				!strings.Contains(promptContent, "Output Contract") {
+				t.Fatalf("generated collaboration prompt %s lacks topic-rich structure:\n%s", promptPath, promptContent)
+			}
 		})
 	}
 }

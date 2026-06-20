@@ -80,6 +80,7 @@ func TestBuildBootstrapPromptNamesNativeMCPBoundary(t *testing.T) {
 		// #80: explicit heartbeat-cadence guidance for long local work so a
 		// healthy-but-slow lane is not classified stalled.
 		"work.heartbeat",
+		"local_work=true",
 		"lease.heartbeat_after_seconds",
 		// #85: steer lanes away from background MCP-discovery probes that idle the
 		// lane and trip the discovery stall before any work is claimed.

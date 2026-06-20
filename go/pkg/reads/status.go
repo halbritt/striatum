@@ -59,7 +59,7 @@ func HandleStatus(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := statusSessions(ctx, runner, repositoryID, runID)
+	sessions, err := statusSessions(ctx, runner, repositoryID, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func HandleStatus(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		return nil, err
 	}
 	decorateCheckpointResolveActions(humanCheckpoints)
-	nonAccepting, err := statusLatestNonAccepting(ctx, runner, repositoryID, runID)
+	nonAccepting, err := statusLatestNonAccepting(ctx, runner, repositoryID, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -367,12 +367,19 @@ func statusJobCounts(ctx context.Context, runner db.Runner, repositoryID, runID 
 	return out, nil
 }
 
-func statusSessions(ctx context.Context, runner db.Runner, repositoryID, runID string) ([]map[string]any, error) {
+func statusSessions(ctx context.Context, runner db.Runner, repositoryID string, scope statusRunScope) ([]map[string]any, error) {
 	where := "s.repository_id = $1"
 	args := []any{repositoryID}
-	if runID != "" {
+	if scope.runID != "" {
 		where += " AND s.run_id = $2"
-		args = append(args, runID)
+		args = append(args, scope.runID)
+	} else if scope.repoWideBounded() {
+		// #480: repo-wide status should expose the current operator frontier, not
+		// every historical session ever registered for the repository. Keep
+		// run-scoped and --all-runs detail intact; bounded repo-wide status tracks
+		// only active sessions on non-terminal runs.
+		where += " AND r.state NOT IN " + statusTerminalRunStatesSQL
+		where += " AND s.state = 'active'"
 	}
 	rows, err := collectRows(ctx, runner,
 		`SELECT s.session_id, s.run_id, s.role_id, s.lane_id, s.slug,
@@ -596,7 +603,7 @@ func statusBlockers(ctx context.Context, runner db.Runner, repositoryID, runID, 
 	)
 }
 
-func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryID, runID string) ([]map[string]any, error) {
+func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryID string, scope statusRunScope) ([]map[string]any, error) {
 	// #283: a non-accepting verdict that was superseded via
 	// `recovery invalidate-job ... <decision_id>` (sets
 	// superseded_by_decision_id) is no longer operator-actionable; a later
@@ -604,9 +611,21 @@ func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryI
 	// status does not report a completed run as still needing a revision.
 	where := "v.repository_id = $1 AND v.verdict NOT IN ('accept', 'accept_with_findings') AND v.superseded_by_decision_id IS NULL"
 	args := []any{repositoryID}
-	if runID != "" {
+	runJoin := ""
+	if scope.runID != "" {
 		where += " AND v.run_id = $2"
-		args = append(args, runID)
+		args = append(args, scope.runID)
+	} else if scope.repoWideBounded() {
+		// #480: repo-wide status is an operator frontier, not an archival verdict
+		// export. `--run-limit 0` used to hide runs while still returning every
+		// historical non-accepting review verdict, producing an unbounded cold-start
+		// payload. Keep run-scoped and --all-runs behavior intact, but make the
+		// bounded repo-wide default report only verdicts on non-terminal runs.
+		runJoin = `
+		   JOIN striatumd.runs r
+		     ON r.repository_id = v.repository_id
+		    AND r.run_id = v.run_id
+		    AND r.state NOT IN ` + statusTerminalRunStatesSQL
 	}
 	rows, err := collectRows(ctx, runner,
 		// #282: also report whether the work this review covers was REVISED after
@@ -629,7 +648,7 @@ func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryI
 		             AND dep.job_id = v.job_id
 		             AND a.created_at > v.created_at
 		        ) AS upstream_revised_after_verdict
-		   FROM striatumd.verdicts v
+		   FROM striatumd.verdicts v`+runJoin+`
 		   JOIN striatumd.jobs j
 		     ON j.repository_id = v.repository_id
 		    AND j.job_id = v.job_id

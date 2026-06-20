@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -82,6 +84,38 @@ func TestRunRunStartAutoDrivesPositionalRunID(t *testing.T) {
 		}
 		if got := (*launches)[0].RunID; got != "run_pos123" {
 			t.Errorf("RunID = %q, want run_pos123", got)
+		}
+	})
+}
+
+func TestRunRunStartAutoDriveAbsolutizesRelativeRepo(t *testing.T) {
+	withStubbedRunStart(t, 0, func(launches *[]driverLaunch) {
+		t.Setenv(envRunDriveAuto, "")
+		dir := t.TempDir()
+		oldwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = os.Chdir(oldwd)
+		})
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		globals := leadingGlobals{
+			CommandArgs: []string{"run", "start", "--run-id", "run_rel123"},
+			RepoPath:    ".",
+		}
+		code := runRunStart([]string{"--repo", ".", "run", "start", "--run-id", "run_rel123"}, io.Discard, io.Discard, globals)
+		if code != 0 {
+			t.Fatalf("expected exit 0, got %d", code)
+		}
+		if len(*launches) != 1 {
+			t.Fatalf("expected exactly one driver launch, got %d", len(*launches))
+		}
+		want := filepath.Clean(dir)
+		if got := (*launches)[0].Repo; got != want {
+			t.Fatalf("driver repo = %q, want %q", got, want)
 		}
 	})
 }

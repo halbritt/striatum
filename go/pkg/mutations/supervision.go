@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/rpc"
@@ -61,6 +62,11 @@ type supervisorReportRow struct {
 	HasPID             bool
 	PIDStartTime       string
 	Metadata           map[string]any
+	// PointerUpdatedAt is the pointer row's stored updated_at at read time. It
+	// drives the RFC 0139 coalesce write-skip on the per-helper-event heartbeat
+	// path from the already-read FOR UPDATE row (no extra SELECT). Empty when
+	// unread (e.g. no pointer row), which always writes.
+	PointerUpdatedAt string
 }
 
 type superviseReportRecordResult struct {
@@ -493,7 +499,8 @@ func findReportSupervisor(ctx context.Context, runner db.TxRunner, repositoryID 
 		return scanReportSupervisor(runner.QueryRow(ctx, `
 			SELECT ps.supervisor_id, ps.run_id, ps.session_id, ps.state,
 			       ps.pid, ps.pid_start_time,
-			       p.daemon_supervisor_id, COALESCE(p.metadata_json, '{}'::jsonb)
+			       p.daemon_supervisor_id, COALESCE(p.metadata_json, '{}'::jsonb),
+			       p.updated_at
 			  FROM striatumd.process_supervisors ps
 			  LEFT JOIN striatumd.process_supervisor_pointers p
 			    ON p.repository_id = ps.repository_id AND p.supervisor_id = ps.supervisor_id
@@ -506,7 +513,8 @@ func findReportSupervisor(ctx context.Context, runner db.TxRunner, repositoryID 
 	return scanReportSupervisor(runner.QueryRow(ctx, `
 		SELECT ps.supervisor_id, ps.run_id, ps.session_id, ps.state,
 		       ps.pid, ps.pid_start_time,
-		       p.daemon_supervisor_id, COALESCE(p.metadata_json, '{}'::jsonb)
+		       p.daemon_supervisor_id, COALESCE(p.metadata_json, '{}'::jsonb),
+		       p.updated_at
 		  FROM striatumd.process_supervisors ps
 		  LEFT JOIN striatumd.process_supervisor_pointers p
 		    ON p.repository_id = ps.repository_id AND p.supervisor_id = ps.supervisor_id
@@ -525,6 +533,7 @@ func scanReportSupervisor(row db.Row, notFound error) (supervisorReportRow, erro
 	var pid *int
 	var pidStartTime *string
 	var rawMetadata any
+	var pointerUpdatedAt any
 	err := row.Scan(
 		&supervisor.SupervisorID,
 		&supervisor.RunID,
@@ -534,6 +543,7 @@ func scanReportSupervisor(row db.Row, notFound error) (supervisorReportRow, erro
 		&pidStartTime,
 		&daemonSupervisorID,
 		&rawMetadata,
+		&pointerUpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -552,6 +562,9 @@ func scanReportSupervisor(row db.Row, notFound error) (supervisorReportRow, erro
 		supervisor.PIDStartTime = *pidStartTime
 	}
 	supervisor.Metadata = asMap(rawMetadata)
+	if ts, ok := asTime(pointerUpdatedAt); ok {
+		supervisor.PointerUpdatedAt = ts.UTC().Format(time.RFC3339)
+	}
 	return supervisor, nil
 }
 
@@ -736,7 +749,18 @@ func updateReportSupervisorStopped(ctx context.Context, runner db.TxRunner, repo
 	})
 }
 
+// refreshReportSupervisorHeartbeat is the per-helper-event timestamp bump — the
+// dominant write source the issue measured (~8.1M/16h). RFC 0139 Direction 1: it
+// coalesces the writes against the supervisor's stored pointer timestamp
+// (PointerUpdatedAt, from the already-held FOR UPDATE row), skipping the three
+// single-column UPDATEs when the prior timestamp is younger than the floor. The
+// skip is evaluated in Go from the already-read row, so no extra SELECT enters the
+// per-helper-event path. A state transition (detached/stopped) takes a different
+// code path that always writes — only the pure-liveness pulse is coalesced.
 func refreshReportSupervisorHeartbeat(ctx context.Context, runner db.TxRunner, repositoryID string, supervisor supervisorReportRow, now string) error {
+	if supervisorHeartbeatBumpSkipped(supervisor.PointerUpdatedAt, now) {
+		return nil
+	}
 	if err := runner.Exec(ctx, `
 		UPDATE striatumd.process_supervisors
 		   SET heartbeat_at = $1

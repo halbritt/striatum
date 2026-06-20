@@ -235,8 +235,178 @@ func doctorBarrierIntegrity(ctx context.Context, runner any, repositoryID string
 		})
 	}
 
+	// RFC 0138 (#453) Option A — the FMA-003 case made legible. A strict fan-in
+	// barrier blocked on a PROVABLY-DEAD required seat that does NOT tolerate a sealed
+	// gap has no automatic exit and parks the run in needs_operator; surface it as a
+	// SPECIFIC reason (not a generic block) naming the seat, the barrier, and the
+	// bounded recovery commands, so the operator sees "this is the dead-required-seat
+	// case" immediately. This scan is separate from the BARRIER_BLOCKED case above: a
+	// provably-dead-but-still-`running` outstanding seat is `outstanding`, not
+	// `blocking`, in the view's narrow classification (a slow `running` seat is merely
+	// pending), so without this scan it would surface as nothing at all.
+	unrecoverable := loadStrictFaninUnrecoverableBarriers(ctx, runner, repositoryID)
+	for _, u := range unrecoverable {
+		problems = append(problems, fmt.Sprintf(
+			"strict_fanin_required_seat_unrecoverable.%s: strict fan-in barrier has %d provably-dead REQUIRED seat(s) (%s) with no automatic exit; the run parks in needs_operator. The barrier does not tolerate a sealed gap (RFC 0138 opt-in off). Recover via: %s",
+			u.BarrierID, len(u.Seats), strings.Join(u.Seats, ", "), strings.Join(u.RecoveryCommands, "; "),
+		))
+		records = append(records, map[string]any{
+			"check": "strict_fanin_required_seat_unrecoverable",
+			"id":    u.BarrierID,
+			"context": map[string]any{
+				"barrier_id":          u.BarrierID,
+				"run_id":              u.RunID,
+				"unrecoverable_seats": u.Seats,
+				"recovery_commands":   u.RecoveryCommands,
+				"fma":                 "FMA-003",
+			},
+		})
+	}
+
 	block["barriers"] = barrierViews
 	return block, problems, records, nil, nil
+}
+
+// strictFaninUnrecoverable is one strict fan-in barrier blocked on one or more
+// provably-dead REQUIRED seats with no automatic terminal-gap exit (RFC 0138 Option A
+// / FMA-003).
+type strictFaninUnrecoverable struct {
+	BarrierID        string
+	RunID            string
+	Seats            []string
+	RecoveryCommands []string
+}
+
+// loadStrictFaninUnrecoverableBarriers finds strict fan-in barriers blocked on a
+// provably-dead REQUIRED seat that the barrier does NOT tolerate as a sealed gap
+// (RFC 0138 Option A). A seat is reported only when ALL hold:
+//
+//   - the barrier does NOT opt into sealed-gap tolerance (fanin_tolerates_sealed_gap
+//     false / absent / budget 0) — an opted-in barrier auto-degrades (Option B) and is
+//     NOT this case;
+//   - the seat is OUTSTANDING: it has no completed job (no live seal) and no quarantine
+//     marker — it is neither live-staged nor a clean terminal gap;
+//   - the seat's owning lane is PROVABLY DEAD: its live job row's owning session's
+//     supervisor pointer is in the conclusive-dead state ('lost' / 'stopped'), the SAME
+//     durable signal supervisedAgentConfirmedDead treats as conclusive. This stays
+//     CONSERVATIVE — a seat whose deadness needs a live PID probe (an 'attached' /
+//     'detached' pointer) is NOT reported here, so a merely-slow seat never reddens the
+//     doctor (fires-on-bad / quiet-on-good).
+//
+// It reads the freeze record's sealed-gap columns adaptively: a deployment behind on
+// migration 0039 lacks them, so the opt-in is treated as off (the FMA-003 case is then
+// reportable for every dead required seat, which is correct for that deployment).
+func loadStrictFaninUnrecoverableBarriers(ctx context.Context, runner any, repositoryID string) []strictFaninUnrecoverable {
+	// The sealed-gap tolerance columns may be absent on a deployment behind on 0039;
+	// project them adaptively so this read never errors on an older schema.
+	tolerates := "false"
+	budget := "0"
+	if faninFreezeSealedGapColumnsPresent(ctx, runner) {
+		tolerates = "COALESCE(fp.fanin_tolerates_sealed_gap, false)"
+		budget = "COALESCE(fp.max_sealed_gaps, 0)"
+	}
+	rows, err := collectRows(ctx, runner, `
+		WITH declared AS (
+		    SELECT fp.repository_id, fp.barrier_id, fp.run_id,
+		           sib.value::text AS workflow_job_id,
+		           `+tolerates+` AS tolerates_gap,
+		           `+budget+`    AS max_gaps
+		      FROM striatumd.fanin_freeze_points fp,
+		           jsonb_array_elements_text(fp.declared_sibling_job_ids) AS sib(value)
+		     WHERE fp.repository_id = $1
+		)
+		SELECT d.barrier_id, d.run_id, d.workflow_job_id
+		  FROM declared d
+		 WHERE (d.tolerates_gap = false OR d.max_gaps <= 0)
+		   -- OUTSTANDING: no completed job (no live seal).
+		   AND NOT EXISTS (
+		     SELECT 1 FROM striatumd.jobs j
+		      WHERE j.repository_id = d.repository_id AND j.run_id = d.run_id
+		        AND j.workflow_job_id = d.workflow_job_id AND j.state = 'completed'
+		   )
+		   -- NOT a quarantine terminal gap.
+		   AND NOT EXISTS (
+		     SELECT 1 FROM striatumd.jobs j
+		      WHERE j.repository_id = d.repository_id AND j.run_id = d.run_id
+		        AND j.workflow_job_id = d.workflow_job_id
+		        AND j.state = 'canceled'
+		        AND COALESCE(j.write_scope_json->>'quarantined','') = 'true'
+		   )
+		   -- PROVABLY DEAD: the seat's live job row's owning session pointer is
+		   -- conclusively dead ('lost'/'stopped'). A merely-slow ('attached'/'detached')
+		   -- or unprobeable seat is NOT reported (conservative — quiet-on-good).
+		   AND EXISTS (
+		     SELECT 1
+		       FROM striatumd.jobs j
+		       JOIN striatumd.leases l
+		         ON l.repository_id = j.repository_id AND l.lease_id = j.current_lease_id
+		       JOIN striatumd.process_supervisor_pointers sp
+		         ON sp.repository_id = j.repository_id AND sp.session_id = l.owner_session_id
+		      WHERE j.repository_id = d.repository_id AND j.run_id = d.run_id
+		        AND j.workflow_job_id = d.workflow_job_id
+		        AND sp.state IN ('lost','stopped')
+		   )
+		 ORDER BY d.barrier_id, d.workflow_job_id`,
+		repositoryID,
+	)
+	if err != nil {
+		return nil
+	}
+	byBarrier := map[string]*strictFaninUnrecoverable{}
+	order := []string{}
+	for _, r := range rows {
+		barrierID := stringFrom(r, "barrier_id")
+		seat := stringFrom(r, "workflow_job_id")
+		u, ok := byBarrier[barrierID]
+		if !ok {
+			u = &strictFaninUnrecoverable{
+				BarrierID:        barrierID,
+				RunID:            stringFrom(r, "run_id"),
+				RecoveryCommands: strictFaninUnrecoverableRecoveryCommands(stringFrom(r, "run_id")),
+			}
+			byBarrier[barrierID] = u
+			order = append(order, barrierID)
+		}
+		u.Seats = append(u.Seats, seat)
+	}
+	out := make([]strictFaninUnrecoverable, 0, len(order))
+	for _, barrierID := range order {
+		out = append(out, *byBarrier[barrierID])
+	}
+	return out
+}
+
+// strictFaninUnrecoverableRecoveryCommands returns the bounded operator recovery
+// commands for a strict fan-in stuck on a dead required seat (RFC 0138 Option A): the
+// run must be canceled (a strict fan-in's required seat is required by design), or the
+// author may re-prepare the join with an opt-in sealed-gap tolerance if a degraded
+// join is acceptable. Note: recovery.quarantine_lane requires the run terminal first
+// (it snapshots a canceled/failed run's worktree), so the bounded path is cancel —
+// then optionally quarantine the seat — or opt into a sealed gap.
+func strictFaninUnrecoverableRecoveryCommands(runID string) []string {
+	return []string{
+		fmt.Sprintf("striatum run cancel %s  (a strict fan-in's required seat is required by design; cancel the run)", runID),
+		fmt.Sprintf("then optionally: striatum recovery quarantine-lane --run-id %s --job-id <dead-seat-job>  (snapshots the now-canceled run's dead lane worktree)", runID),
+		"or re-prepare the join with fanin_tolerates_sealed_gap + max_sealed_gaps if a degraded (short-a-leg) join is acceptable (RFC 0138 Option B)",
+	}
+}
+
+// faninFreezeSealedGapColumnsPresent reports whether the RFC 0138 (#453) sealed-gap
+// tolerance columns (migration 0039) exist on striatumd.fanin_freeze_points. Mirrors
+// the mutations-side faninSealedGapColumnsPresent: a deployment behind on 0039 lacks
+// them, so the doctor treats the opt-in as off rather than erroring on an older schema.
+func faninFreezeSealedGapColumnsPresent(ctx context.Context, runner any) bool {
+	rows, err := collectRows(ctx, runner, `
+		SELECT EXISTS (
+		  SELECT 1 FROM information_schema.columns
+		   WHERE table_schema = 'striatumd'
+		     AND table_name = 'fanin_freeze_points'
+		     AND column_name = 'fanin_tolerates_sealed_gap'
+		) AS present`)
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	return boolValue(rows[0]["present"])
 }
 
 // loadOrphanedStagingBarriers returns, per barrier_id, how many live staged

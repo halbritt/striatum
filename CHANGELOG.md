@@ -4,6 +4,185 @@
 
 ### Fixed
 
+- **RFC 0141 `verifier run` builtins are now actually runnable end-to-end** (the
+  shipped unit tests passed but the live sandbox path was broken — found by
+  dogfooding). Five fixes: (1) `verifier run --check-id builtin:*` no longer
+  requires `--allowlist` (it contradicted "runnable with no operator JSON"), and a
+  new `--intent [--pins --attest]` resolves external two-layer-allowlist checks;
+  (2) builtin tools resolve to an ABSOLUTE host path so they are found regardless of
+  the fixed sandbox `PATH` (`go` may live in `~/.local/bin`); (3) go builtins point
+  `GOCACHE`/`GOPATH`/`HOME` at the writable scratch (the sandbox binds cwd read-only)
+  and `GOMODCACHE` at the host cache with `GOPROXY=off` (offline); (4) `go build`'s
+  output is redirected into scratch with `-o` (it otherwise writes the binary into
+  the read-only cwd for a single-main-package module); (5) `GOTOOLCHAIN=auto` so a
+  project requiring a newer `go` than the host's base binary uses the already-cached
+  toolchain offline. Verified live: all four builtins pass under a strict bubblewrap
+  envelope on a valid module (capped at ASSERTED), plus a new live regression test.
+
+### Added
+
+- **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
+  `collaboration_ledger` contract gains the residual adjudication shape deferred by
+  PR #432: a **Check-B correspondence rubric** (per-`challenge`
+  `landed_and_rebutted` / `landed_unrebutted` / `not_material`; a clearing verdict
+  requires ≥1 `landed_and_rebutted` and no `landed_unrebutted`), **v1.1 per-entry
+  fields** (`correspondence`, `coverage`) plus top-level `adjudicators[]` /
+  `adjudication_mode`, and a **second-adjudicator-on-disagreement gate**
+  (`adjudication_mode: second_on_disagreement` requires ≥2 distinct adjudicators for
+  a clearing verdict; a contested clear → `needs_revision`). Additive and enforced at
+  the publisher exit-6 front-matter contract — every existing v1/v1.1 ledger stays
+  valid.
+- **RFC 0141 (generatable `verification_gate` workflow shape) implemented at the
+  `experimental` tier (D239, #473).** `striatum workflow generate --shape
+  verification_gate` now scaffolds a real `type: verify` job → `claim_ledger` gate
+  that is **runnable out of the box** (builtin checks, capped honestly at ASSERTED)
+  and **cannot lie green**. Three pillars:
+  - **Two-layer allowlist** — a committed, hashless, reviewable
+    `verification/allowlist.intent.json` (`striatum.verifier_allowlist_intent.v1`,
+    in the verify job's `forbidden_paths` so the lane can't sanction its own checks)
+    overlaid by a gitignored per-host pins layer the operator never hand-types.
+    New verbs: `striatum verifier pin --host-here` (runs in the lane, OBSERVES each
+    sanctioned binary's sha; refuses drift / real-pin overwrite without `--force`)
+    and `striatum verifier attest` (the PINNED→VERIFIED hinge — **refused inside a
+    supervised lane** so the verified lane cannot bless its own pins). A re-pin of
+    different bytes invalidates a stale attestation.
+  - **Built-in check library** (`builtin:go-test`/`go-vet`/`go-build`/
+    `artifact-anchor-integrity`) self-pinned to the striatum binary, with
+    `builtin_id`+`striatum_version` sealed into `receipt.v1`. A builtin receipt
+    **caps at ASSERTED** at the daemon gate read regardless of strict posture +
+    agreement (a self-pin proves which harness invoked the tool, not which tool
+    ran); the generator refuses a `gate_floor=verified` gate composed only of
+    builtins.
+  - **The gate cannot lie green** — an UNFILLED gate (a sanctioned external check
+    with no host pin) hard-blocks `workflow validate` (exit 8) and `run start`,
+    naming the entry + the literal `verifier pin --host-here` fix (and clears once
+    pinned, no regeneration); a mandatory `negative_control` runs FIRST and voids
+    the receipt if the known-bad passes (catches a vacuous `true`).
+  - Registered in the workflow catalog at `experimental`; the interim
+    `examples/verification-gate-flow/` stays as the portable today-primitives demo
+    until graduation. D227 preserved: the daemon executes nothing. Graduation
+    follow-ups: gate-side daemon-authoritative attestation enforcement (#482),
+    doctor self-pin/pin-drift classes + version-skew resweep (#483).
+
+### Changed
+
+- **RFC 0134 (executable verification gate + claim status-provenance) graduated to
+  `implemented` (D237).** Both build halves were already on `main` under D227's
+  validate-not-execute accepted form (the daemon NEVER executes a check; the
+  off-gate-path `striatum verifier run` lane mints a tamper-evident `receipt.v1`
+  under the strictest available sandbox, and the run-completion gate is a pure read
+  that degrades a missing/wedged verify to ASSERTED, never blocking on liveness).
+  This change confirms-and-graduates rather than rebuilds: owner bundle 0016 is
+  live (owner DB at bundle 18, `verify` in `jobs_job_type_check`); the live mint
+  classifies a passing check `verified_eligible` and a failing check `asserted`
+  under a strict bubblewrap envelope; and the RFC/index status + the (previously
+  stale, rejected-form) index description are corrected to the shipped form.
+  - **New connected regression** `TestRunClaimVerificationEndToEndRealReceiptMint`
+    (`go/pkg/mutations`) wires the REAL sandboxed mint (`verifier.ExecuteCheck`)
+    through the REAL daemon gate read (`evaluateRunClaimVerification`) in one flow,
+    no fabricated seal: a strict host reads VERIFIED (`two_signal_sealed_receipt`),
+    a re-mint over a changed worktree tree auto-decays to ASSERTED
+    (`receipt_seal_mismatch`), and a degraded host asserts the non-strict fail-safe.
+  - **Operator legibility:** the evidence export now renders a deterministic
+    `## Claim Verification` section (authored vs. effective claim status + degrade
+    basis) from the frozen `run_completion_record`; `TestEvidenceExportRendersProvenanceSections`
+    extended to assert it. No new RPC/route/schema/migration/owner-bundle — no
+    deploy required.
+
+### Fixed
+
+- **Actionable RFC-implementation wave (2026-06-19, D240).** Implements the
+  design-complete open issues from the post-audit handoff as direct runner-fix
+  PRs (one worktree-isolated agent each), graduating their RFCs
+  `proposed`→`implemented`:
+  - **barrier: a strict fan-in with a permanently-dead required seat now has a
+    finite terminal-gap exit instead of only parking in `needs_operator`
+    (#453, RFC 0138, PR #488).** Option A ships unconditionally — a sharper
+    `needs_operator` message and a new `strict_fanin_required_seat_unrecoverable`
+    doctor reason. Option B is opt-in per barrier (`fanin_tolerates_sealed_gap` /
+    `max_sealed_gaps`, sealed on the `fanin_freeze_points` record): a gap is
+    admitted **only** for a provably-dead required seat (reusing the quorum
+    `supervisedAgentConfirmedDead` oracle — no new liveness check), composed into
+    RFC 0135's `is_terminal_gap` predicate as a disjunct (no predicate fork), and
+    the degraded fire records `status=terminal_gap` + a `damage_code` in the join
+    manifest so a downstream gate can refuse a short join. Completeness is never
+    silently forged. Runtime migration `0039`.
+  - **daemon: the supervisor reconcile/heartbeat loop no longer write-amplifies
+    `process_supervisor_pointers` (#421, RFC 0139, PR #489).** A Go write-skip
+    coalesce floor (`STRIATUM_SUPERVISOR_HEARTBEAT_COALESCE`, ~30 s, computed from
+    the already-read row) skips redundant timestamp bumps in
+    `refreshSupervisorHeartbeat`/`refreshReportSupervisorHeartbeat`, and `state` is
+    dropped from the non-partial `idx_process_supervisor_pointers_run` so the common
+    intra-live transitions become HOT updates. The `#417` phantom-supervisor
+    stabilization (partial-unique `…_per_session` index, `state` column, reap
+    migration 0033) is untouched, and nothing is added inside the `lockRun`
+    advisory-lock transaction (#198/#355). Runtime migration `0040` + owner bundle
+    `0019` (transfers the three supervisor tables to `striatumd_rw` first, since
+    migration 0005 left them bootstrap-owned — apply `owner-ddl 0019` before the
+    daemon restart). Targets: ≥80 % fewer timestamp writes, new-page 20 %→≤5 %,
+    HOT→≥92 %.
+  - **attestation: a lane doing honest long tool-call-less local work keeps its
+    publishable byline (#457, RFC 0140, PR #486).** The agent loop now emits a
+    `work.heartbeat local_work=true` keepalive during long local work, and
+    `lanehealth.Classify` reclassifies a `wedged_no_tool_progress` stall on a
+    PID-alive, identity-matched lane as `alive_but_silent` (attestation preserved)
+    instead of an unconditional `Attested=false`. The byline-forgery guard
+    (RFC 0026/D080) is preserved — a confirmed-dead, hijacked, or no-PID-oracle
+    lane still loses attestation and is reaped.
+- **Failure-mode audit remediation + open-issue triage wave (2026-06-19, D236).**
+  Resolves the SERIOUS/MINOR availability & liveness findings from the
+  `STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md` audit (#451–#458) plus the
+  prod-critical owner-DDL crash-loop (#442/#441) and three smaller runner bugs
+  (#445/#446/#447), each as a direct runner-fix PR:
+  - **daemon: a background-sweep panic no longer crash-loops the single writer
+    (#451, FMA-001).** The recovery and auto-spawn sweep goroutines now convert a
+    per-run panic into the same degraded-cursor + backoff path an error already
+    takes (the recovery loop's `panic(r)` re-raise is removed; the auto-spawn loop
+    gains the missing recover), so one poison durable row degrades that run instead
+    of downing the daemon on every restart.
+  - **db: migration apply is now atomic (#452, FMA-002/008).** `applyOne` wraps the
+    DDL and both version stamps in one transaction (mirroring `applyOneOwnerBundle`),
+    closing the crash-window that left DDL applied but the version unstamped; the
+    in-progress version's recorded hash is verified inside that tx, and a guard test
+    trips if any future runner migration introduces non-transactional DDL.
+  - **db: a two-role prod bootstrap no longer crash-loops on an owner-owned runtime
+    table (#442/#441, D236).** New owner bundle `0018` transfers the pre-split
+    runtime-data table cohort (`job_recovery_state` et al.) to `striatumd_rw`
+    ownership (with the required `GRANT CREATE ON SCHEMA` prerequisite) before any
+    runtime migration ALTERs them, so migration 0035's `ADD COLUMN` succeeds under
+    the runtime role instead of failing 42501. The unsound name-based owner-DDL
+    allowlist is removed; the guard now derives the runtime-ALTERable set from the
+    bundles' actual `OWNER TO` transfers, so it passes only because a table is
+    truthfully runtime-owned. Migration 0035's SQL is untouched (hash-stable).
+  - **blob: `PutBytes` verifies a content readback hash, not just object size
+    (#454, FMA-004).** A truncated/corrupt upload that satisfied the size check is
+    now caught at publish (new `ErrContentReadbackMismatch`) rather than late at the
+    run-completion reconstructability gate.
+  - **recovery: auto-finalize enforces the per-job durability floor (#455,
+    FMA-005).** `completeAutoFinalizedJob` now also runs
+    `ensurePerJobPublishedArtifactsDurable`, matching `completeRecoveredJob`, so a
+    job cannot seal `completed` with a non-durable optional published artifact.
+  - **supervisor: buffered `supervised_push` packets survive a daemon restart
+    (#456, FMA-006).** No-reader-buffered packets are persisted (new runtime table
+    via migration `0038`) and replayed on reader-attach, so a push lane no longer
+    silently loses a packet across a restart (self-driving pull lanes already
+    self-healed).
+  - **db: owner-bundle re-apply is legible and self-healing on a missing
+    cross-bundle dependency (#458, FMA-007).** An undefined-object failure now
+    reports the bundle + missing object + remediation, and a one-shot ordered
+    idempotent re-apply re-creates a missing earlier object before a later bundle
+    depends on it; fail-closed is preserved as the final safety property.
+  - **supervisor: the RFC 0015 skill bundle is installed into the lane user's
+    `~/.claude/skills/` at `supervise start` (#445).** Idempotent and non-fatal, it
+    closes the CLI-fallback gap where a lane user never received the protocol skills.
+  - **drive: `cannot_advance_blocked` distinguishes dependency-blocked from
+    seal-failed (#446).** A job merely waiting on an upstream dependency
+    (`started_at IS NULL`) no longer reports a phantom "lane finished but the seal
+    failed" — message-only, no state-machine change.
+  - **barrier: the RFC 0135 assembly commit is deterministic (#447).** The
+    `commit-tree` step now pins `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` + identity, so
+    crash-recovery re-assembly reproduces the journaled commit byte-for-byte (fixes
+    the `TestBarrierAssemblyCrashMidAssemblyResumes` CI flake).
 - **runner: a bare interactive agent-CLI lane now drives `work.*` instead of
   timing out (#431, D235) — the self-hosting crux.** A `process` lane whose
   command is a bare `claude`/`codex`/`agy` (argv where

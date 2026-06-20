@@ -1,1 +1,15 @@
-Read only the curated dialogue trajectory. Publish a collaboration_ledger whose verdict reflects whether a material challenge landed and was directly rebutted.
+# Task
+
+Read only the dialogue trajectory for proposal-readiness and publish the collaboration ledger verdict.
+
+## Deliverable
+
+Publish the collaboration_ledger for proposal-readiness from curated dialogue/artifact evidence only.
+
+## Verdict Basis
+
+Record whether a material challenge landed, whether the holder answered it directly, and which constraints carry into a revision if the verdict is needs_revision.
+
+## Output Contract
+
+Use the declared collaboration_ledger schema and verdict vocabulary. Do not read raw provider logs or private diagnostics as evidence.
