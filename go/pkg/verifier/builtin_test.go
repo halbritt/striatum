@@ -5,10 +5,56 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
 )
+
+// TestCheckRunEnvGoBuiltinPrependsGoBinDir is the regression guard for the sandbox
+// PATH fix: a go builtin must be able to resolve `go` even when the toolchain is not
+// installed under a system bin dir (hosts with go in ~/.local/go/bin previously
+// failed EVERY go builtin with a spurious "go: not found" exit 1). The host go's own
+// directory is prepended to the otherwise-fixed sandbox PATH; a non-go check keeps
+// only the bare system PATH (the hermetic envelope is not widened for it).
+func TestCheckRunEnvGoBuiltinPrependsGoBinDir(t *testing.T) {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go not on PATH; nothing to resolve")
+	}
+	goBin := filepath.Dir(goPath)
+
+	rex, err := builtinResolvedExec("builtin:go-test")
+	if err != nil {
+		t.Fatalf("builtinResolvedExec: %v", err)
+	}
+	path := envValue(t, checkRunEnv(rex, "/some/cwd", t.TempDir()), "PATH")
+	if !strings.HasPrefix(path, goBin+":") {
+		t.Fatalf("go builtin PATH must start with the host go bin dir %q; got %q", goBin, path)
+	}
+	for _, want := range []string{"/usr/local/bin", "/usr/bin", "/bin"} {
+		if !strings.Contains(path, want) {
+			t.Fatalf("go builtin PATH must retain the fixed system dir %q; got %q", want, path)
+		}
+	}
+
+	nonGo := ResolvedExec{CheckID: "x"} // not a builtin:go-* check
+	if got := envValue(t, checkRunEnv(nonGo, "/some/cwd", t.TempDir()), "PATH"); got != "/usr/local/bin:/usr/bin:/bin" {
+		t.Fatalf("non-go check PATH must be the fixed system PATH; got %q", got)
+	}
+}
+
+func envValue(t *testing.T, env []string, key string) string {
+	t.Helper()
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	t.Fatalf("env %q not set in %v", key, env)
+	return ""
+}
 
 // TestBuiltinGoChecksRunOnValidModule is the end-to-end regression for the live
 // builtin path: a trivially-VALID Go module must actually PASS every go builtin

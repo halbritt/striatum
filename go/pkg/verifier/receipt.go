@@ -190,6 +190,12 @@ func executeResolved(ctx context.Context, rex ResolvedExec, req RunRequest) (Che
 	if strings.TrimSpace(cwd) == "" {
 		cwd, _ = os.Getwd()
 	}
+	// Resolve to an ABSOLUTE path. The sandbox uses cwd as a bwrap --ro-bind SOURCE,
+	// and bwrap resolves a relative source against its own (post-chdir) working dir,
+	// so a relative --cwd doubles and vanishes ("bwrap: Can't find source path ...").
+	if abs, aerr := filepath.Abs(cwd); aerr == nil {
+		cwd = abs
+	}
 	// The sandbox binds cwd READ-ONLY (the check observes, it does not mutate the
 	// tree it witnesses); the scratch dir is the single writable space. A toolchain
 	// that needs a writable cache (go-build, GOPATH) must target scratch, so a go
@@ -325,30 +331,42 @@ type runOutcome struct {
 // cwd READ-ONLY, so HOME points at the writable scratch when one is available. A go
 // builtin additionally needs GOCACHE/GOPATH in scratch and the host's module cache
 // (read-only, visible through the sandbox's ro-bind of /) with the network OFF, so
-// `go test/vet/build` runs against an offline, already-cached module. (`go` itself
-// is resolved on the fixed sandbox PATH like every other check binary.)
+// `go test/vet/build` runs against an offline, already-cached module. `go` is
+// invoked as a bare argv resolved on PATH inside the sandbox; the fixed system PATH
+// finds it only when the toolchain sits under a system bin dir, so for a go builtin
+// the host go's OWN directory is prepended (resolved lane-side) — otherwise hosts
+// that install go outside /usr/*/bin (e.g. ~/.local/go/bin) fail EVERY go builtin
+// with a spurious "go: not found" exit 1.
 func checkRunEnv(rex ResolvedExec, cwd, scratch string) []string {
 	home := cwd
 	if strings.TrimSpace(scratch) != "" {
 		home = scratch
 	}
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + home}
+	path := "/usr/local/bin:/usr/bin:/bin"
+	var goEnv []string
 	if isGoBuiltin(rex) && strings.TrimSpace(scratch) != "" {
-		env = append(env,
-			"GOCACHE="+filepath.Join(scratch, "go-build"),
-			"GOPATH="+filepath.Join(scratch, "go"),
+		// Prepend just the host go's directory (not the operator's whole PATH) so
+		// `go` resolves while the hermetic envelope — no network, ro rootfs,
+		// GOPROXY=off — stays intact.
+		if gobin := hostGoBinDir(); gobin != "" {
+			path = gobin + ":" + path
+		}
+		goEnv = []string{
+			"GOCACHE=" + filepath.Join(scratch, "go-build"),
+			"GOPATH=" + filepath.Join(scratch, "go"),
 			"GOPROXY=off", // deps + any toolchain must already be cached; never reach the network
 			// GOTOOLCHAIN=auto so a project whose go.mod requires a newer go than the
 			// host's base `go` uses the ALREADY-CACHED toolchain (in the read-only host
 			// GOMODCACHE) offline; an uncached toolchain fails honestly (the strict
 			// sandbox has no network), rather than silently downgrading.
 			"GOTOOLCHAIN=auto",
-		)
+		}
 		if mod := hostGoModCache(); mod != "" {
-			env = append(env, "GOMODCACHE="+mod)
+			goEnv = append(goEnv, "GOMODCACHE="+mod)
 		}
 	}
-	return env
+	env := []string{"PATH=" + path, "HOME=" + home}
+	return append(env, goEnv...)
 }
 
 // isGoBuiltin reports whether the resolved check is one of the builtin:go-* checks.
@@ -399,6 +417,26 @@ func hostGoModCache() string {
 		}
 	})
 	return hostGoModCacheValue
+}
+
+var (
+	hostGoBinDirValue string
+	hostGoBinDirOnce  sync.Once
+)
+
+// hostGoBinDir returns the directory of the host `go` binary, resolved LANE-SIDE on
+// the operator's PATH. The strict sandbox runs with a fixed minimal PATH for
+// hermeticity, but a go builtin must still be able to launch `go`; prepending only
+// this one directory (never the operator's whole PATH) keeps the envelope tight while
+// fixing hosts where the toolchain is not under a system bin dir. Best-effort: empty
+// when `go` is not found (the go builtins then fail honestly, as before this fix).
+func hostGoBinDir() string {
+	hostGoBinDirOnce.Do(func() {
+		if p, err := exec.LookPath("go"); err == nil {
+			hostGoBinDirValue = filepath.Dir(p)
+		}
+	})
+	return hostGoBinDirValue
 }
 
 // runOnce executes the wrapped check once with a wall-clock deadline, hashing

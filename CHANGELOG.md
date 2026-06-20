@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **verifier: `builtin:go-*` checks now run on hosts where the toolchain isn't on a
+  system PATH, and with a relative `--cwd` (#510).** `checkRunEnv` prepends the host
+  `go` binary's own directory (resolved lane-side, just that one dir — the hermetic
+  envelope is otherwise unchanged) so a go builtin resolves `go` even when it lives in
+  e.g. `~/.local/go/bin`; and `executeResolved` now absolutizes `cwd` before it is used
+  as a bwrap `--ro-bind` source, so a relative `--cwd` no longer doubles into a
+  `bwrap: Can't find source path` failure. Both previously surfaced as a spurious
+  `passed:false`/exit-1 receipt (a false negative, not a real check failure).
 - **RFC 0136 P1 migration `0041` two-role crash-loop fixed (D248, fix of D242).**
   The `event_chain_segments` runtime migration created `repository_id` with a
   `REFERENCES striatumd.repositories` foreign key. Runtime migrations apply as
