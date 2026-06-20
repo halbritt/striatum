@@ -96,3 +96,31 @@ jobs:
 
       - name: Fresh clone smoke
         run: make smoke
+
+  # RFC 0096 / #87 lane-isolation gate (D244).
+  #
+  # Disposition: this is OPERATOR-PROVISIONED HARDENING, not a mandatory-in-CI
+  # check. The negative control (make lane-isolation-check) fundamentally needs
+  # host provisioning a stock runner cannot have — a dedicated PG-less lane OS
+  # user, passwordless `sudo -n -u`, and PostgreSQL pg_hba reject rules (see
+  # docs/how-to/lane-sandbox.md). So this job ALWAYS appears in the checks list
+  # for legibility, but the gate itself runs only when the host advertises
+  # provisioning via the STRIATUM_LANE_ISOLATION_HOST repo/org variable set to
+  # "1"; on a stock runner the var is unset and the gate SKIPS LOUDLY (exit 0,
+  # printing that it did NOT run) so a green CI never falsely implies the
+  # isolation gate executed. To actually run it, a provisioned self-hosted
+  # runner sets the STRIATUM_LANE_ISOLATION_HOST=1 variable plus the
+  # STRIATUM_LANE_OS_USER / *_UNIX_URL / *_TCP_URL probe env (see the runbook).
+  lane-isolation-gate:
+    name: Lane-isolation gate (operator-provisioned, D244)
+    runs-on: ubuntu-latest
+    env:
+      STRIATUM_LANE_ISOLATION_HOST: ${{ vars.STRIATUM_LANE_ISOLATION_HOST }}
+      STRIATUM_LANE_OS_USER: ${{ vars.STRIATUM_LANE_OS_USER }}
+      STRIATUM_LANE_ISOLATION_UNIX_URL: ${{ vars.STRIATUM_LANE_ISOLATION_UNIX_URL }}
+      STRIATUM_LANE_ISOLATION_TCP_URL: ${{ vars.STRIATUM_LANE_ISOLATION_TCP_URL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Lane-isolation negative control (runs only on a provisioned host)
+        run: make lane-isolation-check-ci

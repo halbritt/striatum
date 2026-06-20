@@ -6,7 +6,7 @@ VERSION := $(shell tr -d '[:space:]' < "$(MAKEFILE_DIR)/VERSION")
 PREFIX ?= $(HOME)/.local
 DIST_DIR ?= $(MAKEFILE_DIR)/dist
 
-.PHONY: install uninstall build lint typecheck test smoke check installed-cli-check lane-isolation-check release-check check-docs \
+.PHONY: install uninstall build lint typecheck test smoke check installed-cli-check lane-isolation-check lane-isolation-check-ci release-check check-docs \
 	go-build go-test go-vet go-release release-archives check-release-archives package-smoke
 
 install: go-build
@@ -53,6 +53,19 @@ installed-cli-check:
 
 lane-isolation-check:
 	"$(MAKEFILE_DIR)/scripts/check_lane_isolation_neg.sh"
+
+# CI / operator wrapper for the RFC 0096 #87 lane-isolation gate (D244).
+#
+# The negative-control gate fundamentally requires host provisioning a stock
+# runner cannot have (a dedicated PG-less lane OS user, passwordless `sudo -n
+# -u`, and PostgreSQL `pg_hba.conf` reject rules — see
+# docs/how-to/lane-sandbox.md). It is therefore *operator-provisioned
+# hardening*, not mandatory-in-CI. This target is the legible entry point for a
+# conditional CI job: it runs the real gate ONLY when the host advertises
+# provisioning via STRIATUM_LANE_ISOLATION_HOST=1, and otherwise SKIPS LOUDLY so
+# a green CI never falsely implies the isolation gate ran.
+lane-isolation-check-ci:
+	"$(MAKEFILE_DIR)/scripts/check_lane_isolation_ci.sh"
 
 release-check: check release-archives check-release-archives package-smoke smoke
 

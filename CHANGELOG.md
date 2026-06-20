@@ -67,6 +67,21 @@
   bundle (owner bundle 0013 already exists — applying it is an operator deploy
   step). #354 stays open: the go-live flip and wiring `recordFaninFreezePoint` into
   a live fan-out remain.
+- **RFC 0096 / #87 lane-isolation gate disposition (D244).** The residual
+  host-isolation-gate ambiguity is resolved: the green gate
+  (`make lane-isolation-check`, the RFC 0110 `T-LANE-ISOLATION-NEG` negative
+  control) is **operator-provisioned hardening**, surfaced via a **conditional
+  CI job** rather than made mandatory-in-CI (a stock runner cannot have the
+  PG-less lane OS user, passwordless `sudo -n -u`, and `pg_hba` reject rules the
+  gate requires). New `make lane-isolation-check-ci`
+  (`scripts/check_lane_isolation_ci.sh`) and a `lane-isolation-gate` job in
+  `.github/workflows/ci.yml` that runs the real negative control only when the
+  host advertises provisioning via `STRIATUM_LANE_ISOLATION_HOST=1` and
+  otherwise **skips loudly** (exit 0, printing that the gate did NOT run) so a
+  green CI never falsely implies the isolation gate ran; once a host claims
+  provisioning, a missing probe URL / lane user / sudo rule is a loud failure,
+  not a silent skip. RFC 0096 re-statused `partially implemented`→`implemented`;
+  `docs/how-to/lane-sandbox.md` documents the guard variable.
 - **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
   `collaboration_ledger` contract gains the residual adjudication shape deferred by
   PR #432: a **Check-B correspondence rubric** (per-`challenge`

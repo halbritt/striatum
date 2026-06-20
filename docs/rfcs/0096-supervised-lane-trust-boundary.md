@@ -1,6 +1,6 @@
 # RFC 0096: Supervised-Lane Trust Boundary and Control-Plane Sandboxing
 
-Status: partially implemented (Phase 1 landed; V2 lane-user launch support landed; hardened host gate pending)
+Status: implemented (Phase 1 + V2 lane-user launch landed; the green host-isolation gate is operator-provisioned hardening surfaced via a conditional CI job — D244, #87 closed)
 Date: 2026-05-30
 author: proposer-claude-opus-4-8-001
 
@@ -191,6 +191,26 @@ constraint violation. With the safe path present and the boundary hardened, the
 #87 behavior is both unnecessary and impossible.
 
 ## Acceptance Criteria
+
+> **Host-isolation gate disposition (D244, 2026-06-20).** The remaining
+> ambiguity — whether the green host-isolation gate
+> (`make lane-isolation-check`, the RFC 0110 `T-LANE-ISOLATION-NEG` negative
+> control behind acceptance criterion 2) should be **mandatory-in-CI** or
+> **operator-provisioned** — is resolved as **operator-provisioned hardening**.
+> The gate fundamentally requires host provisioning a stock CI runner cannot
+> have (a dedicated PG-less lane OS user, passwordless `sudo -n -u`, and
+> PostgreSQL `pg_hba.conf` reject rules; see
+> [the lane sandbox runbook](../how-to/lane-sandbox.md)). Making it
+> unconditionally mandatory would either break CI or — worse — pass vacuously on
+> a host where the lane user does not exist. Instead it is surfaced via a
+> **conditional CI job** (`make lane-isolation-check-ci`, wrapping
+> `scripts/check_lane_isolation_ci.sh`): the real negative control runs only
+> when the host advertises provisioning via the `STRIATUM_LANE_ISOLATION_HOST=1`
+> guard variable, and otherwise **skips loudly** (exit 0, printing that the gate
+> did NOT run) so a green CI never falsely implies the isolation gate executed.
+> Once a host sets the guard, a missing probe URL / lane user / sudo rule is a
+> **loud failure**, never a silent skip. This closes #87's residual ambiguity
+> without weakening the negative-control assertion when provisioned.
 
 1. **No DSN reachable from a lane.** A supervised lane's environment contains no
    Postgres DSN/credential; a test asserts the constructed lane env is the

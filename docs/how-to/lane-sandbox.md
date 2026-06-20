@@ -188,6 +188,33 @@ user, protected socket directory, and PostgreSQL `pg_hba.conf` deny rule are in
 place. It is not part of the ordinary unit suite because it depends on host OS
 users and PostgreSQL listener configuration.
 
+### Wiring the gate into CI (D244)
+
+Per [D244](../decisions/decision-log.md), this gate is **operator-provisioned
+hardening, not mandatory-in-CI** — a stock runner has none of the host
+provisioning above. It is surfaced via a **conditional CI job**: `make
+lane-isolation-check-ci` (wrapping `scripts/check_lane_isolation_ci.sh`) runs the
+real negative control **only** when the host advertises provisioning via the
+guard variable, and otherwise **skips loudly** (exit 0, printing that the gate
+did NOT run) so a green CI never falsely implies the gate executed.
+
+The `lane-isolation-gate` job in `.github/workflows/ci.yml` always appears in the
+checks list. To make it actually run on a provisioned (self-hosted) runner, set
+these as repo/org **Actions variables** (the workflow maps them into the job env):
+
+```sh
+STRIATUM_LANE_ISOLATION_HOST=1
+STRIATUM_LANE_OS_USER=striatum-lane
+STRIATUM_LANE_ISOLATION_UNIX_URL=postgres:///striatumd?host=/var/run/postgresql&connect_timeout=2
+STRIATUM_LANE_ISOLATION_TCP_URL=postgres://localhost/striatumd?connect_timeout=2
+```
+
+Once `STRIATUM_LANE_ISOLATION_HOST=1` is set, a missing probe URL / lane user /
+sudo rule is a **loud failure** (exit 2), never a silent skip — the
+negative-control assertion is never weakened when provisioned. An operator can
+run the same wrapper locally: `STRIATUM_LANE_ISOLATION_HOST=1 … make
+lane-isolation-check-ci`.
+
 ## The privilege split (#201)
 
 Keep the **trusted** half of supervision on the daemon/operator side of the user
