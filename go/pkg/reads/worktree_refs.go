@@ -197,6 +197,29 @@ func readGitDefaultBranchRef(ctx context.Context, repoRoot string) string {
 	return ""
 }
 
+// readGitLocalDefaultBranchRef resolves ONLY the repository's LOCAL default
+// branch (refs/heads/main, then refs/heads/master), never a remote ref. It exists
+// because readGitDefaultBranchRef prefers the remote default (origin/HEAD ->
+// origin/main) so the artifact-anchor doctor checks can ALSO consult the local
+// default branch that `run integrate --into <branch>` advances before the
+// operator pushes to origin (#504): a deliverable that is live on the locally
+// integrated default branch is superseded/preserved, not lost, even while the
+// remote tip is still stale. It degrades safely to "" and is ctx-cancellable.
+func readGitLocalDefaultBranchRef(ctx context.Context, repoRoot string) string {
+	if strings.TrimSpace(repoRoot) == "" {
+		return ""
+	}
+	for _, ref := range []string{
+		"refs/heads/main",
+		"refs/heads/master",
+	} {
+		if _, err := readGitCommit(ctx, repoRoot, ref); err == nil {
+			return ref
+		}
+	}
+	return ""
+}
+
 // worktreeReclassRecord builds a verbose record for a reclassified
 // (warning, not problem) worktree finding, mirroring worktreeProblemRecord but
 // carrying the run state and any preserving ref.
