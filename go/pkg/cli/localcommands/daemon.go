@@ -256,6 +256,34 @@ func runDaemonInstall(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// #509: the user-scope unit this command writes carries no owner-DB
+	// bootstrap environment (STRIATUM_OWNER_DB_URL et al.), so when a system
+	// unit already owns striatumd the user unit crash-loops on owner bootstrap
+	// and the two units conflict, taking the daemon down for every session.
+	// Detect an installed system unit and refuse the user-scope install rather
+	// than re-create the broken, conflicting unit (which would also silently
+	// defeat an operator `systemctl --user mask`).
+	if systemdAvailable() && systemUnitInstalled() {
+		msg := fmt.Sprintf("refusing user-scope install: a system unit already owns striatumd (%s).\n"+
+			"The user-scope unit lacks the owner-DB bootstrap env and would crash-loop and conflict with it (#509).\n"+
+			"Manage the daemon with `sudo systemctl restart striatumd`; print the unit with `striatum daemon install --print-unit`.", systemUnitPath)
+		if flags.json {
+			// Emit the structured refusal on stdout (for tooling) but keep the
+			// non-zero exit so callers and CI treat the refusal as a failure.
+			_ = writeDaemonJSON(stdout, stderr, map[string]any{
+				"ok": false,
+				"error": map[string]any{
+					"code":             "daemon_install_system_unit_present",
+					"message":          msg,
+					"system_unit_path": systemUnitPath,
+				},
+			})
+			return 1
+		}
+		_, _ = fmt.Fprintln(stderr, msg)
+		return 1
+	}
+
 	// Always scaffold daemon.toml when absent; this is host-agnostic and safe
 	// regardless of whether systemd is present.
 	tomlCreated, err := scaffoldDaemonTOML(layout.configTOML)
@@ -542,6 +570,18 @@ func inspectDaemonUnit(layout layout) daemonUnitInspection {
 		return system
 	}
 	return user
+}
+
+// systemUnitInstalled reports whether a system-scope striatumd unit owns the
+// daemon. It mirrors inspectDaemonUnitScope's FragmentPath probe (so the same
+// systemctl stub drives it in tests) and falls back to the on-disk unit path so
+// a masked-or-disabled-but-present system unit still blocks the user install.
+func systemUnitInstalled() bool {
+	path := strings.TrimSpace(systemctlOutputForScope(systemdScopeSystem, "show", unitName, "--property=FragmentPath", "--value"))
+	if path != "" && path != "/dev/null" {
+		return true
+	}
+	return fileExists(systemUnitPath)
 }
 
 func inspectDaemonUnitScope(scope systemdScope, fallbackPath string) daemonUnitInspection {

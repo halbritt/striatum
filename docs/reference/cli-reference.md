@@ -340,6 +340,15 @@ lifecycle after installation. On hosts without systemd user services, run
 `striatumd -socket "${XDG_RUNTIME_DIR}/striatum/daemon-go.sock"` directly as
 described in the daemon runbook.
 
+If a system unit (`/etc/systemd/system/striatumd.service`) already owns the
+daemon, `striatum daemon install` refuses with exit code 1 and
+`daemon_install_system_unit_present` rather than writing a conflicting
+user-scope unit. The user-scope unit carries no owner-DB bootstrap environment,
+so re-creating it next to a system unit crash-loops the daemon and takes it down
+for every session (#509). On such a host, manage the daemon with
+`sudo systemctl restart striatumd` and use `--print-unit` to inspect the unit
+template without installing it.
+
 `striatumd` is the supported foreground daemon process. Per D094 / RFC 0043 the
 daemon is a hard prerequisite for every Striatum verb; CLI verbs without a
 reachable daemon refuse with exit code 11 (`daemon_unreachable`) and do not

@@ -64,7 +64,7 @@ state changes must route through daemon RPC.
 |---|---|---|---|
 | `go/pkg/cli/localcommands/daemon.go::runDaemonMigrate` | `daemon migrate-db` | `db.ResolveConfig`, `db.ConnectAndMigrate` | Applies forward PostgreSQL migrations with an owner/admin DSN before the daemon serves; no workflow RPC mutation. |
 | `go/pkg/cli/localcommands/daemon.go::runDaemonOwnerDDL` | `daemon owner-ddl apply` | `db.ResolveConfig`, `db.Connect`, `db.ApplyOwnerBundles`, `db.ReassertWriteRevokes`, `db.ReassertReadRevokes` | Applies owner bundles and reasserts protected grants with an owner DSN; no workflow RPC mutation. |
-| `go/pkg/cli/localcommands/daemon.go::runDaemonInstall` | `daemon install` | none | Renders the systemd user unit and config scaffold only. |
+| `go/pkg/cli/localcommands/daemon.go::runDaemonInstall` | `daemon install` | none | Renders the systemd user unit and config scaffold only; refuses (exit 1) when a system unit already owns the daemon (#509). |
 | `go/pkg/cli/localcommands/daemon.go::runDaemonStatus` | `daemon status` | none directly | Reports local service/runtime layout and shells to `striatum doctor` for a read-only daemon health check. |
 
 ## Registered Daemon Methods
