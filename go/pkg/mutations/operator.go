@@ -525,6 +525,22 @@ func HandleCheckpointResolve(ctx context.Context, runner db.Runner, envelope rpc
 		if err != nil {
 			return nil, err
 		}
+		// #505: the detached auto-driver (`run drive`, unit `striatum-drive-<run>`)
+		// exits when the run hits the waiting_human checkpoint
+		// (runreconcile.IsTerminalRunState treats waiting_human as drive-terminal)
+		// and is not re-armed by this handler. When continue/override leave the run
+		// `running` with claimable downstream work, advertise the re-drive verb so
+		// the operator (or an automation watching next_actions) re-arms the driver
+		// instead of the run silently stalling until a manual re-drive. A paused run
+		// is a deliberate hold (RFC 0124 C5) and a terminal run (the cancel path)
+		// has no work to drive, so neither gets the hint.
+		runState := fmt.Sprint(run["state"])
+		runPaused := nullable(run["paused_at"]) != nil
+		if runState == "running" && !runPaused && len(downstream) > 0 {
+			nextActions = append([]string{
+				fmt.Sprintf("run drive --run-id %s", runID),
+			}, nextActions...)
+		}
 		return map[string]any{
 			"status":               "resolved",
 			"blocker_id":           blockerID,
