@@ -1,6 +1,6 @@
 # RFC 0152: Recovery budget policy for `agent_exited_unsealed` reviewer lanes
 
-Status: proposed
+Status: accepted (D249; option 3 — lane-kind-differentiated requeue budget)
 Date: 2026-06-20
 author: proposer-claude-opus-4-8
 
@@ -36,8 +36,11 @@ Adjacent/related (do not fold in; cross-reference only):
 
 - **#289 / D198** — the decision that introduced the `agent_exited_unsealed`
   class and its smaller-budget policy (the contract this RFC would amend).
-- **#381** — a separate reserved recovery-policy RFC slot (distinct surface;
-  not this budget). Kept distinct per triage steer.
+- **#381** — a separate, unrelated concurrency claim-throttle issue
+  (`concurrency P2.2: in-txn max_active_jobs cap guard in claimChosenJob`,
+  PARKED), cross-referenced only to confirm it is **out of scope** for this
+  recovery-budget decision. It is not a recovery-policy surface; kept distinct
+  per triage steer.
 
 ## The unresolved decision
 
@@ -73,7 +76,13 @@ The decision to make:
 5. **Detect a complete-but-unsealed deliverable** (a published artifact / sealed
    verdict present in the worktree) and route differently — explicitly listed as
    out-of-scope by D198 because naive auto-completion would forge attestation;
-   would need its own forgery-resistant signal.
+   would need its own forgery-resistant signal. Note that **both** unsealed
+   exits #478 documents left **no `REVIEW.md` at all** (the lane emitted its
+   review text to the PTY but exited before durably publishing), so there is no
+   deliverable to detect — option 5 would **not** have self-healed #478's
+   observed cases. It is a separate enhancement, not a fix for this issue,
+   which is why the accepted resolution prefers a clean fresh-session retry
+   (option 3) over artifact detection.
 
 ## Current evidence and claim boundaries
 
@@ -154,14 +163,51 @@ string; no wire format change.)
   real death signal would regress the dead-lane escalation timing the gate was
   built to preserve.
 
-## Handoff
+## Decision (accepted — D249)
 
-Maintainer decision required (no `RFC_REVIEW.md` exists in-repo; route via the
-standard `rfc/NNNN-*` maintainer-review branch convention). On acceptance, mint
-the next decision number (D249 is the next free slot at the anchor) and pick one
-of options 1–5; the implementation (constant/policy change, lane-kind
-differentiation, or fresh-attempt grant) plus the corresponding update to
-`dx_289_test.go` and D198's revisit cell lands in a follow-up implementation
-run, not here. Until then #478 stays open with this RFC as its disposition and
-the per-workflow `max_unsealed_requeues` override as the documented interim
-mitigation.
+Accepted as **D249** via RFC_REVIEW (run `2026-06-20_9e1b6475`, independent
+falsification review, verdict ACCEPT_WITH_FINDINGS). Resolution: **option 3 —
+differentiate the requeue budget by lane kind / job type.** Raise the
+unsealed-requeue budget only for a **lane-scoped kind** (read-only reviewer
+lanes — e.g. `claude_code` `review_final` and the broader stateless
+review/reviewer lanes #478 also hit, such as `review_design`), **not** the
+global default. This satisfies #478's transient committee-reviewer case (a
+fresh session is a clean retry there) while **preserving D198's intent for the
+stateful repo-write lanes it was written for** (where a repeated unsealed exit
+still signals systematic failure and should escalate sooner than a hard crash),
+and it keeps the pinned invariant **`defaultMaxUnsealedRequeues <
+defaultMaxRequeues`** intact because only a lane-scoped bound is raised — the
+global constant does not move.
+
+**Why not the alternatives:** option 1 (keep) leaves #478's dominant committee
+`needs_operator` cause unaddressed; option 2 (raise the global default) directly
+reverses D198 and breaks the pinned invariant; option 4 (auto-grant one
+fresh-attempt globally) is a reasonable second choice but applies the looser
+posture to stateful repo-write lanes too, which D198 deliberately excludes;
+option 5 (detect a complete-but-unsealed deliverable) would not have self-healed
+either of #478's documented exits, which left no `REVIEW.md` to detect (see the
+note on option 5 above).
+
+## Implementation conditions (for the follow-up impl run)
+
+The follow-up implementation run (a `code_change` run; not this RFC) must:
+
+- introduce the lane-kind / job-type-scoped unsealed-requeue budget in
+  `go/pkg/mutations/recovery_decision_tree.go` (a larger budget for the
+  read-only reviewer lane kind; the tight default unchanged for stateful
+  repo-write lanes), keeping `defaultMaxUnsealedRequeues < defaultMaxRequeues`
+  for the global default;
+- update **`go/pkg/mutations/dx_289_test.go`** — `TestRecoveryPolicyUnsealedBudget`
+  must keep the global invariant green, and a new assertion must pin the
+  lane-kind differentiation (reviewer-lane budget > stateful-lane budget while
+  the global default invariant holds);
+- update **D198's "Revisit Trigger" cell** in `docs/decisions/decision-log.md`
+  to record that this revisit fired and was resolved lane-scoped by D249
+  (rather than by moving the global default).
+
+**Interim mitigation (already shipped, no code change):** `recovery_policy`
+accepts a per-workflow `max_unsealed_requeues` override today, so a committee
+workflow can raise its own unsealed-requeue budget immediately —
+`recovery_policy.max_unsealed_requeues: 2` in the workflow JSON unblocks #478's
+committee runs without waiting for the lane-kind impl. #478 stays **open** as
+the implementation tracker; this RFC + D249 are its disposition.
