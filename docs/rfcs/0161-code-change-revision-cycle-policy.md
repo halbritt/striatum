@@ -1,6 +1,6 @@
 # RFC 0161: code_change revision-cycle policy (cycle width + in-loop author rebuttal)
 
-Status: proposed (no decision recorded; no code lands with this proposal)
+Status: proposed (revised 2026-06-20; rebuttal alternative added; ratification pending)
 Date: 2026-06-20
 author: proposer-claude-opus-4-8
 
@@ -56,14 +56,18 @@ No code, contract, or default change lands with this proposal. See issue #506
 
 ## Evidence and claim boundaries
 
-What the repository state supports today (origin/main @ `d5d3cd86`):
+What the repository state supports today (origin/main @ `9e1b6475`;
+the cycle-policy source files are unchanged from the prior anchor `d5d3cd86`,
+an ancestor of `9e1b6475`):
 
 - Default `code_change` cycle width is exactly 1
   (`maxCycles` -> `defaultAny(spec.Options["max_revision_cycles"], 1)`).
 - The compiled cycle is `{from: review, to: draft, on_verdict: needs_revision,
   max_iterations: <max>}` with no intermediate rebuttal node.
 - Cycle exhaustion escalates to a human gate; the documented operator exits are
-  `override` and `retry-job`.
+  `checkpoint resolve override` (the human run-gate; D158 distinguishes this from
+  the verdict-surface `override-verdict`, which force-terminals a reject) and
+  `retry-job`.
 
 What is *not* yet established and is the open product question:
 
@@ -101,29 +105,97 @@ What is *not* yet established and is the open product question:
 
 ## Alternatives / rejected direct patches
 
-1. **Bump the default `max_revision_cycles` from 1 to N (one-line change in
+These are ordered cheapest-first by blast radius. The decision should evaluate
+them in order and adopt the cheapest that resolves the friction: reviewer-posture
+/ calibration (no graph change) before any structural change, and — if a node is
+added — the asymmetric concession-only rebuttal (alternative 5), which is the only
+structural option that does **not** loosen the acceptance contract.
+
+1. **Reviewer-posture/prompt calibration only (no shape change).** The cheapest
+   intervention: it touches no workflow-graph contract and no default, and may
+   resolve much of the over-rejection friction directly (a thorough reviewer that
+   is recalibrated to hold findings only when genuinely unaddressed never exhausts
+   the cycle). Evaluate this first; only add a graph change if calibration alone
+   is insufficient.
+2. **Operator-side legibility only (issue #506 part b).** Already shipped
+   separately (the read-only `striatum artifact get-content` verb). Necessary but
+   not sufficient: it makes adjudication easier but does not address the structural
+   "override or full re-attempt" dichotomy. Listed here for completeness; it is not
+   a substitute for a cycle-policy decision.
+3. **Bump the default `max_revision_cycles` from 1 to N (one-line change in
    `maxCycles`).** Rejected as a direct FIX: it silently re-weights the
    acceptance contract for every `code_change` run with no decision and no
-   evidence that N is better than 1 for a miscalibrated reviewer.
-2. **Always auto-`retry-job` on cycle exhaustion.** Rejected: removes the human
+   evidence that N is better than 1 for a miscalibrated reviewer. Widening the
+   default *loosens* the RFC 0034 V1 contract (`max_revision_cycles: 1`); the
+   default must stay 1 until a decision is recorded.
+4. **Always auto-`retry-job` on cycle exhaustion.** Rejected: removes the human
    gate that the escalation exists to provide; can loop indefinitely against a
    reviewer that will never concede.
-3. **Reviewer-posture/prompt calibration only (no shape change).** A viable
-   subset that may resolve much of the friction without a contract change; this
-   RFC should evaluate it as the cheapest alternative before adding a node.
-4. **Operator-side legibility only (issue #506 part b).** Necessary but not
-   sufficient: it makes adjudication easier but does not address the structural
-   "override or full re-attempt" dichotomy.
+5. **Asymmetric, concession-only in-loop author-rebuttal turn (RECOMMENDED
+   structural shape if any node is added).** This is the structural option that
+   keeps the default cycle width at **1** and is **contract-neutral**: the author
+   may post exactly **one** rebuttal per `needs_revision`, and that rebuttal costs
+   a revision iteration **only when the reviewer declines to concede**. The
+   asymmetry is load-bearing:
+   - **Reviewer concedes** (it agrees the finding was already addressed): the
+     concession resolves the cycle in-loop and clears it as accepted — a no-op on
+     the iteration budget. No extra full attempt is spent; the human gate is not
+     touched; default width stays 1 for the common case.
+   - **Reviewer holds** (it does not concede): the rebuttal falls straight through
+     to the existing bounded cycle and, on exhaustion, the existing
+     `waiting_human` gate — exactly as today. The author cannot re-enter review
+     for free; a reviewer that never concedes can never loop the author↔reviewer
+     pair below the human gate. This is precisely the failure mode of alternative
+     4 (auto-retry) and a naive "rebuttal re-enters review without consuming an
+     iteration" node, and the asymmetry forecloses it.
+
+   Because it only ever *shortens* the path (concession) or leaves it unchanged
+   (hold), it does not widen the default and does not loosen the
+   `product_safety_claim` (work reaching a run branch was still actually accepted).
+   It is therefore separable from the cycle-width question along the axis "does
+   this change the default width / loosen the contract?" — and the answer for this
+   node is *no*.
+
+   **Bounding requirements (must be specified before any code or default lands).**
+   A rebuttal node sits directly on top of the in-force cycle router and the
+   attempt/lease/fresh-session machinery; without explicit bounds a naive node is
+   an unbounded extra cycle that *does* weaken provenance. The decision must spell
+   out:
+   - **D158 cycle-router compatibility.** D158 (accepted) refuses an in-cycle
+     `reject` inside a declared `on_verdict: needs_revision` cycle and steers it to
+     `needs_revision`/`override-verdict`; the router consults only declared cycles
+     (D155 added the cycle-aware routing). The rebuttal node and its concession
+     verdict must be declared so the router recognizes them; a concession must not
+     be expressible as a path around the D158 refusal (i.e. it must not reopen the
+     in-cycle `reject`→`needs_revision` wedge class of #127/#132/#140).
+   - **Iteration / attempt accounting.** Exactly one rebuttal is permitted per
+     `needs_revision`; a held rebuttal consumes one revision iteration of the
+     existing bounded budget (it does not mint a fresh budget). Concession does not
+     consume an iteration. The `waiting_human` escalation on budget exhaustion is
+     unchanged.
+   - **Lease and fresh-session-on-revision semantics.** Today a revision spawns a
+     fresh-session next-ordinal lane. The decision must state whether a rebuttal is
+     authored within the current session/lease or spawns its own lane, how the
+     reviewer-concession turn is leased, and how a stale lease during a rebuttal is
+     recovered — so the node cannot strand a lane or create an un-leased turn.
+
+   Adopting this shape lets the decision improve the in-loop experience without
+   changing the default width or the acceptance contract; widening width (and the
+   contract loosening it entails) remains a separate, gated question.
 
 ## Open questions for review
 
-- Is the answer reviewer-calibration, cycle width, an author-rebuttal turn, or
-  a combination — and what is the default for each?
-- If an author-rebuttal turn is added: where does it sit in the graph, what
-  artifact does it emit, how does the reviewer concede, and how do
-  attempt/lease/fresh-session semantics change?
-- Should any width change be a new default or an opt-in `spec.options` knob
-  with the default unchanged?
+- Evaluated cheapest-first: does reviewer-calibration (alternative 1) alone
+  resolve the over-rejection, or is a structural change needed at all?
+- If a structural node is added, the recommended shape is the asymmetric
+  concession-only rebuttal (alternative 5): where exactly does it sit in the
+  graph, what artifact does the rebuttal emit, how does the reviewer concede,
+  and how are the bounding requirements above (D158 router compatibility,
+  iteration/attempt accounting, lease/fresh-session semantics) made concrete?
+- Should any width change be a new default or an opt-in `spec.options` knob with
+  the default unchanged? The default `max_revision_cycles` stays **1** (the
+  RFC 0034 V1 contract) unless and until a decision explicitly records a wider
+  default — note the recommended rebuttal node does not require widening it.
 
 ## Handoff
 
@@ -131,4 +203,17 @@ This is a non-implementing stub. Route to RFC_REVIEW for a product decision on
 the two coupled questions above. The legibility half of issue #506 ships
 separately as a direct FIX and does not depend on this RFC. No default, contract,
 or migration changes until a decision is recorded in
-`docs/decisions/decision-log.md`.
+`docs/decisions/decision-log.md`; the default `max_revision_cycles` stays 1 and
+`wontfix` (keep width 1, no node) remains a legitimate outcome.
+
+## Revision history
+
+- 2026-06-20 (post-RFC_REVIEW, run `2026-06-20_9e1b6475`): addressed the
+  ACCEPT_WITH_FINDINGS report. Added the asymmetric, concession-only
+  author-rebuttal turn as alternative 5 (the contract-preserving structural
+  option that keeps default width at 1) with explicit bounding against
+  attempt/lease/fresh-session accounting and the D158 cycle router; reordered the
+  alternatives cheapest-first (calibration before any graph change); named
+  `checkpoint resolve override` precisely vs. `override-verdict`; refreshed the
+  evidence anchor to `9e1b6475`. The `max_revision_cycles` default is unchanged
+  (stays 1, the RFC 0034 V1 contract). Ratification still pending.
