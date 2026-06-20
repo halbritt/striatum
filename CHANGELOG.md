@@ -21,6 +21,24 @@
 
 ### Added
 
+- **RFC 0136 P1 — event-chain segment sealing (#387, D242).** Generalizes the
+  `audit_segments` "seal + boundary-hash + retention_state" model to the
+  per-repository event chain so an event partition can be SEALED and
+  proven-continuous BEFORE any future partition DROP (the chain-safe retention
+  boundary P2/P4 depend on). New **runtime** migration
+  `0041_event_chain_segments.sql` adds the per-`repository_id`
+  `striatumd.event_chain_segments` ledger (append-only via refuse-triggers,
+  explicit `striatumd_rw` GRANT + `REVOKE DELETE`, **no FK into owner-held
+  `events`** — integrity enforced in Go per D215). New `pkg/mutations`
+  `SealEventChainSegment` closes the open segment with its first/last event +
+  hash boundaries and opens a chained successor (cross-segment hash witnesses for
+  seam continuity), with the boundary referential-integrity check in Go. New
+  doctor invariant `event_chain_segment_seam_unproven`
+  (`go/pkg/reads/doctor_event_chain_segment.go`) reds when a sealed segment lacks
+  its boundary hashes or its seam witnesses do not link to its predecessor.
+  Corrects the RFC's stale P2/P3 owner-bundle reference `0016`→`0020`. P2–P5 are
+  NOT implemented; #387 stays open as their tracker. No owner-bundle, RPC, or
+  daemon restart.
 - **RFC 0094 adjudicator-reliability extras (#402, D240, PR #487).** The
   `collaboration_ledger` contract gains the residual adjudication shape deferred by
   PR #432: a **Check-B correspondence rubric** (per-`challenge`

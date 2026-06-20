@@ -272,6 +272,17 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	warnings = append(warnings, stuckJobWarnings...)
 	warningRecords = append(warningRecords, stuckJobWarningRecords...)
 
+	// RFC 0136 P1 (D242 / #387): the event_chain_segment_seam_unproven invariant.
+	// A sealed event-chain segment (migration 0041) is the unit of retention; a
+	// future partition DROP may only retire a sealed, hash-witnessed range. This
+	// check reds when a sealed segment lacks its boundary hashes or its
+	// cross-segment seam witnesses do not link to its predecessor — i.e. when the
+	// chain's provable continuity across the (future) dropped-rows seam is broken.
+	// It skips cleanly on a DB where migration 0041 has not yet applied.
+	eventSegmentBlock, eventSegmentProblems, eventSegmentRecords := doctorEventChainSegmentSeams(ctx, runner, repositoryID)
+	problems = append(problems, eventSegmentProblems...)
+	problemRecords = append(problemRecords, eventSegmentRecords...)
+
 	result := map[string]any{
 		"ok":                           len(problems) == 0,
 		"schema_version":               schemaVersion,
@@ -296,6 +307,7 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		"recovery_sweep_cursor":        recoveryCursorBlock,
 		"recovery_escape_valve":        recoveryGateBlock,
 		"job_stuck_no_live_session":    stuckJobBlock,
+		"event_chain_segment_seams":    eventSegmentBlock,
 		"skills":                       skillsBlock,
 		"blob":                         blobBlock,
 	}

@@ -29,8 +29,10 @@ Context:
   (`go/pkg/db/migrations_test.go:423`) fails otherwise, and a two-role production daemon
   crash-loops (D187 / #244).
 - [D218](../decisions/decision-log.md) — owner bundle `0014` (chain-head lock-wait
-  gauges) is the most recent owner-bundle precedent on these exact two tables; with
-  `0015` (#386) now taken, the next free owner bundle for this reshape is **`0016`**.
+  gauges) is an owner-bundle precedent on these exact two tables. (At draft time the
+  next free owner bundle was `0016`; that and `0017`–`0019` have since been taken, so
+  the P2/P3 reshape now ships as **owner bundle `0020`** — re-fetch before claiming,
+  per D236/D239 renumber discipline.)
 - Grounded reads at `main`:
   `go/pkg/db/sql/0005_repo_local_workflow_state.sql` (the `events` table,
   `PRIMARY KEY (repository_id, event_id)`, the six FKs, the `events_no_update` /
@@ -248,8 +250,10 @@ tamper-evident log rather than a chain break.
 
 ## The owner bundle and capability parity
 
-Per D187 / D215 the reshape ships as **owner bundle `0016`** (0015 is the highest taken;
-§D218). The bundle is owner-applied out-of-band, additive/cumulative on 0001–0015, and
+Per D187 / D215 the reshape ships as **owner bundle `0020`** (0019 is the highest taken
+at the time of P1; the draft text said `0016` before 0016–0019 were claimed —
+re-fetch before claiming, per D236/D239). The bundle is owner-applied out-of-band,
+additive/cumulative on 0001–0019, and
 **capability-parity gated** exactly like owner bundle 0004 (RFC 0110 §8.2): a binary
 that does not understand partition-aware append/retention must refuse to serve once the
 bundle is stamped, and a binary configured for partitioned retention must refuse to
@@ -310,9 +314,9 @@ no longer reachable via row deletes.
 | Phase | Scope | Schema / ownership |
 | --- | --- | --- |
 | **P0 — decide the policy knobs** ✅ **DONE (2026-06-19, D241)** | ~~Pin the granularity and retention horizon with the maintainer.~~ **Resolved: weekly granularity; `events` 3-month retention, `audit_log` infinite (partitioned-but-never-dropped); Q3=(a) sole-writer, Q4=sibling slices, Q5=generalize segment abstraction.** See "P0 RESOLVED" above. | none (decision) |
-| **P1 — chain-segment sealing for events** | Generalize the audit-segment "seal + boundary-hash + retention_state" model to the **event** chain (an `event_chain_segments` ledger or a shared segment abstraction), so an event partition can be sealed and proven-continuous before any drop. Land this **before** any partitioning, so retention has a chain-safe boundary from day one. | runtime table (no FK into owner `events`, integrity in Go, explicit GRANT) per D215 |
-| **P2 — the reshape + partitioned `events`** | Owner bundle 0016: events PK → `(repository_id, event_id, created_at)`; drop the `repo_event_chain_heads` SQL FK and move its RI into the `append_event_row` transaction (Go/SD-local); create the partitioned table, attach the legacy heap as the historical partition (backfill form A), re-validate `append_event_row` against the parent, capability-parity stamp. | **owner bundle 0016** |
-| **P3 — partitioned `audit_log`** | Owner bundle 0016 (same bundle or a sibling): audit PK → `(audit_id, ts)`, UNIQUE → `(row_hash, ts)`; align partition boundaries to `audit_segments`; re-validate `append_audit_row`; partition-DROP wired to segment `purged`/`retention_state`. | **owner bundle 0016** |
+| **P1 — chain-segment sealing for events** ✅ **DONE (2026-06-20, D242)** | Generalize the audit-segment "seal + boundary-hash + retention_state" model to the **event** chain (an `event_chain_segments` ledger or a shared segment abstraction), so an event partition can be sealed and proven-continuous before any drop. Land this **before** any partitioning, so retention has a chain-safe boundary from day one. **Shipped:** runtime migration [`0041_event_chain_segments.sql`](../../go/pkg/db/sql/0041_event_chain_segments.sql) (the per-repo `event_chain_segments` ledger, generalizing `audit_segments`), the Go sealing path `pkg/mutations.SealEventChainSegment` (integrity-in-Go, no FK into owner `events`), and the `event_chain_segment_seam_unproven` doctor invariant (`go/pkg/reads/doctor_event_chain_segment.go`). | runtime table (no FK into owner `events`, integrity in Go, explicit GRANT) per D215 |
+| **P2 — the reshape + partitioned `events`** | Owner bundle 0020: events PK → `(repository_id, event_id, created_at)`; drop the `repo_event_chain_heads` SQL FK and move its RI into the `append_event_row` transaction (Go/SD-local); create the partitioned table, attach the legacy heap as the historical partition (backfill form A), re-validate `append_event_row` against the parent, capability-parity stamp. | **owner bundle 0020** |
+| **P3 — partitioned `audit_log`** | Owner bundle 0020 (same bundle or a sibling): audit PK → `(audit_id, ts)`, UNIQUE → `(row_hash, ts)`; align partition boundaries to `audit_segments`; re-validate `append_audit_row`; partition-DROP wired to segment `purged`/`retention_state`. | **owner bundle 0020** |
 | **P4 — retention executor + doctor** | A daemon-owned, segment-aware retention sweep that seals → records boundary hashes → detaches/drops partitions past the horizon, plus doctor invariants: `event_chain_segment_seam_unproven`, `audit_segment_purged_without_boundary_hash`, `partition_dropped_without_sealed_segment`. The retention act is daemon-mediated, never a hand `DROP`. | owner partition-management privilege; doctor reads runtime |
 | **P5 — re-validate / prune indexes** | Confirm the #386 FK-covering indexes are still earning their keep against the partitioned shape (per-partition local indexes vs. the global ones), and add time-leading local indexes the partition pruner can use for the §Problem-1 time-range reads. | index tuning (owner, no grant — 0015 precedent) |
 
@@ -400,11 +404,13 @@ the per-chunk VACUUM story, so the RFC's reflexive "monthly default" was overrid
   into a shared chain-segment abstraction reused by `events` (P1), rather than minting a
   divergent parallel table.
 
-P1+ implementation stays **ready-for-human** (the P2/P3 owner-DDL reshape is the
-highest-risk slice and must land on a deliberate owner-bundle cutover). **Owner-bundle
-numbers in P2–P4 below say `0016`; that number is now TAKEN (the latest owner bundle on
-`main` is `0019`). Use the next free owner-bundle number at implementation time** (re-fetch
-before claiming — same renumber discipline as D236/D239).
+**P1 is DONE (2026-06-20, D242)** — the runtime `event_chain_segments` ledger, the Go
+sealing path, and the `event_chain_segment_seam_unproven` doctor invariant landed (see
+the phase table). **P2+ implementation stays ready-for-human** (the P2/P3 owner-DDL
+reshape is the highest-risk slice and must land on a deliberate owner-bundle cutover).
+**The P2/P3 owner-bundle number is now `0020`** (0016–0019 are taken; the original draft
+said `0016`). Use the next free owner-bundle number at implementation time and **re-fetch
+before claiming** — same renumber discipline as D236/D239.
 
 ## Open Questions (resolved — see "P0 RESOLVED" above)
 
@@ -422,8 +428,8 @@ before claiming — same renumber discipline as D236/D239).
    constraint-trigger re-check. Recommendation: **(a)**, documented explicitly, pinned
    before P2.
 4. **One bundle or two for the two tables?** Ship `events` and `audit_log` in a single
-   owner bundle 0016 (one capability stamp, one cutover) or sibling bundles (independent
-   risk, independent rollback)? Recommendation: sibling slices within the 0016 line so
+   owner bundle 0020 (one capability stamp, one cutover) or sibling bundles (independent
+   risk, independent rollback)? Recommendation: sibling slices within the 0020 line so
    `audit_log` (the higher-stakes record) can land on its own verified cutover after
    `events` proves the pattern.
 5. **Generalize `audit_segments` into a shared chain-segment abstraction for events

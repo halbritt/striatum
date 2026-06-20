@@ -119,6 +119,12 @@ var readAuthorityInventory = map[string]ReadAuthorityClass{
 	"auto_finalize_circuit_breakers": ReadClassRuntimeOperational,
 	"cross_repo_cycle_counters":      ReadClassRuntimeOperational,
 	"daemon_meta":                    ReadClassRuntimeOperational,
+	// event_chain_segments (RFC 0136 P1, migration 0041): the per-repository event
+	// chain-segment seal ledger (first/last boundary ids + hashes + cross-segment
+	// witnesses + retention_state). Operational chain metadata the runtime role
+	// SELECTs to seal and to prove continuity — like audit_segments /
+	// repo_event_chain_heads, not a sensitive prose surface.
+	"event_chain_segments":           ReadClassRuntimeOperational,
 	"repo_event_chain_heads":         ReadClassRuntimeOperational,
 	"repo_migrations":                ReadClassRuntimeOperational,
 	"rpc_methods":                    ReadClassRuntimeOperational,
