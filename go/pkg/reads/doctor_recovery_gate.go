@@ -203,6 +203,9 @@ func recoveryGateSummary(ctx context.Context, runner db.Runner, repositoryID, ru
 		       jrs.escalation_pending,
 		       jrs.last_recovery_action,
 		       jrs.last_recovery_at,
+		       b.blocker_id,
+		       b.blocker_kind,
+		       b.severity,
 		       COALESCE(
 		         NULLIF((w.workflow_json #>> '{recovery_policy,max_silent_sweeps}'), '')::int,
 		         GREATEST(
@@ -222,6 +225,18 @@ func recoveryGateSummary(ctx context.Context, runner db.Runner, repositoryID, ru
 		  LEFT JOIN striatumd.workflow_snapshots w
 		    ON w.repository_id = r.repository_id
 		   AND w.workflow_snapshot_id = r.workflow_snapshot_id
+		  -- #477: surface the open blocker (and thus the escalation_id) backing an
+		  -- escalated gate, preferring the recovery_exhausted escalation the sweep
+		  -- opens, so run.summary names the id + resolve verb instead of just job_id.
+		  LEFT JOIN LATERAL (
+		    SELECT bz.blocker_id, bz.blocker_kind, bz.severity
+		      FROM striatumd.blockers bz
+		     WHERE bz.repository_id = jrs.repository_id
+		       AND bz.job_id = jrs.job_id
+		       AND bz.state = 'open'
+		     ORDER BY (bz.blocker_kind = 'recovery_exhausted') DESC, bz.created_at, bz.blocker_id
+		     LIMIT 1
+		  ) b ON true
 		 WHERE jrs.repository_id = $1 AND jrs.run_id = $2
 		   AND (jrs.consecutive_silent_sweeps > 0 OR jrs.escalation_pending = true)
 		 ORDER BY j.workflow_job_id, jrs.job_id`,
@@ -246,6 +261,21 @@ func recoveryGateSummary(ctx context.Context, runner db.Runner, repositoryID, ru
 			"last_probe_basis":          stringFrom(row, "last_probe_basis"),
 			"escalation_pending":        escalationPending,
 			"last_recovery_action":      stringFrom(row, "last_recovery_action"),
+		}
+		// #477: when an open blocker backs this gate, name the blocker_id, the
+		// resolve surface, and the literal resolve command. For escalation-class
+		// blockers (e.g. recovery_exhausted) escalation_id == blocker_id, so an
+		// operator reading `run summary` can copy `escalation resolve <id>` instead
+		// of grepping raw event payloads for the id and guessing the verb.
+		if blockerID := stringFrom(row, "blocker_id"); blockerID != "" {
+			gate["blocker_id"] = blockerID
+			gate["blocker_kind"] = stringFrom(row, "blocker_kind")
+			gate["resolve_surface"] = blockerResolveSurface(row)
+			gate["resolution_command"] = blockerResolutionCommand(row)
+			gate["resolve_command"] = blockerResolveCommand(row)
+			if escID := escalationIDForBlocker(row); escID != nil {
+				gate["escalation_id"] = escID
+			}
 		}
 		if at, ok := parseTimeValue(row["last_recovery_at"]); ok {
 			gate["last_recovery_at"] = at.UTC().Format(time.RFC3339)
