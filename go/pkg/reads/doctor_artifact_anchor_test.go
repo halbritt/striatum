@@ -224,6 +224,101 @@ func TestDoctorArtifactAnchorIntegrityReportsJobPinMismatch(t *testing.T) {
 	}
 }
 
+// TestDoctorArtifactAnchorIntegrityClearsRevisionRepublishOnLocalIntegratedDefault
+// is the #504 regression: a revision-republished draft whose run branch was
+// `run integrate`d into the LOCAL default branch (refs/heads/main) but NOT yet
+// pushed to origin must downgrade to the superseded-on-default-branch warning,
+// not stay an ok-reddening artifact_anchor_hash_mismatch. Before the fix the
+// doctor resolved the default ref to the stale refs/remotes/origin/main (where
+// the integrated path is absent), so Rule B never fired until the push.
+func TestDoctorArtifactAnchorIntegrityClearsRevisionRepublishOnLocalIntegratedDefault(t *testing.T) {
+	repoRoot := t.TempDir()
+	seedSHA := readsGitInit(t, repoRoot) // local refs/heads/main @ seed (no artifact)
+
+	// A remote whose default branch is the STALE pre-integrate seed: origin/HEAD ->
+	// origin/main -> seed. The integrated artifact is NOT present here.
+	readsGitRun(t, repoRoot, "update-ref", "refs/remotes/origin/main", seedSHA)
+	readsGitRun(t, repoRoot, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	// Author the REVISED artifact (attempt 2) on a run branch, then `run integrate`
+	// it into LOCAL main (no push to origin).
+	runBranch := "wf/rev-republish"
+	readsGitRun(t, repoRoot, "checkout", "-q", "-b", runBranch)
+	if err := os.MkdirAll(filepath.Join(repoRoot, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifactPath := "docs/DRAFT.md"
+	if err := os.WriteFile(filepath.Join(repoRoot, filepath.FromSlash(artifactPath)), []byte("revised body attempt 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readsGitRun(t, repoRoot, "add", artifactPath)
+	readsGitRun(t, repoRoot, "commit", "-q", "-m", "revised draft")
+	readsGitRun(t, repoRoot, "checkout", "-q", "main")
+	readsGitRun(t, repoRoot, "merge", "-q", "--no-ff", "-m", "integrate", runBranch)
+
+	// The artifact record carries the ORIGINAL attempt-1 draft sha, which is no
+	// longer the blob on any ref (it was revised before merge).
+	staleDraftSHA := testSHA256("draft body attempt 1\n")
+	row := artifactAnchorRow(repoRoot, "art_rev", "run_rev", "job_rev", runBranch, artifactPath, staleDraftSHA)
+
+	_, problems, _, warnings, warningRecords := doctorArtifactAnchorIntegrity(
+		context.Background(),
+		&doctorArtifactAnchorRunner{artifactRows: []map[string]any{row}},
+		"repo_anchor",
+		healthyBlobBlock(),
+	)
+	if strings.Contains(strings.Join(problems, "\n"), "artifact_anchor_hash_mismatch") {
+		t.Fatalf("post-integrate revision-republish still reds (#504 regression): problems=%#v", problems)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), artifactSupersededOnDefaultBranch) {
+		t.Fatalf("want superseded-on-default-branch warning, got problems=%#v warnings=%#v", problems, warnings)
+	}
+	if len(warningRecords) != 1 || warningRecords[0]["check"] != artifactSupersededOnDefaultBranch {
+		t.Fatalf("warning records = %#v, want one superseded record", warningRecords)
+	}
+	if ref := warningRecords[0]["context"].(map[string]any)["preserved_ref"]; ref != "refs/heads/main" {
+		t.Fatalf("preserved_ref = %v, want refs/heads/main (the locally integrated default)", ref)
+	}
+}
+
+// TestDoctorArtifactAnchorIntegrityStillRedsGenuineLossOffDefault is the control
+// for #504: when the revised path is live on NEITHER the remote NOR the local
+// default branch (genuine loss), the hash mismatch must stay an ok-reddening
+// problem — the local-default fallback must not over-broaden Rule B.
+func TestDoctorArtifactAnchorIntegrityStillRedsGenuineLossOffDefault(t *testing.T) {
+	repoRoot := t.TempDir()
+	seedSHA := readsGitInit(t, repoRoot)
+	readsGitRun(t, repoRoot, "update-ref", "refs/remotes/origin/main", seedSHA)
+	readsGitRun(t, repoRoot, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	// Artifact lives ONLY on a run branch (never integrated into any default), with
+	// a recorded sha that does not match the blob there.
+	runBranch := "wf/orphan"
+	readsGitRun(t, repoRoot, "checkout", "-q", "-b", runBranch)
+	if err := os.MkdirAll(filepath.Join(repoRoot, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifactPath := "docs/ORPHAN.md"
+	if err := os.WriteFile(filepath.Join(repoRoot, filepath.FromSlash(artifactPath)), []byte("orphan body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readsGitRun(t, repoRoot, "add", artifactPath)
+	readsGitRun(t, repoRoot, "commit", "-q", "-m", "orphan draft")
+	readsGitRun(t, repoRoot, "checkout", "-q", "main")
+
+	row := artifactAnchorRow(repoRoot, "art_orphan", "run_orphan", "job_orphan", runBranch, artifactPath, testSHA256("expected orphan\n"))
+
+	_, problems, _, _, _ := doctorArtifactAnchorIntegrity(
+		context.Background(),
+		&doctorArtifactAnchorRunner{artifactRows: []map[string]any{row}},
+		"repo_anchor",
+		healthyBlobBlock(),
+	)
+	if !strings.Contains(strings.Join(problems, "\n"), "artifact_anchor_hash_mismatch.art_orphan") {
+		t.Fatalf("genuine off-default loss must still red: problems=%#v", problems)
+	}
+}
+
 func healthyBlobBlock() map[string]any {
 	return map[string]any{
 		"configured":    true,

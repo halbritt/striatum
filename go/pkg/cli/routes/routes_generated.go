@@ -45,6 +45,7 @@ var generatedRoutes = []Route{
 	{Command: "block", Subcommand: "", Method: "work.block", ParamsGroup: "block", RequiredCapability: "write", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "complete", Subcommand: "", Method: "work.complete", ParamsGroup: "complete", RequiredCapability: "write", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "publish-artifact", Subcommand: "", Method: "artifact.publish", ParamsGroup: "publish_artifact", RequiredCapability: "write", RepositoryScopeMode: "single_repo", Deprecated: false},
+	{Command: "artifact", Subcommand: "get-content", Method: "artifact.get_content", ParamsGroup: "artifact_get_content", RequiredCapability: "read", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "verdict", Subcommand: "", Method: "review.verdict", ParamsGroup: "verdict", RequiredCapability: "review", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "submit-review", Subcommand: "", Method: "review.submit", ParamsGroup: "submit_review", RequiredCapability: "review", RepositoryScopeMode: "single_repo", Deprecated: false},
 	{Command: "override-verdict", Subcommand: "", Method: "review.override", ParamsGroup: "override_verdict", RequiredCapability: "admin", RepositoryScopeMode: "single_repo", Deprecated: false},

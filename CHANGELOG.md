@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **`striatum daemon install` no longer resurrects a `--user` unit on a system-managed
+  host.** When the daemon is already installed as a SYSTEM unit
+  (`/etc/systemd/system/striatumd.service` — a hardened/multi-user deployment), install
+  now detects it, **skips** writing/enabling a per-user unit, and sweeps away any stale
+  one, instead of unconditionally `systemctl --user enable`-ing a masked/absent unit
+  (which broke `make install` with `Unit ... is masked`). The daemon's lifecycle stays
+  with the operator (`sudo systemctl ...`).
 - **verifier: `builtin:go-*` checks now run on hosts where the toolchain isn't on a
   system PATH, and with a relative `--cwd` (#510).** `checkRunEnv` prepends the host
   `go` binary's own directory (resolved lane-side, just that one dir — the hermetic

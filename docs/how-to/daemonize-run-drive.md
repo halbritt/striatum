@@ -125,6 +125,30 @@ for runs whose workflow opted a lane into `supervision.auto_spawn` at `run start
 (RFC 0122); every other run is operator-driven, so plan to re-`run drive` it after
 any outage.
 
+### Re-arming after a human checkpoint (`checkpoint resolve`)
+
+A human checkpoint flips the run to `waiting_human`, which the drive loop treats
+as drive-terminal: the transient `striatum-drive-<run>` unit exits and tears down
+its lanes so a human takes a clean slot. Resolving the checkpoint with
+`checkpoint resolve <blocker> continue|override` flips the run back to `running`
+and unblocks the gated downstream work — but, like resume, **it does not by itself
+restart the driver**. When the resolve leaves the run `running` with claimable
+downstream work, the `checkpoint.resolve` response prepends the re-arm verb to its
+`next_actions` so the operator (or an automation watching `next_actions`) re-drives
+instead of the run silently stalling:
+
+```sh
+striatum --repo <target> checkpoint resolve $BLOCKER override --decision-id $DEC
+# { ..., "run_state": "running",
+#   "next_actions": ["run drive --run-id run_abc123", "claim_available_work", ...] }
+striatum --repo <target> run drive --run-id $RUN   # re-arm when the hint is present
+```
+
+If the daemon RFC 0122 scheduler is enabled and the run holds an active grant, the
+scheduler re-adopts the resolved run on its next sweep regardless; the hint is the
+fallback for the operator-driven (no-grant / scheduler-off) deployments. The
+`cancel` action terminates the gated work and gets no re-drive hint.
+
 ## Composition with explicit `run drive` and the refactoring-campaign skill
 
 Because the driver is idempotent, auto-drive composes safely with anything that

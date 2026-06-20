@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,6 +177,33 @@ func TestCheckpointOverrideClearsRevisionRoutingAndUnblocksDownstream(t *testing
 	if intValue(evtRow["n"]) != 1 {
 		t.Fatalf("expected 1 override checkpoint.resolved event, got %v", evtRow["n"])
 	}
+	// #505: resolving the checkpoint left the run `running` with a now-claimable
+	// downstream job, but the detached `run drive` unit exited when the run hit
+	// the waiting_human checkpoint (IsTerminalRunState treats waiting_human as
+	// drive-terminal) and is not re-armed here. next_actions must name the
+	// re-drive verb so the run does not silently stall until a manual re-drive.
+	if got := fmt.Sprint(result["run_state"]); got != "running" {
+		t.Fatalf("run_state = %q, want running (checkpoint left claimable work)", got)
+	}
+	if !nextActionsContainRunDrive(result) {
+		t.Fatalf("next_actions = %#v, want a run-drive re-arm hint (#505)", result["next_actions"])
+	}
+}
+
+// nextActionsContainRunDrive reports whether the handler's next_actions advise
+// re-arming the detached driver (`run drive`). #505: without this the operator
+// gets no signal that the resolved run needs a driver and it silently stalls.
+func nextActionsContainRunDrive(result map[string]any) bool {
+	actions, ok := result["next_actions"].([]string)
+	if !ok {
+		return false
+	}
+	for _, a := range actions {
+		if strings.Contains(a, "run drive") {
+			return true
+		}
+	}
+	return false
 }
 
 // override without decision_id is a schema_invalid error.

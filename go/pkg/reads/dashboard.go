@@ -40,6 +40,7 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 				"jobs_by_state":              map[string]int{},
 				"verdicts_by_state":          map[string]int{},
 				"blockers":                   map[string]int{},
+				"open_blockers":              []map[string]any{},
 				"sessions":                   []any{},
 				"recent_events":              []any{},
 				"artifact_provenance_counts": map[string]int{},
@@ -129,6 +130,13 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 			}
 		}
 		blockerCounts[k] = count
+	}
+	// #477: the {kind: count} tally above is not actionable — it never names the
+	// blocker_id (the `blk_…` that IS the escalation_id) nor the verb that clears
+	// it. Project the open blockers into actionable entries alongside the counts.
+	openBlockers, err := openRunBlockerActions(ctx, runner, repositoryID, runID)
+	if err != nil {
+		return nil, err
 	}
 
 	sessions, err := collectRows(ctx, runner,
@@ -272,6 +280,7 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 		"jobs_by_state":              jobsByState,
 		"verdicts_by_state":          verdictCounts,
 		"blockers":                   blockerCounts,
+		"open_blockers":              openBlockers,
 		"sessions":                   sessions,
 		"recent_events":              events,
 		"artifact_provenance_counts": artifactProvenanceCounts(artifactRows),

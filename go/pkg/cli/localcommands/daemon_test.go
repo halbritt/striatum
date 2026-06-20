@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,39 @@ import (
 	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
+
+// TestDaemonInstallRespectsExistingSystemUnit guards the "forever" fix: when the
+// daemon is already a SYSTEM unit, `striatum daemon install` must NOT write or enable
+// a competing per-user unit (which would resurrect the masked --user unit and fail
+// `make install` on `systemctl --user enable`).
+func TestDaemonInstallRespectsExistingSystemUnit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("daemon install systemd path is linux-only")
+	}
+	runtimeDir := t.TempDir()
+	configHomeDir := t.TempDir()
+	t.Setenv("STRIATUM_DAEMON_RUNTIME_DIR", runtimeDir)
+	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, "")
+
+	restore := stubSystemctl(t, map[string]string{
+		"show striatumd.service --property=FragmentPath --value": "/etc/systemd/system/striatumd.service",
+		"is-enabled striatumd.service":                           "enabled",
+		"is-active striatumd.service":                            "active",
+	})
+	defer restore()
+
+	var stdout, stderr bytes.Buffer
+	if code := runDaemonInstall([]string{"--no-start"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("install exit = %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if userUnit := filepath.Join(configHomeDir, "systemd", "user", unitName); fileExists(userUnit) {
+		t.Fatalf("per-user unit must NOT be created when a system unit is installed; found %s", userUnit)
+	}
+	if !strings.Contains(stdout.String(), "SYSTEM unit") {
+		t.Fatalf("expected system-managed notice; stdout=%q", stdout.String())
+	}
+}
 
 func TestDaemonSubcommandsAreLocal(t *testing.T) {
 	for _, sub := range []string{"install", "uninstall", "status"} {
@@ -227,6 +261,67 @@ func TestRunDaemonStatusUsesDiscoveryTokenWhenClientTokenMissing(t *testing.T) {
 	}
 	if data["token_source"] != "discovery.json" {
 		t.Fatalf("token_source = %#v, want discovery.json", data["token_source"])
+	}
+}
+
+func TestDaemonInstallRefusesWhenSystemUnitInstalled(t *testing.T) {
+	// #509: the user-scope unit lacks the owner-DB bootstrap env, so when a
+	// system unit already owns the daemon, installing the user unit makes the
+	// daemon crash-loop and conflict with the healthy system service. The
+	// user-scope install must detect the system unit and refuse without
+	// touching the user unit file.
+	configHomeDir := t.TempDir()
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(admin.EnvRuntimeDir, runtimeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, "")
+
+	restore := stubSystemctl(t, map[string]string{
+		"show striatumd.service --property=FragmentPath --value": "/etc/systemd/system/striatumd.service",
+		"is-enabled striatumd.service":                           "enabled",
+		"is-active striatumd.service":                            "active",
+	})
+	defer restore()
+
+	var stdout, stderr bytes.Buffer
+	code := RunDaemon([]string{"install"}, &stdout, &stderr, "test")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit when a system unit is installed; got 0\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	unitPath := filepath.Join(configHomeDir, "systemd", "user", "striatumd.service")
+	if fileExists(unitPath) {
+		t.Fatalf("user-scope unit was written despite an installed system unit: %s", unitPath)
+	}
+	if !strings.Contains(stderr.String(), "system unit") {
+		t.Fatalf("refusal message did not mention the system unit:\n%s", stderr.String())
+	}
+}
+
+func TestDaemonInstallJSONRefusalWhenSystemUnitInstalled(t *testing.T) {
+	configHomeDir := t.TempDir()
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHomeDir)
+	t.Setenv(admin.EnvRuntimeDir, runtimeDir)
+	t.Setenv(rpcclient.EnvDaemonSocket, "")
+
+	restore := stubSystemctl(t, map[string]string{
+		"show striatumd.service --property=FragmentPath --value": "/etc/systemd/system/striatumd.service",
+		"is-enabled striatumd.service":                           "enabled",
+		"is-active striatumd.service":                            "active",
+	})
+	defer restore()
+
+	var stdout, stderr bytes.Buffer
+	code := RunDaemon([]string{"install", "--json"}, &stdout, &stderr, "test")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit; got 0\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("install --json refusal must emit JSON: %v\n%s", err, stdout.String())
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("refusal JSON must report ok=false: %s", stdout.String())
 	}
 }
 

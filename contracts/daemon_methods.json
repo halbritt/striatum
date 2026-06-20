@@ -43,6 +43,7 @@
     {"command": "block", "subcommand": null, "method": "work.block", "params": "block"},
     {"command": "complete", "subcommand": null, "method": "work.complete", "params": "complete"},
     {"command": "publish-artifact", "subcommand": null, "method": "artifact.publish", "params": "publish_artifact"},
+    {"command": "artifact", "subcommand": "get-content", "method": "artifact.get_content", "params": "artifact_get_content"},
     {"command": "verdict", "subcommand": null, "method": "review.verdict", "params": "verdict"},
     {"command": "submit-review", "subcommand": null, "method": "review.submit", "params": "submit_review"},
     {"command": "override-verdict", "subcommand": null, "method": "review.override", "params": "override_verdict"},
