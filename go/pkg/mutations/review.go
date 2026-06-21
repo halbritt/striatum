@@ -1130,6 +1130,22 @@ func completeReviewJob(ctx context.Context, runner any, repositoryID string, job
 	if !ok {
 		return fmt.Errorf("runner does not support exec")
 	}
+	// #551: anchor a git_publication artifact the lane published during this
+	// verdict-bearing job (a repo-write phase_synthesis/review writes its
+	// collaboration_ledger / synthesis into the per-job worktree, publishes it via
+	// artifact.publish, then completes via review.verdict). The verdict-completion
+	// path historically registered the artifact (content + front matter validated,
+	// verdict captured, gate cleared) but never committed/anchored the file — so the
+	// file stayed untracked in the per-job worktree, the run branch never advanced,
+	// and the downstream gated job (which forks from the run-branch tip) was blind to
+	// it. This mirrors work.complete EXACTLY: the daemon-as-porter (RFC 0125, D192)
+	// force-commits the declared artifact file the lane wrote into the worktree, then
+	// anchorActiveWorktreeForJob advances the run ref over it (fast-forward-or-pin) —
+	// the same helpers, the same ordering (durable -> anchor -> state flip), invoked
+	// from the same transaction work.complete uses. No new git path.
+	if err := anchorReviewJobPublishedArtifacts(ctx, runner, repositoryID, job, sessionID, leaseID); err != nil {
+		return err
+	}
 	if err := exec.Exec(ctx, `
 		UPDATE striatumd.jobs
 		   SET state = 'completed', completed_at = $1, current_lease_id = NULL

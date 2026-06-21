@@ -106,6 +106,59 @@ func ensurePublishedArtifactsDurableWithPorter(ctx context.Context, runner any, 
 	return publishedArtifactsNotDurableError(surface, job, problems)
 }
 
+// anchorReviewJobPublishedArtifacts is the #551 review.verdict-completion variant
+// of work.complete's "durable -> anchor" sequence. A repo-write verdict-bearing
+// job (phase_synthesis / review) writes its synthesis (e.g. collaboration_ledger)
+// into the per-job worktree, publishes it via artifact.publish, then completes via
+// review.verdict — but completeReviewJob historically flipped the job to completed
+// without ever committing/anchoring that file, so it stayed untracked in the
+// worktree and the run branch never advanced (downstream gated jobs forked from a
+// tip blind to it). This runs the SAME daemon-as-porter commit + run-ref anchor
+// work.complete runs, in the SAME transaction, in the SAME order (porter ->
+// anchor -> caller flips state). It is a strict no-op when:
+//   - the job is not a repo-write job (publishedArtifactDurabilityProbe returns
+//     done with no problems, and anchorActiveWorktreeForJob returns nil), or
+//   - no active per-job worktree exists for the job (the stale-lane recovery path,
+//     recovery.go applyVerdict, may complete a verdict job whose worktree is gone;
+//     recovery owns its own durability machinery and must not start failing on a
+//     newly-required worktree here — so we skip silently when the worktree is
+//     absent rather than raising worktreeRequiredError).
+//
+// Anchoring only ever commits the declared artifact paths the lane wrote into THIS
+// job's worktree (the porter is path-scoped); blob-backed artifacts
+// (blob_exhaust / git_pointer_manifest) carry a blob_key and are skipped by the
+// durability probe, so this never touches them.
+func anchorReviewJobPublishedArtifacts(ctx context.Context, runner any, repositoryID string, job map[string]any, sessionID, leaseID string) error {
+	if !isRepoWrite(job) {
+		return nil
+	}
+	// Only proceed when an active per-job worktree exists. This deliberately does
+	// not raise worktreeRequiredError (unlike work.complete): the stale-lane
+	// recovery path reaches completeReviewJob with a possibly-absent worktree and
+	// recovery owns durability separately, so a missing worktree must remain a
+	// silent skip here, never a new completion failure.
+	worktree, err := activeWorktreeForJob(ctx, runner, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil {
+		return err
+	}
+	if worktree == nil {
+		return nil
+	}
+	if err := ensurePublishedArtifactsDurableWithPorter(ctx, runner, repositoryID, job, "review.verdict"); err != nil {
+		return err
+	}
+	anchorPayload, err := anchorActiveWorktreeForJob(ctx, runner, repositoryID, job)
+	if err != nil {
+		return err
+	}
+	if anchorPayload != nil {
+		if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "job.commits_anchored", sessionID, job["job_id"], nullable(job["current_message_id"]), nil, leaseID, anchorPayload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // porterCommitWorktreeArtifacts is the daemon-as-porter last-mile commit
 // (RFC 0125, D192). For each still-undurable published artifact whose body the
 // lane DID write into the per-job worktree, the daemon force-adds it (past the
