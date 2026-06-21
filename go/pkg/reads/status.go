@@ -112,12 +112,25 @@ func HandleStatus(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	if err != nil {
 		return nil, err
 	}
+	// RFC 0157 (D251): the additive canonical state projection. status keeps its
+	// own `.runs[]` (list of run objects, each with .state) and `.jobs{}` (state ->
+	// count map) untouched. When status is run_id-scoped the projection is populated
+	// for that one run; when it is the repo-wide multi-run window (no single run_id)
+	// the projection is the null/empty form — it does not flatten many runs into one
+	// run_state. This is the SAME `{run_state, jobs:[{id,state}]}` block run.summary
+	// and dashboard emit, so a script reads run/job state identically across verbs.
+	stateProjection, err := buildStateProjection(ctx, runner, repositoryID, runID)
+	if err != nil {
+		return nil, err
+	}
+
 	var autoFinalize any
 	var provenanceMode any
 	var operatorMode any
 	result := map[string]any{
 		"runs":                                 runs,
 		"jobs":                                 jobs,
+		"state_projection":                     stateProjection,
 		"sessions":                             sessions,
 		"verdicts_by_posture":                  verdictsByPosture,
 		"latest_non_accepting_review_verdicts": nonAccepting,

@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -269,5 +270,45 @@ func TestSanitizeUnit(t *testing.T) {
 	}
 	if got := sanitizeUnit("run/abc 1"); got != "run-abc-1" {
 		t.Errorf("sanitizeUnit = %q, want run-abc-1", got)
+	}
+}
+
+// #513: the generated detached-driver unit must carry Restart=on-failure (plus a
+// bounded restart loop) so a driver that exits non-zero on a daemon restart is
+// self-healed by systemd instead of silently abandoning a live, resumable run.
+func TestDriverUnitArgsCarriesRestartOnFailure(t *testing.T) {
+	args := driverUnitArgs("striatum-drive-run_x", "/usr/local/bin/striatum", driverLaunch{
+		RunID:      "run_x",
+		Repo:       "/repo",
+		SocketPath: "/run/striatum/rpc/daemon-go.sock",
+		TokenFile:  "/run/tok",
+	})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--property=Restart=on-failure",
+		"--property=RestartSec=2s",
+		"--property=StartLimitIntervalSec=120s",
+		"--property=StartLimitBurst=10",
+		"--collect",
+		"run drive --run-id run_x",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("driver unit args missing %q; got %q", want, joined)
+		}
+	}
+	// The run-drive verb must come AFTER the `--` separator so the properties are
+	// not mistaken for striatum flags.
+	sep := -1
+	verb := -1
+	for i, a := range args {
+		if a == "--" && sep == -1 {
+			sep = i
+		}
+		if a == "drive" {
+			verb = i
+		}
+	}
+	if sep == -1 || verb == -1 || verb < sep {
+		t.Fatalf("expected `drive` after `--`; sep=%d verb=%d args=%#v", sep, verb, args)
 	}
 }

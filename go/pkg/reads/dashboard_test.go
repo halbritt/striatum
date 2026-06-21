@@ -31,6 +31,12 @@ func (dashboardFakeRunner) BeginTx(context.Context) (db.TxRunner, error) {
 
 func (dashboardFakeRunner) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	switch {
+	case strings.Contains(sql, "FROM striatumd.runs"):
+		// RFC 0157 state_projection reads the run state.
+		return dashboardAllRowsFromMaps([]map[string]any{{"state": "running"}}), nil
+	case strings.Contains(sql, "FROM striatumd.jobs") && strings.Contains(sql, "workflow_job_id, state"):
+		// RFC 0157 state_projection's per-job (id, state) query.
+		return dashboardAllRowsFromMaps([]map[string]any{{"workflow_job_id": "wj_1", "state": "queued"}}), nil
 	case strings.Contains(sql, "FROM striatumd.jobs"):
 		return dashboardAllRowsFromMaps([]map[string]any{{"state": "queued", "c": int64(1)}}), nil
 	case strings.Contains(sql, "FROM striatumd.verdicts"):

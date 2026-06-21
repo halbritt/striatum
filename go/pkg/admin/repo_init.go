@@ -42,6 +42,14 @@ func (s Service) RepoInit(ctx context.Context, envelope rpc.Envelope) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	// #537 / #539: provision the committee POSIX ACLs (lane-writable repo tree +
+	// inheritable defaults for both the lane and the daemon owner) so a
+	// clone/worktree-registered repo supports `review_only_artifact` lanes and so
+	// lane-written committee provenance stays operator-manageable without sudo.
+	// Best-effort and idempotent: applies on both fresh registration and
+	// re-adopt, no-op for owner-run lanes / missing lane user / no setfacl. A
+	// failure is surfaced in the result, never fatal to registration.
+	aclProvisioned, aclErr := ProvisionCommitteeACLsResult(repo)
 	identity, err := repoIdentity(repo)
 	if err != nil {
 		return nil, err
@@ -59,7 +67,7 @@ func (s Service) RepoInit(ctx context.Context, envelope rpc.Envelope) (map[strin
 				return nil, err
 			}
 		}
-		return repoInitResult(*existing, true), nil
+		return WithCommitteeACLResult(repoInitResult(*existing, true), aclProvisioned, aclErr), nil
 	}
 	existing, err = s.findInitRegistration(ctx, "repo_root", repo)
 	if err != nil {
@@ -113,7 +121,7 @@ func (s Service) RepoInit(ctx context.Context, envelope rpc.Envelope) (map[strin
 	); err != nil {
 		return nil, err
 	}
-	return repoInitResult(repoRegistration{
+	return WithCommitteeACLResult(repoInitResult(repoRegistration{
 		RepositoryID:  repositoryID,
 		RepoRoot:      repo,
 		RepoIdentity:  identity,
@@ -122,7 +130,7 @@ func (s Service) RepoInit(ctx context.Context, envelope rpc.Envelope) (map[strin
 		State:         "active",
 		BlobBucket:    blobBucket,
 		BlobCreatedAt: blobCreatedAt,
-	}, false), nil
+	}, false), aclProvisioned, aclErr), nil
 }
 
 // provisionBucket runs the RFC 0072 adopt-time blob provisioning and

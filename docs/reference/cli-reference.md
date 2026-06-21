@@ -311,6 +311,17 @@ stale leases, and degraded repositories. It uses daemon-owned repository
 registration state and requires a daemon `read` capability token from the
 runtime `client-token` file.
 
+`run summary --json`, `dashboard --once`, and `status --json` all emit the
+RFC 0157 (D251) canonical `state_projection` block —
+`{run_state, jobs:[{id,state}]}` — so a script reads run/job state uniformly
+across the three verbs (`jobs[].id` is the stable `workflow_job_id`). The block
+is strictly additive: existing keys (`run.summary`'s `.run`/`.jobs[]`,
+`dashboard`'s `.jobs_by_state`, `status`'s `.runs[]`/`.jobs{}`) are unchanged,
+and `dashboard --once` additionally carries a top-level `state` mirroring
+`state_projection.run_state`. For a repo-wide call (no single run in scope)
+`run_state` is `null` and `jobs` is empty. See
+[spec.md → Operator read-surface state projection](spec.md#operator-read-surface-state-projection).
+
 ## Daemon and multi-repo registry (RFC 0028 V1)
 
 ```text
