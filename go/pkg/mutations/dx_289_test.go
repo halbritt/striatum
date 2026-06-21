@@ -85,6 +85,65 @@ func TestRecoveryPolicyUnsealedBudget(t *testing.T) {
 	}
 }
 
+// #478 / D249 unit: the agent_exited_unsealed requeue budget is
+// lane-kind-differentiated. A READ-ONLY reviewer lane (repoWrite == false) gets a
+// budget STRICTLY GREATER than a STATEFUL repo-write lane (repoWrite == true), so
+// a single transient reviewer unsealed exit (the common cause is transient
+// Anthropic-API unavailability during end-of-session wind-down) is a clean
+// fresh-session retry rather than an immediate whole-run escalation. The global
+// default (the stateful bound) is unchanged, so the pinned
+// defaultMaxUnsealedRequeues < defaultMaxRequeues invariant — asserted in
+// TestRecoveryPolicyUnsealedBudget above — still holds.
+func TestRecoveryPolicyReviewerUnsealedBudgetExceedsStateful(t *testing.T) {
+	def := recoveryPolicyFromWorkflow(map[string]any{})
+
+	statefulBound := def.unsealedRequeueBudget(true)
+	reviewerBound := def.unsealedRequeueBudget(false)
+
+	// The stateful selector must still equal the unchanged tight default.
+	if statefulBound != defaultMaxUnsealedRequeues {
+		t.Fatalf("stateful (repo-write) unsealed bound = %d, want the unchanged tight default %d",
+			statefulBound, defaultMaxUnsealedRequeues)
+	}
+	// The reviewer selector must be STRICTLY LARGER than the stateful bound (#478).
+	if reviewerBound <= statefulBound {
+		t.Fatalf("reviewer (read-only) unsealed bound (%d) must exceed the stateful bound (%d) so a transient reviewer unsealed exit is a clean retry, not an immediate escalation",
+			reviewerBound, statefulBound)
+	}
+	// The reviewer bound must never exceed the hard-crash requeue budget: a hard
+	// crash is never out-budgeted by a reviewer unsealed exit.
+	if reviewerBound > def.maxRequeues {
+		t.Fatalf("reviewer unsealed bound (%d) must not exceed max_requeues (%d)", reviewerBound, def.maxRequeues)
+	}
+
+	// Operator override: a workflow can raise the reviewer bound up to max_requeues.
+	over := recoveryPolicyFromWorkflow(map[string]any{
+		"recovery_policy": map[string]any{
+			"max_requeues":                   float64(4),
+			"max_reviewer_unsealed_requeues": float64(4),
+		},
+	})
+	if got := over.unsealedRequeueBudget(false); got != 4 {
+		t.Fatalf("reviewer override bound = %d, want 4", got)
+	}
+	if got := over.unsealedRequeueBudget(true); got != defaultMaxUnsealedRequeues {
+		t.Fatalf("stateful bound under reviewer override = %d, want the unchanged %d", got, defaultMaxUnsealedRequeues)
+	}
+
+	// Clamp: a reviewer override below the stateful bound is raised to the stateful
+	// bound (never tighter than a stateful lane), and one above max_requeues is
+	// capped at max_requeues.
+	lowReq := recoveryPolicyFromWorkflow(map[string]any{
+		"recovery_policy": map[string]any{
+			"max_requeues":                   float64(1),
+			"max_reviewer_unsealed_requeues": float64(5),
+		},
+	})
+	if got := lowReq.unsealedRequeueBudget(false); got != 1 {
+		t.Fatalf("reviewer bound capped at max_requeues = %d, want 1", got)
+	}
+}
+
 // #289 unit: the escalation remediation is class-specific — the unsealed class
 // points the operator at the worktree (the deliverable may already be there).
 func TestSuggestedOperatorActionsUnsealed(t *testing.T) {
@@ -302,6 +361,88 @@ func TestSweepConfirmedDeadStalledRoutesToUnsealedNotTransfer(t *testing.T) {
 	requeue, transfer, _ := jobRecoveryCounts(t, ctx, runner, repoID, jobID)
 	if requeue != 1 || transfer != 0 {
 		t.Fatalf("budgets requeue=%d transfer=%d, want requeue=1 transfer=0 (dead-lane path, not transfer)", requeue, transfer)
+	}
+}
+
+// makeJobReadOnlyReviewerLane converts the seeded repo-write fixture job into a
+// READ-ONLY reviewer lane (no repo_write) — the lane kind #478 / D249 grants the
+// larger unsealed-requeue budget. write_scope is cleared of repo_write so
+// isRepoWrite(row) is false for it.
+func makeJobReadOnlyReviewerLane(t *testing.T, ctx context.Context, runner db.Runner, repoID, jobID string) {
+	t.Helper()
+	ws, err := db.JSONBArg(runner, map[string]any{"mode": "read_only", "repo_write": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET write_scope_json = $3::jsonb
+		 WHERE repository_id = $1 AND job_id = $2`, repoID, jobID, ws); err != nil {
+		t.Fatalf("set read-only reviewer write_scope: %v", err)
+	}
+}
+
+// #478 / D249 integration: a READ-ONLY reviewer lane that exits unsealed at
+// requeue_count=1 must STILL REQUEUE (its budget is the larger reviewer bound,
+// limit 2) rather than escalate the whole run — whereas the byte-identical
+// STATEFUL repo-write fixture escalates at the same count (limit 1, proven by
+// TestSweepUnsealedExitEscalatesOnSmallerBudget). This is the #478 fix: one
+// transient reviewer unsealed exit no longer takes down a multi-stage run.
+func TestSweepReviewerUnsealedExitRequeuesNotEscalates(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+
+	repoR := "repo_sweep_reviewer_unsealed_budget"
+	runR, jobR, _, _, sessR := seedStalledSessionActiveLane(t, ctx, runner, repoR)
+	makeJobReadOnlyReviewerLane(t, ctx, runner, repoR, jobR)
+	makeConfirmedDeadActiveSessionWithOutput(t, ctx, runner, repoR, runR, sessR, true)
+	stubDeadProbe(t)
+	// Same starting count (1) at which the stateful repo-write lane escalates.
+	preseedRequeueBudget(t, ctx, runner, repoR, runR, jobR, 1)
+
+	res, err := SweepRun(ctx, runner, repoR, runR, "")
+	if err != nil {
+		t.Fatalf("reviewer sweep: %v", err)
+	}
+	sum := recoveryActionsFromSweep(t, res)
+	// It REQUEUED (acted), not escalated.
+	if intValue(sum["acted_count"]) != 1 {
+		t.Fatalf("reviewer acted_count = %v, want 1 (requeued on the larger reviewer budget); %#v", sum["acted_count"], sum)
+	}
+	if intValue(sum["escalation_pending_count"]) != 0 {
+		t.Fatalf("reviewer escalation_pending_count = %v, want 0 (reviewer budget not yet exhausted at count 1); %#v", sum["escalation_pending_count"], sum)
+	}
+	acts, _ := sum["actions"].([]map[string]any)
+	if len(acts) != 1 || acts[0]["action"] != "requeue_same_attempt" || acts[0]["acted"] != true {
+		t.Fatalf("expected one requeue_same_attempt acted=true; got %#v", sum["actions"])
+	}
+	// The action reports the larger reviewer limit (2), not the stateful limit (1).
+	if got := intValue(acts[0]["limit"]); got != defaultMaxReviewerUnsealedRequeues {
+		t.Fatalf("reviewer requeue action limit = %d, want the reviewer bound %d", got, defaultMaxReviewerUnsealedRequeues)
+	}
+	if got := jobLastStallClass(t, ctx, runner, repoR, jobR); got != stallClassAgentExitedUnsealed {
+		t.Fatalf("reviewer last_stall_class = %q, want %q", got, stallClassAgentExitedUnsealed)
+	}
+
+	// The reviewer lane DOES eventually escalate (never un-escalatable): a FRESH
+	// reviewer fixture preseeded AT the reviewer bound escalates on its first sweep
+	// — proving the larger budget is a delay, not an exemption.
+	repoB := "repo_sweep_reviewer_unsealed_at_bound"
+	runB, jobB, _, _, sessB := seedStalledSessionActiveLane(t, ctx, runner, repoB)
+	makeJobReadOnlyReviewerLane(t, ctx, runner, repoB, jobB)
+	makeConfirmedDeadActiveSessionWithOutput(t, ctx, runner, repoB, runB, sessB, true)
+	stubDeadProbe(t)
+	preseedRequeueBudget(t, ctx, runner, repoB, runB, jobB, defaultMaxReviewerUnsealedRequeues)
+
+	resB, err := SweepRun(ctx, runner, repoB, runB, "")
+	if err != nil {
+		t.Fatalf("reviewer at-bound sweep: %v", err)
+	}
+	sumB := recoveryActionsFromSweep(t, resB)
+	if intValue(sumB["escalation_pending_count"]) != 1 {
+		t.Fatalf("reviewer escalation_pending_count at the reviewer bound = %v, want 1 (must still escalate eventually); %#v", sumB["escalation_pending_count"], sumB)
+	}
+	if got := jobState(t, ctx, runner, repoB, jobB); got != "running" {
+		t.Fatalf("reviewer at-bound job state = %q, want running (escalated, not requeued)", got)
 	}
 }
 

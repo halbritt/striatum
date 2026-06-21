@@ -1,6 +1,6 @@
 # RFC 0152: Recovery budget policy for `agent_exited_unsealed` reviewer lanes
 
-Status: accepted (D249; option 3 — lane-kind-differentiated requeue budget)
+Status: implemented (D249/D255; option 3 — lane-kind-differentiated requeue budget)
 Date: 2026-06-20
 author: proposer-claude-opus-4-8
 
