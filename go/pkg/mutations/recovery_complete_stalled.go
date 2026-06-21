@@ -161,6 +161,21 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 				"complete-stalled requires an open recovery_exhausted blocker on the job (the autonomous-recovery dead-end); pass --force to finalize a job stalled for another reason after inspection", nil)
 		}
 
+		// #530 salvage: a lane can write its deliverable to disk (its per-job
+		// worktree) and then exit unsealed BEFORE artifact.publish — e.g. a transient
+		// Anthropic-API outage during end-of-session wind-down. The deliverable then
+		// has NO artifact row, so verifyRequiredArtifacts (Gate 1) below would refuse
+		// and the expensive work would be discarded. Before failing, scan the main
+		// checkout and the job's per-job worktree for the written-but-unpublished
+		// file and publish the missing required artifact ROW(s) so the body (anchored
+		// via the worktree commit) becomes reconstructable and finalizable here. A
+		// no-op when the rows already exist (the original #292 case) or no matching
+		// file is on disk. salvaged>0 is surfaced in the result for legibility.
+		salvaged, err := salvagePublishMissingRequiredArtifacts(ctx, tx, repositoryID, job)
+		if err != nil {
+			return nil, err
+		}
+
 		// Gate 1: every required expected_artifact row exists (publish happened).
 		if err := verifyRequiredArtifacts(ctx, tx, repositoryID, jobID); err != nil {
 			return nil, err
@@ -196,6 +211,11 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 		}
 		if len(recon) > 0 {
 			base["artifacts"] = reconstructionLedgerEntries(recon)
+		}
+		if salvaged > 0 {
+			// #530: the required artifact row(s) were salvaged from disk (the lane
+			// wrote the deliverable but exited unsealed before artifact.publish).
+			base["salvaged_artifact_count"] = salvaged
 		}
 
 		if dryRun {

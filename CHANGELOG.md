@@ -53,6 +53,31 @@
   accepted-semantics halves of these issues (the all-N/quorum debounce, RFC 0154/D250;
   and the `code_change` cycle-width / rebuttal policy, RFC 0161/D253) remain RFC-gated
   and are NOT changed here.
+- **recovery: a transient unsealed exit on a READ-ONLY reviewer lane no longer
+  escalates the whole run after a single respawn (#478, RFC 0152 / D249 / D255).**
+  The `agent_exited_unsealed` requeue budget is now lane-kind-differentiated: a
+  read-only reviewer lane (a job that does not repo-write) recovers on the larger
+  `max_reviewer_unsealed_requeues` (default 2), while a stateful repo-write lane
+  keeps the tight `max_unsealed_requeues` (default 1) — a repeated unsealed exit
+  there still signals systematic failure. The global default and the pinned
+  `defaultMaxUnsealedRequeues < defaultMaxRequeues` invariant are unchanged. The
+  common reviewer cause (transient Anthropic-API unavailability during
+  end-of-session wind-down, after the review was produced) is a clean
+  fresh-session retry, so one blip no longer takes down a committee run. New
+  per-workflow override `recovery_policy.max_reviewer_unsealed_requeues`.
+- **recovery: a deliverable a per-job lane WROTE but never sealed is salvaged from
+  its per-job worktree instead of discarded (#530 / D256).** When a `claude_code`
+  (or any per-job) lane committed its required artifact into its isolated worktree
+  and then exited unsealed before `artifact.publish` (e.g. a transient API outage
+  during optional memory wind-down), recovery used to find nothing — the
+  auto-publish pass and `recovery complete-stalled` only scanned the main checkout —
+  and the expensive work was lost. They now also scan the job's most-recent
+  per-job worktree (`job_worktrees.worktree_path`, jailed under
+  `.striatum/worktrees/`), publish the missing artifact ROW from the
+  worktree-committed body (already git-anchored), and finalize the job from durable
+  provenance. The salvaged file's byline must still match the lane's expected
+  author line, so a forged file cannot be adopted. `recovery complete-stalled`
+  reports `salvaged_artifact_count` when it salvaged.
 - **`striatum repo add --init` now provisions the committee POSIX ACLs on
   clone/worktree-registered repos, so `review_only_artifact` lanes can publish
   and lane-written committee provenance stays operator-manageable without `sudo`

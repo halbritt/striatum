@@ -756,7 +756,15 @@ func HandleRecoveryAuto(ctx context.Context, runner db.Runner, envelope rpc.Enve
 			}
 			artifacts := []map[string]any{}
 			for _, declared := range publishable {
-				artifact, err := publishRecoveredArtifact(ctx, tx, repositoryID, job, sessionID, leaseID, fmt.Sprint(run["repo_root"]), declared)
+				// #530: publish FROM the root the file was found in (main repo_root or
+				// the per-job worktree), so a worktree-salvaged deliverable is read back
+				// from the worktree. The write-scope path check still uses the declared
+				// repo-relative path, so the artifact's recorded repo_path is unchanged.
+				sourceRoot := fmt.Sprint(run["repo_root"])
+				if r, ok := declared["source_root"].(string); ok && r != "" {
+					sourceRoot = r
+				}
+				artifact, err := publishRecoveredArtifact(ctx, tx, repositoryID, job, sessionID, leaseID, sourceRoot, declared)
 				if err != nil {
 					return nil, err
 				}
@@ -1368,11 +1376,80 @@ func SweepRun(ctx context.Context, runner db.Runner, repositoryID string, runID 
 	return result, nil
 }
 
+// jobSalvageSearchRoots returns the ordered roots the auto-publish pass scans for
+// a required artifact written-but-unsealed (#530). The main run repo_root is tried
+// FIRST (the legacy behavior — a shared-checkout lane writes there). When a job ran
+// on a PER-JOB worktree (worktree_isolation: per_job), the agent wrote its
+// deliverable into the per-job worktree under .striatum/worktrees/, NOT the main
+// checkout — so a transient unsealed exit (e.g. transient Anthropic-API
+// unavailability during end-of-session wind-down) discarded the work because the
+// auto-publish pass only ever scanned the main repo_root and found nothing
+// (#530). We append the job's most-recent non-removed per-job worktree so its
+// committed-but-unsealed deliverable can be adopted instead of discarded. The
+// worktree path is validated to sit under repo_root/.striatum/worktrees/ (the
+// read-side jail) so a forged worktree_path cannot redirect the read outside the
+// scratch tree. A root is included only when it exists on disk.
+func jobSalvageSearchRoots(ctx context.Context, runner any, repositoryID, repoRoot string, job map[string]any) []string {
+	roots := []string{repoRoot}
+	jobID := fmt.Sprint(job["job_id"])
+	// Most-recent non-removed worktree for the job (active preferred, then abandoned).
+	row, err := oneRow(ctx, runner, `
+		SELECT worktree_path
+		  FROM striatumd.job_worktrees
+		 WHERE repository_id = $1 AND job_id = $2
+		   AND state IN ('active','abandoned','released')
+		 ORDER BY (state = 'active') DESC, created_at DESC, worktree_id DESC
+		 LIMIT 1`, repositoryID, jobID)
+	if err != nil || row == nil {
+		return roots
+	}
+	worktreeRoot, jerr := salvageWorktreeTarget(repoRoot, fmt.Sprint(nullable(row["worktree_path"])))
+	if jerr != nil {
+		return roots
+	}
+	if info, serr := os.Stat(worktreeRoot); serr != nil || !info.IsDir() {
+		return roots
+	}
+	return append(roots, worktreeRoot)
+}
+
+// salvageWorktreeTarget resolves a job_worktrees.worktree_path (relative or
+// absolute) to an absolute path and jails it under repo_root/.striatum/worktrees/,
+// mirroring the read-side reads.readWorktreeTarget so the salvage read is never
+// looser than the worktree-refs reader. Returns an error if the path is empty or
+// escapes the scratch jail.
+func salvageWorktreeTarget(repoRoot, pathText string) (string, error) {
+	root, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("repo_root_invalid")
+	}
+	pathText = strings.TrimSpace(pathText)
+	if pathText == "" || pathText == "<nil>" {
+		return "", fmt.Errorf("worktree_path_missing")
+	}
+	var target string
+	if filepath.IsAbs(pathText) {
+		target = filepath.Clean(pathText)
+	} else {
+		target = filepath.Clean(filepath.Join(root, filepath.FromSlash(pathText)))
+	}
+	worktreesRoot := filepath.Join(root, ".striatum", "worktrees")
+	rel, err := filepath.Rel(worktreesRoot, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("worktree_path_outside_scratch")
+	}
+	return target, nil
+}
+
 func autoPublishableArtifacts(ctx context.Context, runner any, repositoryID string, repoRoot string, job map[string]any, sessionID string, expectedByline string) (publishable []map[string]any, skipped []map[string]any, err error) {
 	publishable = []map[string]any{}
 	skipped = []map[string]any{}
 	currentAttempt := jobAttemptValue(job["attempt"])
 	workflowJobID := fmt.Sprint(job["workflow_job_id"])
+	// #530: scan the main repo_root first, then the job's per-job worktree, so a
+	// deliverable an unsealed-exiting per-job lane wrote into its isolated worktree
+	// is salvaged rather than discarded.
+	searchRoots := jobSalvageSearchRoots(ctx, runner, repositoryID, repoRoot, job)
 	for _, item := range asList(job["expected_artifacts_json"]) {
 		declared := asMap(item)
 		if declared["required"] == false {
@@ -1384,19 +1461,29 @@ func autoPublishableArtifacts(ctx context.Context, runner any, repositoryID stri
 		if pathText == "" || kind == "" || logicalName == "" {
 			continue
 		}
-		path, err := repoRelativePath(repoRoot, pathText, false)
-		if err != nil {
-			continue
+		// Try each search root in priority order; the first that holds a readable,
+		// valid-UTF-8 file wins and its root is recorded so the recovered artifact is
+		// published FROM the same root (the body read for the artifact row matches).
+		var payload []byte
+		var sourceRoot string
+		for _, root := range searchRoots {
+			path, perr := repoRelativePath(root, pathText, false)
+			if perr != nil {
+				continue
+			}
+			info, serr := os.Stat(path)
+			if serr != nil || info.IsDir() {
+				continue
+			}
+			body, rerr := os.ReadFile(path)
+			if rerr != nil || !utf8.Valid(body) {
+				continue
+			}
+			payload = body
+			sourceRoot = root
+			break
 		}
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		payload, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		if !utf8.Valid(payload) {
+		if sourceRoot == "" {
 			continue
 		}
 		matched := false
@@ -1438,6 +1525,10 @@ func autoPublishableArtifacts(ctx context.Context, runner any, repositoryID stri
 			"path":         pathText,
 			"kind":         kind,
 			"logical_name": logicalName,
+			// #530: the root the body was found in (main repo_root or the per-job
+			// worktree). The publish step reads from this root so the artifact row's
+			// content matches the file that satisfied the byline/attempt gates.
+			"source_root": sourceRoot,
 		})
 	}
 	return publishable, skipped, nil
@@ -1479,7 +1570,15 @@ func recoveredReviewVerdict(repoRoot string, publishable, artifacts []map[string
 			continue
 		}
 		pathText := fmt.Sprint(declared["path"])
-		path, perr := repoRelativePath(repoRoot, pathText, false)
+		// #530: read the finding from the root it was salvaged from (main repo_root
+		// or the per-job worktree), so a worktree-salvaged review's verdict_intent is
+		// honored rather than missed (which would default to a plain completion and
+		// silently drop a needs_revision).
+		root := repoRoot
+		if r, ok := declared["source_root"].(string); ok && r != "" {
+			root = r
+		}
+		path, perr := repoRelativePath(root, pathText, false)
 		if perr != nil {
 			continue
 		}
@@ -1501,6 +1600,93 @@ func recoveredReviewVerdict(repoRoot string, publishable, artifacts []map[string
 		return v, findingArtifactID, true, nil
 	}
 	return "", nil, false, nil
+}
+
+// salvagePublishMissingRequiredArtifacts is the #530 salvage path for the
+// operator complete-stalled verb: when a required artifact ROW is missing (the
+// lane wrote its deliverable but exited unsealed before artifact.publish — e.g. a
+// transient Anthropic-API outage during end-of-session wind-down), this scans the
+// job's main-checkout and per-job-worktree roots for the declared file and, if it
+// finds a matching-byline body, publishes the missing artifact ROW(s) so the
+// reconstructability gate (which then resolves the body via the worktree's
+// git anchor) can pass and the job can be finalized from durable provenance. It
+// is a no-op when the rows already exist (the legacy #292 case) or when no
+// matching file is on disk. It does NOT complete the job or record a verdict — the
+// caller's finalizeStalledJob does that. Returns the count of artifact rows
+// published. A reviewer/verdict-capable job is salvaged the same way (the row is
+// what complete-stalled needs); complete-stalled already refuses verdict-capable
+// jobs at a prior gate, so this only runs for non-verdict jobs.
+func salvagePublishMissingRequiredArtifacts(ctx context.Context, tx db.TxRunner, repositoryID string, job map[string]any) (int, error) {
+	jobID := fmt.Sprint(job["job_id"])
+	// Already satisfied? Then there is nothing to salvage (the #292 case).
+	if err := verifyRequiredArtifacts(ctx, tx, repositoryID, jobID); err == nil {
+		return 0, nil
+	}
+	repoRoot, err := activeRepositoryRoot(ctx, tx, repositoryID)
+	if err != nil {
+		// Cannot resolve the checkout — leave the missing-row failure to the gate.
+		return 0, nil
+	}
+	// Resolve the dead lane's owning session for the byline check. Prefer the job's
+	// current lease, then the most-recent lease on the job resource.
+	sessionID := salvageOwnerSessionForJob(ctx, tx, repositoryID, job)
+	if sessionID == "" {
+		return 0, nil
+	}
+	expectedByline, err := expectedAuthorLine(ctx, tx, repositoryID, job, sessionID)
+	if err != nil {
+		return 0, nil
+	}
+	publishable, _, err := autoPublishableArtifacts(ctx, tx, repositoryID, repoRoot, job, sessionID, expectedByline)
+	if err != nil {
+		return 0, err
+	}
+	if len(publishable) == 0 {
+		return 0, nil
+	}
+	leaseID := fmt.Sprint(nullable(job["current_lease_id"]))
+	published := 0
+	for _, declared := range publishable {
+		sourceRoot := repoRoot
+		if r, ok := declared["source_root"].(string); ok && r != "" {
+			sourceRoot = r
+		}
+		if _, perr := publishRecoveredArtifact(ctx, tx, repositoryID, job, sessionID, leaseID, sourceRoot, declared); perr != nil {
+			return published, perr
+		}
+		published++
+	}
+	return published, nil
+}
+
+// salvageOwnerSessionForJob resolves the dead lane's owning session for a job
+// whose artifact must be salvaged (#530). It prefers the job's current lease, then
+// the most-recent lease on the job resource (the dead lane's lease may already be
+// released/expired with the job pointer cleared). Returns "" when no owner can be
+// resolved.
+func salvageOwnerSessionForJob(ctx context.Context, runner any, repositoryID string, job map[string]any) string {
+	if leaseID := nullable(job["current_lease_id"]); leaseID != nil {
+		row, err := oneRow(ctx, runner, `
+			SELECT owner_session_id FROM striatumd.leases
+			 WHERE repository_id = $1 AND lease_id = $2 LIMIT 1`, repositoryID, leaseID)
+		if err == nil && row != nil {
+			if s := nullable(row["owner_session_id"]); s != nil {
+				return fmt.Sprint(s)
+			}
+		}
+	}
+	row, err := oneRow(ctx, runner, `
+		SELECT owner_session_id FROM striatumd.leases
+		 WHERE repository_id = $1 AND resource_id = $2 AND owner_session_id IS NOT NULL
+		 ORDER BY (state = 'active') DESC, acquired_at DESC, lease_id DESC
+		 LIMIT 1`, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil || row == nil {
+		return ""
+	}
+	if s := nullable(row["owner_session_id"]); s != nil {
+		return fmt.Sprint(s)
+	}
+	return ""
 }
 
 // autonomouslyApplicableVerdict reports whether the autonomous stale-lease

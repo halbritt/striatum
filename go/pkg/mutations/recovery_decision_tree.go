@@ -31,8 +31,24 @@ type recoveryPolicy struct {
 	// (turn-end / context-budget / rate-limit death mid-task) rarely self-heals on
 	// repeat — so this class escalates to the operator faster than a hard crash,
 	// burning less of the requeue budget than the symptom the issue reported.
+	// This is the STATEFUL repo-write lane bound; a read-only reviewer lane uses
+	// the larger maxReviewerUnsealedRequeues (#478 / D249).
 	maxUnsealedRequeues int
-	maxTransfers        int
+	// maxReviewerUnsealedRequeues is the agent_exited_unsealed requeue bound for a
+	// READ-ONLY reviewer lane (a job that does not repo-write — e.g. a claude_code
+	// review_final / review_design lane). D249 (RFC 0152) resolved #478 with a
+	// lane-kind-differentiated budget: for a stateless reviewer lane a transient
+	// unsealed exit (the common cause is transient Anthropic-API unavailability
+	// during end-of-session wind-down, after the review was already produced) is a
+	// clean fresh-session retry, so escalate-after-one-respawn made a single API
+	// blip the most frequent committee needs_operator cause. A stateful repo-write
+	// lane's repeated unsealed exit still signals systematic failure, so it keeps
+	// the tight maxUnsealedRequeues default. This larger bound is therefore applied
+	// only to non-repo-write lanes; the global defaultMaxUnsealedRequeues constant
+	// (and the pinned defaultMaxUnsealedRequeues < defaultMaxRequeues invariant)
+	// does not move.
+	maxReviewerUnsealedRequeues int
+	maxTransfers                int
 	// maxQuarantinableJobs bounds how many jobs a single run may move to the
 	// 'quarantined' state and still finalize-the-majority (#311 P0). The default
 	// is 1: a run with a SINGLE recovery-exhausted, downstream-clear job
@@ -57,10 +73,19 @@ type recoveryPolicy struct {
 }
 
 const (
-	defaultMaxRequeues          = 2
-	defaultMaxUnsealedRequeues  = 1
-	defaultMaxTransfers         = 3
-	defaultMaxQuarantinableJobs = 1
+	defaultMaxRequeues         = 2
+	defaultMaxUnsealedRequeues = 1
+	// defaultMaxReviewerUnsealedRequeues is the larger #478 / D249 unsealed-requeue
+	// bound for a read-only reviewer lane. It deliberately matches the hard-crash
+	// requeue default (defaultMaxRequeues) rather than exceeding it: a transient
+	// reviewer unsealed exit is no worse than a hard crash and a fresh session
+	// almost always succeeds, so it earns the same room — never MORE — as a hard
+	// crash. The selector caps it at maxRequeues at use time, so an operator who
+	// lowers max_requeues never gets a reviewer bound that exceeds their own
+	// requeue budget.
+	defaultMaxReviewerUnsealedRequeues = 2
+	defaultMaxTransfers                = 3
+	defaultMaxQuarantinableJobs        = 1
 )
 
 // silentSweepCap returns the RFC 0131 Layer 4 escape-valve cap FLOOR for this
@@ -178,10 +203,11 @@ func isNecrosisStallClass(stallClass string) bool {
 // existing recovery_policy block keeps meaning what it says.
 func recoveryPolicyFromWorkflow(workflow map[string]any) recoveryPolicy {
 	policy := recoveryPolicy{
-		maxRequeues:          defaultMaxRequeues,
-		maxUnsealedRequeues:  defaultMaxUnsealedRequeues,
-		maxTransfers:         defaultMaxTransfers,
-		maxQuarantinableJobs: defaultMaxQuarantinableJobs,
+		maxRequeues:                 defaultMaxRequeues,
+		maxUnsealedRequeues:         defaultMaxUnsealedRequeues,
+		maxReviewerUnsealedRequeues: defaultMaxReviewerUnsealedRequeues,
+		maxTransfers:                defaultMaxTransfers,
+		maxQuarantinableJobs:        defaultMaxQuarantinableJobs,
 	}
 	block := asMap(workflow["recovery_policy"])
 	if len(block) == 0 {
@@ -196,6 +222,13 @@ func recoveryPolicyFromWorkflow(workflow map[string]any) recoveryPolicy {
 	}
 	if v, ok := block["max_unsealed_requeues"]; ok {
 		policy.maxUnsealedRequeues = intFromAny(v, policy.maxUnsealedRequeues)
+	}
+	if v, ok := block["max_reviewer_unsealed_requeues"]; ok {
+		// #478 / D249 operator override for the read-only reviewer-lane unsealed
+		// bound. Absent, the larger default applies; clamped >= the stateful bound
+		// and <= max_requeues below so it is always at least as forgiving as the
+		// stateful lane and never exceeds the run's own requeue budget.
+		policy.maxReviewerUnsealedRequeues = intFromAny(v, policy.maxReviewerUnsealedRequeues)
 	}
 	if v, ok := block["max_transfers"]; ok {
 		policy.maxTransfers = intFromAny(v, policy.maxTransfers)
@@ -224,6 +257,21 @@ func recoveryPolicyFromWorkflow(workflow map[string]any) recoveryPolicy {
 	if policy.maxUnsealedRequeues > policy.maxRequeues {
 		policy.maxUnsealedRequeues = policy.maxRequeues
 	}
+	if policy.maxReviewerUnsealedRequeues < 0 {
+		policy.maxReviewerUnsealedRequeues = 0
+	}
+	// #478 / D249: the reviewer-lane unsealed bound is at LEAST as forgiving as the
+	// stateful bound (it is the looser of the two, never tighter) and never exceeds
+	// the run's own requeue budget. The first clamp keeps a too-low operator
+	// override from accidentally making a reviewer lane escalate sooner than a
+	// stateful one; the second keeps it bounded by max_requeues (so a hard crash is
+	// never out-budgeted by a reviewer unsealed exit).
+	if policy.maxReviewerUnsealedRequeues < policy.maxUnsealedRequeues {
+		policy.maxReviewerUnsealedRequeues = policy.maxUnsealedRequeues
+	}
+	if policy.maxReviewerUnsealedRequeues > policy.maxRequeues {
+		policy.maxReviewerUnsealedRequeues = policy.maxRequeues
+	}
 	if policy.maxTransfers < 0 {
 		policy.maxTransfers = 0
 	}
@@ -231,6 +279,24 @@ func recoveryPolicyFromWorkflow(workflow map[string]any) recoveryPolicy {
 		policy.maxQuarantinableJobs = 0
 	}
 	return policy
+}
+
+// unsealedRequeueBudget returns the agent_exited_unsealed requeue bound for a
+// lane of the given kind (#478 / D249). A READ-ONLY reviewer lane (repoWrite ==
+// false) gets the larger maxReviewerUnsealedRequeues — a transient unsealed exit
+// there (transient API unavailability during end-of-session wind-down, after the
+// review was already produced) is a clean fresh-session retry, so it earns the
+// same room as a hard crash. A STATEFUL repo-write lane (repoWrite == true) keeps
+// the tight maxUnsealedRequeues: a repeated unsealed exit there still signals
+// systematic failure and must escalate sooner than a hard crash. The global
+// defaultMaxUnsealedRequeues constant (and the pinned
+// defaultMaxUnsealedRequeues < defaultMaxRequeues invariant) is untouched — only
+// the lane-scoped selection differs.
+func (p recoveryPolicy) unsealedRequeueBudget(repoWrite bool) int {
+	if repoWrite {
+		return p.maxUnsealedRequeues
+	}
+	return p.maxReviewerUnsealedRequeues
 }
 
 // jobRecoveryBudget mirrors a striatumd.job_recovery_state row.
@@ -1087,7 +1153,11 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 			// #289: the unsealed-exit class shares the requeue_count counter but
 			// escalates after a smaller budget — a respawn rarely heals a systematic
 			// unsealed exit, so hand it to the operator sooner with a precise reason.
-			limit = policy.maxUnsealedRequeues
+			// #478 / D249: the bound is lane-kind-differentiated — a read-only reviewer
+			// lane gets the larger reviewer bound (a transient unsealed exit there is a
+			// clean fresh-session retry), while a stateful repo-write lane keeps the
+			// tight default (a repeated unsealed exit signals systematic failure).
+			limit = policy.unsealedRequeueBudget(isRepoWrite(row))
 		}
 		// gateEscalation is set when the RFC 0131 131-C confidence gate PERMITTED a
 		// deadline_elapsed_only escalation to commit this sweep (the two-sweep bar
@@ -1511,6 +1581,21 @@ func tryFinalizeUnsealedFromDurableArtifact(ctx context.Context, tx db.TxRunner,
 	}
 	if !hasRequired {
 		return false, nil
+	}
+	// #530 salvage: a per-job lane can write its deliverable to its isolated
+	// worktree and then exit unsealed BEFORE artifact.publish (e.g. a transient
+	// API outage during end-of-session wind-down), leaving no artifact row. Before
+	// Gate 1 refuses on the missing row, scan the main checkout and the job's
+	// per-job worktree for the written-but-unpublished file and publish the missing
+	// required artifact ROW(s); the body, anchored via the worktree commit the
+	// sweep pinned, then satisfies the reconstructability gate. A no-op when the
+	// rows already exist or no matching file is on disk (then Gate 1 falls through
+	// to the requeue path as before).
+	if _, serr := salvagePublishMissingRequiredArtifacts(ctx, tx, repositoryID, job); serr != nil {
+		if _, ok := serr.(*rpc.Error); ok {
+			return false, nil
+		}
+		return false, serr
 	}
 	// Gate 1: every required artifact ROW exists (publish happened). A missing row
 	// returns an rpc invalid_transition error from verifyRequiredArtifacts; treat
