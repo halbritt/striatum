@@ -21,6 +21,21 @@ const (
 	EnvDaemonToken     = "STRIATUM_DAEMON_TOKEN"
 	EnvDaemonTokenFile = "STRIATUM_DAEMON_TOKEN_FILE"
 	DefaultDeadlineMS  = 30000
+
+	// EnvDaemonRuntimeDir is the single-source-of-truth runtime directory for the
+	// daemon. When the daemon runs as a system unit (e.g. striatumd.service) it sets
+	// this to /run/striatum; interactive shells inherit it via /etc/profile.d/striatum.sh.
+	// The CLI honours it so that non-login environments (scripts, lane helpers) that
+	// miss the profile.d sourcing still resolve the correct socket path.
+	EnvDaemonRuntimeDir = "STRIATUM_DAEMON_RUNTIME_DIR"
+
+	// SystemDaemonSocket is the well-known socket path for the system-unit topology
+	// (striatumd.service, socket nested in rpc/ for lane-ACL reasons — see service
+	// file comment). Used as a last-resort fallback when no explicit socket or
+	// runtime-dir env is configured and the user-scope socket does not exist, so the
+	// CLI works out of the box against the system daemon without requiring the
+	// operator to export STRIATUM_DAEMON_SOCKET manually.
+	SystemDaemonSocket = "/run/striatum/rpc/daemon-go.sock"
 )
 
 type Config struct {
@@ -291,10 +306,57 @@ func envMap(env []string) map[string]string {
 	return values
 }
 
+// defaultSocketPath resolves the daemon socket path when neither an explicit
+// flag value nor STRIATUM_DAEMON_SOCKET env is set. Precedence:
+//
+//  1. STRIATUM_DAEMON_RUNTIME_DIR → <dir>/daemon-go.sock   (system-unit topology)
+//  2. XDG_RUNTIME_DIR             → <dir>/striatum/daemon-go.sock (user-scope topology)
+//  3. system socket fallback       → SystemDaemonSocket, when present on disk
+//     (handles non-login shells that miss /etc/profile.d/striatum.sh but the
+//     system daemon is running)
+//  4. XDG_RUNTIME_DIR default     → original user-scope path (legible error)
 func defaultSocketPath(values map[string]string) string {
-	runtimeDir := values["XDG_RUNTIME_DIR"]
-	if runtimeDir == "" {
-		runtimeDir = os.TempDir()
+	// Tier 1: explicit runtime-dir env (set by the system unit and by profile.d).
+	// Mirror the logic in striatumd/main.go::defaultSocketPath so the CLI and
+	// daemon agree on where the socket lives when STRIATUM_DAEMON_RUNTIME_DIR is
+	// set. The system unit nests the RPC socket one level deep (rpc/) for
+	// lane-ACL reasons (see striatumd.service), but the daemon writes the actual
+	// path directly via the -socket flag. We look for daemon-go.sock directly
+	// inside the runtime dir first (rpc/daemon-go.sock), then bare.
+	if runtimeDir := strings.TrimSpace(values[EnvDaemonRuntimeDir]); runtimeDir != "" {
+		// The system unit puts the socket at <runtimeDir>/rpc/daemon-go.sock;
+		// a future or alternate topology might put it at <runtimeDir>/daemon-go.sock.
+		// Try the rpc/ sub-path first (matching the production layout), then bare.
+		rpcSocket := filepath.Join(runtimeDir, "rpc", "daemon-go.sock")
+		if _, err := os.Stat(rpcSocket); err == nil {
+			return rpcSocket
+		}
+		return filepath.Join(runtimeDir, "daemon-go.sock")
 	}
-	return filepath.Join(runtimeDir, "striatum", "daemon-go.sock")
+
+	// Tier 2: user-scope socket derived from XDG_RUNTIME_DIR (user-unit or
+	// development topology).
+	userSocket := ""
+	if xdg := values["XDG_RUNTIME_DIR"]; xdg != "" {
+		userSocket = filepath.Join(xdg, "striatum", "daemon-go.sock")
+	} else {
+		userSocket = filepath.Join(os.TempDir(), "striatum", "daemon-go.sock")
+	}
+	if _, err := os.Stat(userSocket); err == nil {
+		return userSocket
+	}
+
+	// Tier 3: system socket fallback. When no env pins the location but the
+	// well-known system socket exists on disk, prefer it. This recovers
+	// non-login shells (scripts, agent lanes, sudo -i) that did not source
+	// /etc/profile.d/striatum.sh. The user socket (tier 2) above would have
+	// been returned already if it existed, so reaching here means it is absent.
+	if _, err := os.Stat(SystemDaemonSocket); err == nil {
+		return SystemDaemonSocket
+	}
+
+	// Tier 4: return the user-scope path as the default even if it does not
+	// exist — the caller gets a legible daemon_unreachable error naming the
+	// path it tried, rather than a confusing "no such file" stat error.
+	return userSocket
 }

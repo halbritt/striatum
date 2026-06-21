@@ -13,6 +13,123 @@ import (
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
 
+// TestDefaultSocketPathPrecedence covers the four-tier fallback introduced in
+// fix(cli) #541: explicit env > STRIATUM_DAEMON_RUNTIME_DIR > user socket (if
+// present) > system socket fallback (if present) > user socket default.
+//
+// The test uses only temp-dir sockets so it works on any host regardless of
+// whether /run/striatum/rpc/daemon-go.sock actually exists.
+func TestDefaultSocketPathPrecedence(t *testing.T) {
+	t.Run("ExplicitEnvSocketWins", func(t *testing.T) {
+		// When STRIATUM_DAEMON_SOCKET is set, ResolveConfig returns it verbatim
+		// regardless of any runtime-dir or XDG env.
+		cfg, err := ResolveConfig([]string{
+			"STRIATUM_DAEMON_SOCKET=/explicit/sock",
+			"STRIATUM_DAEMON_RUNTIME_DIR=/should/be/ignored",
+			"XDG_RUNTIME_DIR=/also/ignored",
+		}, "", "", "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SocketPath != "/explicit/sock" {
+			t.Fatalf("socket = %q, want /explicit/sock", cfg.SocketPath)
+		}
+	})
+
+	t.Run("RuntimeDirEnvSocketPath", func(t *testing.T) {
+		// When STRIATUM_DAEMON_RUNTIME_DIR is set and the rpc/ sub-socket exists,
+		// the CLI picks it up — matching the production system-unit layout.
+		tmp := t.TempDir()
+		rpcDir := filepath.Join(tmp, "rpc")
+		if err := os.MkdirAll(rpcDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		sock := filepath.Join(rpcDir, "daemon-go.sock")
+		if err := os.WriteFile(sock, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultSocketPath(map[string]string{
+			"STRIATUM_DAEMON_RUNTIME_DIR": tmp,
+		})
+		if got != sock {
+			t.Fatalf("socket = %q, want %q", got, sock)
+		}
+	})
+
+	t.Run("UserSocketPresentPreferredOverSystemFallback", func(t *testing.T) {
+		// When XDG_RUNTIME_DIR points to a dir where the user-scope socket exists,
+		// it is returned without probing the system socket. This preserves the
+		// user-unit / development-machine topology.
+		tmp := t.TempDir()
+		userSocketDir := filepath.Join(tmp, "striatum")
+		if err := os.MkdirAll(userSocketDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		userSock := filepath.Join(userSocketDir, "daemon-go.sock")
+		if err := os.WriteFile(userSock, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultSocketPath(map[string]string{
+			"XDG_RUNTIME_DIR": tmp,
+		})
+		if got != userSock {
+			t.Fatalf("socket = %q, want user socket %q", got, userSock)
+		}
+	})
+
+	t.Run("SystemSocketFallbackWhenUserSocketAbsent", func(t *testing.T) {
+		// Core #541 regression: when no STRIATUM_DAEMON_RUNTIME_DIR and the
+		// user-scope socket does not exist, defaultSocketPath should return
+		// SystemDaemonSocket when it exists on disk. This test only runs when
+		// the system daemon socket is present (i.e. striatumd is running as a
+		// system unit), which is the exact topology the fix targets.
+		if _, err := os.Stat(SystemDaemonSocket); err != nil {
+			t.Skipf("system socket %s not present on this host; skipping system-fallback subtest", SystemDaemonSocket)
+		}
+		tmp := t.TempDir() // XDG dir with NO user daemon socket inside
+		got := defaultSocketPath(map[string]string{
+			"XDG_RUNTIME_DIR": tmp,
+		})
+		if got != SystemDaemonSocket {
+			t.Fatalf("socket = %q, want system fallback %q when user socket absent and system socket present", got, SystemDaemonSocket)
+		}
+	})
+
+	t.Run("DefaultsToUserSocketWhenNeitherExists", func(t *testing.T) {
+		// When no env is set and no socket exists on disk (neither user nor system),
+		// return the user-scope path so the caller gets a legible daemon_unreachable
+		// error naming the path tried. We simulate "system socket absent" by using
+		// a nonexistent path — we can't override SystemDaemonSocket (const), so we
+		// verify the behaviour when XDG_RUNTIME_DIR points somewhere isolated and
+		// the system socket does NOT exist. On hosts where the system socket does
+		// exist we skip this variant (it would be superseded by the system fallback).
+		if _, err := os.Stat(SystemDaemonSocket); err == nil {
+			t.Skipf("system socket %s exists; tier-4 default path unreachable on this host", SystemDaemonSocket)
+		}
+		tmp := t.TempDir()
+		got := defaultSocketPath(map[string]string{
+			"XDG_RUNTIME_DIR": tmp,
+		})
+		wantUserSock := filepath.Join(tmp, "striatum", "daemon-go.sock")
+		if got != wantUserSock {
+			t.Fatalf("socket = %q, want user-default %q when neither socket exists", got, wantUserSock)
+		}
+	})
+
+	t.Run("RuntimeDirEnvFallsBackToBareSocket", func(t *testing.T) {
+		// When STRIATUM_DAEMON_RUNTIME_DIR is set but rpc/daemon-go.sock does not
+		// exist, fall back to <runtimeDir>/daemon-go.sock (non-nested layout).
+		tmp := t.TempDir()
+		got := defaultSocketPath(map[string]string{
+			"STRIATUM_DAEMON_RUNTIME_DIR": tmp,
+		})
+		want := filepath.Join(tmp, "daemon-go.sock")
+		if got != want {
+			t.Fatalf("socket = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestResolveConfigUsesExplicitAndEnvValues(t *testing.T) {
 	config, err := ResolveConfig([]string{
 		"STRIATUM_DAEMON_SOCKET=/env/socket",
