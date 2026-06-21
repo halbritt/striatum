@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- **Canonical operator read-surface `state_projection` (RFC 0157 / D251, #481).**
+  `run summary --json`, `dashboard --once`, and `status --json` now all emit one
+  additive, identical `state_projection` block — `{run_state, jobs:[{id,state}]}`
+  — so a script or AFK agent reads run/job state uniformly across the three verbs
+  instead of special-casing `.run.state` (summary) vs `.jobs_by_state` (dashboard)
+  vs `.runs[].state`/`.jobs{}` (status). `jobs[].id` is the stable
+  `workflow_job_id`; richer per-job fields (`attempt`, `role_id`) stay on
+  `run.summary`'s own `.jobs[]`. The block is strictly additive (no existing key
+  changes, no `schema_version` bump per RFC 0030), and `dashboard --once` also
+  gains a top-level `state` mirroring `state_projection.run_state`. A repo-wide
+  call (no single run in scope) yields `run_state: null` and an empty `jobs`.
+
 ### Fixed
 
 - **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a
