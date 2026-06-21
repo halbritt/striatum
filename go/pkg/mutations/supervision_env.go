@@ -237,7 +237,12 @@ func configuredLaneRunAsUser() string {
 	return laneUser
 }
 
-func currentOSUsername() string {
+// currentOSUsername is a package var (not a plain func) so tests can override the
+// daemon-user identity, mirroring the laneOSUserHome seam above. Without this seam,
+// a test asserting the lane_user resolution path is non-hermetic: it collapses to
+// daemon-user mode whenever the SUITE happens to run as the configured lane user
+// (configuredLaneRunAsUser returns "" when laneUser == daemonUser).
+var currentOSUsername = func() string {
 	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
 		return strings.TrimSpace(u.Username)
 	}

@@ -44,6 +44,28 @@ func TestCheckRunEnvGoBuiltinPrependsGoBinDir(t *testing.T) {
 	}
 }
 
+// TestCheckRunEnvGoBuiltinDisablesBuildVCS is the regression guard for the
+// worktree false-RED fix (#554): a go builtin's env must set
+// GOFLAGS=-buildvcs=false, because when the verified tree is a git worktree its
+// `.git` is a pointer file whose real gitdir lives OUTSIDE the strict bwrap
+// sandbox, so Go's VCS-status probe fails exit 128 and `go build`/`go test`
+// abort before compiling. A non-go check must NOT carry GOFLAGS (its hermetic
+// envelope is not widened). The BuiltinID alone drives this, so the ResolvedExec
+// is built directly to avoid a host go-toolchain dependency.
+func TestCheckRunEnvGoBuiltinDisablesBuildVCS(t *testing.T) {
+	goRex := ResolvedExec{CheckID: "builtin:go-build", BuiltinID: "builtin:go-build"}
+	if got := envValue(t, checkRunEnv(goRex, "/some/cwd", t.TempDir()), "GOFLAGS"); got != "-buildvcs=false" {
+		t.Fatalf("go builtin GOFLAGS = %q, want -buildvcs=false", got)
+	}
+
+	nonGo := ResolvedExec{CheckID: "x"} // not a builtin:go-* check
+	for _, e := range checkRunEnv(nonGo, "/some/cwd", t.TempDir()) {
+		if strings.HasPrefix(e, "GOFLAGS=") {
+			t.Fatalf("non-go check must not set GOFLAGS; got %q", e)
+		}
+	}
+}
+
 func envValue(t *testing.T, env []string, key string) string {
 	t.Helper()
 	prefix := key + "="

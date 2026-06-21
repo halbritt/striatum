@@ -85,6 +85,15 @@ func TestSpawnRunAsSpecResolvesLaneUser(t *testing.T) {
 	}
 	defer func() { laneOSUserHome = restore }()
 
+	// Pin the daemon-user identity to something that cannot equal the configured
+	// lane user, so the lane_user resolution path is asserted deterministically
+	// regardless of the OS user this suite runs as (#555 hermeticity fix —
+	// configuredLaneRunAsUser collapses to daemon-user mode when laneUser ==
+	// currentOSUsername()).
+	restoreUser := currentOSUsername
+	currentOSUsername = func() string { return "daemon-not-the-lane-user" }
+	defer func() { currentOSUsername = restoreUser }()
+
 	spec, err := spawnRunAsSpec()
 	if err != nil {
 		t.Fatalf("spawnRunAsSpec: %v", err)

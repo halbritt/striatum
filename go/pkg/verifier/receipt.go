@@ -400,6 +400,15 @@ func checkRunEnv(rex ResolvedExec, cwd, scratch string) []string {
 			// GOMODCACHE) offline; an uncached toolchain fails honestly (the strict
 			// sandbox has no network), rather than silently downgrading.
 			"GOTOOLCHAIN=auto",
+			// GOFLAGS=-buildvcs=false disables Go's VCS-status probe during build/test.
+			// When the verified tree is a git WORKTREE, its `.git` is a POINTER file whose
+			// real gitdir lives OUTSIDE the strict bwrap sandbox; Go's VCS probe then fails
+			// with "error obtaining VCS status ... Use -buildvcs=false" (exit 128) and
+			// `go build`/`go test` ABORT before compiling — a false RED. (`go vet` does not
+			// stamp a binary, so this is harmless there.) The verifier already self-pins
+			// the striatum binary SHA as its honest binding, so it does NOT rely on Go's
+			// VCS stamp; dropping it costs no provenance.
+			"GOFLAGS=-buildvcs=false",
 		}
 		if mod := hostGoModCache(); mod != "" {
 			goEnv = append(goEnv, "GOMODCACHE="+mod)
