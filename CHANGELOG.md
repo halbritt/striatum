@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **driver self-heal: the detached `run drive` auto-driver survives a daemon
+  restart instead of abandoning a live run, and is re-armed after an escalation
+  resolve (#513, #505, #261).** A daemon restart briefly drops the unix socket;
+  the next `run drive` invoke used to surface `daemon_unreachable` (exit 11) and
+  exit, abandoning a 9-job resumable run until an operator noticed (#513). The
+  driver now reconnects with bounded exponential backoff (default 30s budget,
+  250ms→2s steps) on transient `daemon_unreachable`/socket-missing errors, then
+  gives up loudly so a genuinely dead daemon still fails; and the generated
+  `striatum-drive-<run>` transient unit now carries `Restart=on-failure` +
+  `RestartSec=2s` (bounded by `StartLimit*`) so a driver that crashes before the
+  in-loop reconnect catches it is restarted by systemd. Separately,
+  `escalation resolve` now advertises `run drive --run-id <id>` in its
+  `next_actions` when it leaves the run `running` with claimable work — parity
+  with `checkpoint resolve`'s re-arm hint (#505), so resolving a blocker no
+  longer silently stalls the run with no driver attached. (#261's launched-lane
+  teardown on `needs_operator`/`waiting_human` was already shipped; it is closed
+  by the above self-heal cluster.)
+
 - **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a
   SUBDIRECTORY (e.g. striatum's own `go/`), and a failing builtin surfaces its stderr
   (#515).** `striatum verifier run --check-id builtin:go-* --cwd <repo-root>` ran
