@@ -25,8 +25,119 @@ func TestHTTPHandlerInitializeDirectPost(t *testing.T) {
 	if response.ID != "init" || response.Error != nil {
 		t.Fatalf("initialize response = %#v", response)
 	}
-	if response.Result["protocolVersion"] != protocolVersion {
-		t.Fatalf("protocolVersion = %#v", response.Result["protocolVersion"])
+	// #557: a request that names NO protocolVersion negotiates the server's
+	// latest supported version (it is treated like an unsupported request).
+	if response.Result["protocolVersion"] != latestProtocolVersion {
+		t.Fatalf("protocolVersion = %#v, want latest %q", response.Result["protocolVersion"], latestProtocolVersion)
+	}
+}
+
+// #557: the `initialize` POST response carries a non-empty Mcp-Session-Id header
+// so a spec-compliant streamable-HTTP client (codex) considers the server
+// initialized and stops falling back to a hand-rolled HTTP path that intermittently
+// failed to claim work.
+func TestHTTPHandlerInitializeReturnsSessionIDHeader(t *testing.T) {
+	handler, _, _, _ := newTestHTTPHandler(t)
+	recorder := postJSON(t, handler, EndpointPath, `{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-06-18"}}`, "")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	sessionID := recorder.Header().Get(HeaderMCPSessionID)
+	if sessionID == "" {
+		t.Fatalf("initialize response missing %s header; headers=%#v", HeaderMCPSessionID, recorder.Header())
+	}
+	if !handler.isIssuedSession(sessionID) {
+		t.Fatalf("issued session id %q not recorded in the issued-set", sessionID)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json (codex accepts JSON for a single initialize response)", got)
+	}
+}
+
+// #557: protocol-version negotiation. A client that requests a supported version
+// gets exactly that version back (so 2025-06-18 streamable-HTTP and legacy
+// 2024-11-05 HTTP+SSE both negotiate their own); a client requesting an
+// unsupported version gets the server's latest supported version.
+func TestHTTPHandlerInitializeNegotiatesProtocolVersion(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested string
+		want      string
+	}{
+		{name: "streamable-http 2025-06-18 echoed", requested: "2025-06-18", want: "2025-06-18"},
+		{name: "interim 2025-03-26 echoed", requested: "2025-03-26", want: "2025-03-26"},
+		{name: "legacy 2024-11-05 preserved (claude path)", requested: "2024-11-05", want: "2024-11-05"},
+		{name: "unsupported version falls back to latest", requested: "1999-01-01", want: latestProtocolVersion},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, _, _, _ := newTestHTTPHandler(t)
+			body := `{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"` + tc.requested + `"}}`
+			recorder := postJSON(t, handler, EndpointPath, body, "")
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			response := decodeTestResponse(t, recorder)
+			if response.Error != nil {
+				t.Fatalf("initialize error = %#v", response.Error)
+			}
+			if response.Result["protocolVersion"] != tc.want {
+				t.Fatalf("requested %q -> protocolVersion %#v, want %q", tc.requested, response.Result["protocolVersion"], tc.want)
+			}
+			// every initialize, regardless of negotiated version, still mints a
+			// session-id header (the legacy 2024-11-05 client simply ignores it).
+			if recorder.Header().Get(HeaderMCPSessionID) == "" {
+				t.Fatalf("requested %q: missing %s header", tc.requested, HeaderMCPSessionID)
+			}
+		})
+	}
+}
+
+// #557 backward-compat / streamable-HTTP correlation: a subsequent POST that
+// ECHOES the issued Mcp-Session-Id succeeds, AND a subsequent POST that OMITS it
+// ALSO succeeds (claude's HTTP+SSE client never sends one — the bearer is the
+// only auth, the session id is transport correlation, not a second auth factor).
+func TestHTTPHandlerSubsequentPostAcceptsWithAndWithoutSessionID(t *testing.T) {
+	handler, _, _, _ := newTestHTTPHandler(t)
+
+	// initialize to obtain a session id.
+	initRecorder := postJSON(t, handler, EndpointPath, `{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-06-18"}}`, "")
+	sessionID := initRecorder.Header().Get(HeaderMCPSessionID)
+	if sessionID == "" {
+		t.Fatalf("initialize did not return a session id")
+	}
+
+	// subsequent tools/list WITH the issued session id -> success.
+	withReq := newJSONRequest(t, EndpointPath, `{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{"repository_id":"repo_1"}}`, "read.secret")
+	withReq.Header.Set(HeaderMCPSessionID, sessionID)
+	withRec := httptest.NewRecorder()
+	handler.ServeHTTP(withRec, withReq)
+	if withRec.Code != http.StatusOK {
+		t.Fatalf("tools/list WITH session id status = %d, body = %s", withRec.Code, withRec.Body.String())
+	}
+	if resp := decodeTestResponse(t, withRec); resp.Error != nil {
+		t.Fatalf("tools/list WITH session id error = %#v", resp.Error)
+	}
+
+	// subsequent tools/list WITHOUT the session id -> still success (claude path).
+	withoutRec := postJSON(t, handler, EndpointPath, `{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{"repository_id":"repo_1"}}`, "read.secret")
+	if withoutRec.Code != http.StatusOK {
+		t.Fatalf("tools/list WITHOUT session id status = %d, body = %s", withoutRec.Code, withoutRec.Body.String())
+	}
+	if resp := decodeTestResponse(t, withoutRec); resp.Error != nil {
+		t.Fatalf("tools/list WITHOUT session id error = %#v", resp.Error)
+	}
+
+	// an UNKNOWN/forged session id must NOT hard-reject the request — the bearer
+	// is the auth boundary, and a reconnecting client may present an id we no
+	// longer hold.
+	unknownReq := newJSONRequest(t, EndpointPath, `{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{"repository_id":"repo_1"}}`, "read.secret")
+	unknownReq.Header.Set(HeaderMCPSessionID, "deadbeefdeadbeefdeadbeefdeadbeef")
+	unknownRec := httptest.NewRecorder()
+	handler.ServeHTTP(unknownRec, unknownReq)
+	if unknownRec.Code != http.StatusOK {
+		t.Fatalf("tools/list with UNKNOWN session id status = %d (must not hard-reject), body = %s", unknownRec.Code, unknownRec.Body.String())
 	}
 }
 

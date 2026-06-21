@@ -26,6 +26,28 @@ const (
 	serverName        = "striatum-local"
 	defaultAllowValue = "GET, POST, OPTIONS"
 
+	// HeaderMCPSessionID is the streamable-HTTP session-correlation header (MCP
+	// 2025-03-26 / 2025-06-18). #557: codex's spec-compliant streamable-HTTP MCP
+	// client treats the server as "not initialized" — and falls back to a
+	// hand-rolled HTTP path that intermittently fails to claim — unless the
+	// `initialize` response carries an `Mcp-Session-Id` header it can echo on
+	// every subsequent request. The daemon previously served the legacy
+	// 2024-11-05 HTTP+SSE transport with NO session header, so codex lanes
+	// registered a session but never claimed their work packet. We now mint a
+	// session id on `initialize` and echo it back. The id is MCP transport
+	// correlation, NOT a second auth factor — the bearer remains the only auth —
+	// so a request that OMITS the header is still accepted (claude's existing
+	// HTTP+SSE client never sends one; backward-compat is mandatory).
+	HeaderMCPSessionID = "Mcp-Session-Id"
+
+	// maxIssuedSessions bounds the in-memory issued-session set so a long-lived
+	// daemon that mints a session per lane initialize cannot grow it without
+	// limit. The set is lenient correlation state only: when it is full the
+	// oldest-issued ids are evicted, and an evicted (or never-issued) id is NOT
+	// hard-rejected — the bearer still governs auth — so eviction can never wedge
+	// a reconnecting client.
+	maxIssuedSessions = 4096
+
 	jsonrpcVersion = "2.0"
 
 	// HeaderBootEpoch is the request header a lane's MCP client presents to
@@ -48,6 +70,29 @@ const (
 	StaleDaemonIdentityCode = "stale_daemon_identity"
 )
 
+// supportedProtocolVersions is the server-supported MCP protocol-version set,
+// newest first. #557: `initialize` echoes the CLIENT's requested
+// params.protocolVersion when it appears here (so a 2025-06-18 streamable-HTTP
+// client like codex 0.140 negotiates 2025-06-18, and a legacy 2024-11-05 client
+// like claude's HTTP+SSE path still gets 2024-11-05 unchanged); a client that
+// requests an unsupported (or no) version gets latestProtocolVersion. 2024-11-05
+// MUST stay in this set — dropping it would break claude's existing client.
+var supportedProtocolVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
+
+// latestProtocolVersion is the version returned when the client requests one the
+// server does not support (or requests none). It is the first (newest) entry of
+// supportedProtocolVersions.
+const latestProtocolVersion = "2025-06-18"
+
+func negotiateProtocolVersion(requested string) string {
+	for _, supported := range supportedProtocolVersions {
+		if requested == supported {
+			return requested
+		}
+	}
+	return latestProtocolVersion
+}
+
 const (
 	jsonrpcParseError     = -32700
 	jsonrpcInvalidRequest = -32600
@@ -65,6 +110,13 @@ type HTTPHandler struct {
 
 	mu       sync.Mutex
 	sessions map[string]*sseSession
+
+	// issuedMu guards the streamable-HTTP issued-session set (#557). It is
+	// separate from `mu` (which guards the SSE `sessions` map) so minting/looking
+	// up a streamable-HTTP session id never contends with an active SSE stream.
+	issuedMu       sync.Mutex
+	issuedSessions map[string]struct{}
+	issuedOrder    []string
 }
 
 type sseSession struct {
@@ -87,10 +139,11 @@ type jsonrpcError struct {
 
 func NewHTTPHandler(service Service) *HTTPHandler {
 	return &HTTPHandler{
-		Service:       service,
-		ServerName:    serverName,
-		ServerVersion: serverVersion(service),
-		sessions:      map[string]*sseSession{},
+		Service:        service,
+		ServerName:     serverName,
+		ServerVersion:  serverVersion(service),
+		sessions:       map[string]*sseSession{},
+		issuedSessions: map[string]struct{}{},
 	}
 }
 
@@ -186,7 +239,15 @@ func (h *HTTPHandler) servePost(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, response)
 		return
 	}
-	response, respond := h.handleBody(r.Context(), r, body)
+	response, respond, issuedSessionID := h.handleBody(r.Context(), r, body)
+	// #557: streamable-HTTP session correlation. handleBody mints a session id on
+	// an `initialize` request; surface it as the Mcp-Session-Id response header
+	// BEFORE writing the body so a spec-compliant client (codex) can echo it on
+	// subsequent requests. The header is harmless to clients that ignore it
+	// (claude's HTTP+SSE path).
+	if issuedSessionID != "" {
+		w.Header().Set(HeaderMCPSessionID, issuedSessionID)
+	}
 	if !respond {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -215,50 +276,64 @@ func (h *HTTPHandler) servePost(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *HTTPHandler) handleBody(ctx context.Context, r *http.Request, body []byte) (jsonrpcResponse, bool) {
+// handleBody parses and dispatches a single JSON-RPC request. The third return
+// value is the streamable-HTTP session id minted for an `initialize` request
+// (#557); it is empty for every other method and for the parse/validation error
+// paths. servePost surfaces it as the Mcp-Session-Id response header.
+func (h *HTTPHandler) handleBody(ctx context.Context, r *http.Request, body []byte) (jsonrpcResponse, bool, string) {
 	var payload map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
-		return errorResponse(nil, jsonrpcParseError, "invalid JSON: "+err.Error(), errorData("malformed_body", nil)), true
+		return errorResponse(nil, jsonrpcParseError, "invalid JSON: "+err.Error(), errorData("malformed_body", nil)), true, ""
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return errorResponse(nil, jsonrpcParseError, "request body must contain one JSON-RPC object", errorData("malformed_body", nil)), true
+		return errorResponse(nil, jsonrpcParseError, "request body must contain one JSON-RPC object", errorData("malformed_body", nil)), true, ""
 	}
 	if payload == nil {
-		return errorResponse(nil, jsonrpcInvalidRequest, "JSON-RPC request must be an object", errorData("schema_invalid", nil)), true
+		return errorResponse(nil, jsonrpcInvalidRequest, "JSON-RPC request must be an object", errorData("schema_invalid", nil)), true, ""
 	}
 	rawID, hasID := payload["id"]
 	requestID, validID := jsonrpcID(rawID)
 	if !validID {
-		return errorResponse(nil, jsonrpcInvalidRequest, "id must be a string, number, or null", errorData("schema_invalid", nil)), true
+		return errorResponse(nil, jsonrpcInvalidRequest, "id must be a string, number, or null", errorData("schema_invalid", nil)), true, ""
 	}
 	if payload["jsonrpc"] != jsonrpcVersion {
-		return errorResponse(requestID, jsonrpcInvalidRequest, "jsonrpc must be '2.0'", errorData("schema_invalid", nil)), true
+		return errorResponse(requestID, jsonrpcInvalidRequest, "jsonrpc must be '2.0'", errorData("schema_invalid", nil)), true, ""
 	}
 	method, ok := payload["method"].(string)
 	if !ok || method == "" {
-		return errorResponse(requestID, jsonrpcInvalidRequest, "method is required", errorData("schema_invalid", nil)), true
+		return errorResponse(requestID, jsonrpcInvalidRequest, "method is required", errorData("schema_invalid", nil)), true, ""
 	}
 	params, err := requestParams(payload)
 	if err != nil {
-		return errorResponse(requestID, jsonrpcInvalidParams, err.Error(), errorData("schema_invalid", nil)), true
+		return errorResponse(requestID, jsonrpcInvalidParams, err.Error(), errorData("schema_invalid", nil)), true, ""
+	}
+
+	// #557: mint a streamable-HTTP session id for an `initialize` request and
+	// negotiate the protocol version from the client's request. The id is
+	// recorded in the lenient issued-set and surfaced to servePost so it lands on
+	// the Mcp-Session-Id response header. Non-initialize methods get no id.
+	var issuedSessionID string
+	if method == "initialize" {
+		issuedSessionID = h.newIssuedSession()
 	}
 
 	result, rpcErr := h.dispatch(ctx, r, requestID, method, params)
 	if !hasID {
-		return jsonrpcResponse{}, false
+		return jsonrpcResponse{}, false, issuedSessionID
 	}
 	if rpcErr != nil {
-		return jsonrpcResponse{JSONRPC: jsonrpcVersion, ID: requestID, Error: rpcErr}, true
+		return jsonrpcResponse{JSONRPC: jsonrpcVersion, ID: requestID, Error: rpcErr}, true, issuedSessionID
 	}
-	return jsonrpcResponse{JSONRPC: jsonrpcVersion, ID: requestID, Result: result}, true
+	return jsonrpcResponse{JSONRPC: jsonrpcVersion, ID: requestID, Result: result}, true, issuedSessionID
 }
 
 func (h *HTTPHandler) dispatch(ctx context.Context, r *http.Request, requestID any, method string, params map[string]any) (map[string]any, *jsonrpcError) {
 	switch method {
 	case "initialize":
-		return h.initializeResult(), nil
+		requestedVersion, _ := params["protocolVersion"].(string)
+		return h.initializeResult(negotiateProtocolVersion(requestedVersion)), nil
 	case "notifications/initialized":
 		return map[string]any{}, nil
 	case "tools/list":
@@ -302,7 +377,7 @@ func (h *HTTPHandler) dispatch(ctx context.Context, r *http.Request, requestID a
 	}
 }
 
-func (h *HTTPHandler) initializeResult() map[string]any {
+func (h *HTTPHandler) initializeResult(negotiatedVersion string) map[string]any {
 	name := h.ServerName
 	if name == "" {
 		name = serverName
@@ -311,8 +386,11 @@ func (h *HTTPHandler) initializeResult() map[string]any {
 	if version == "" {
 		version = serverVersion(h.Service)
 	}
+	if negotiatedVersion == "" {
+		negotiatedVersion = protocolVersion
+	}
 	return map[string]any{
-		"protocolVersion": protocolVersion,
+		"protocolVersion": negotiatedVersion,
 		"serverInfo": map[string]any{
 			"name":    name,
 			"version": version,
@@ -344,6 +422,45 @@ func (h *HTTPHandler) session(id string) *sseSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.sessions[id]
+}
+
+// newIssuedSession mints a streamable-HTTP session id (#557), records it in the
+// bounded, lenient issued-set, and returns it. The set is FIFO-evicted past
+// maxIssuedSessions so a long-lived daemon cannot grow it without limit;
+// eviction is harmless because isIssuedSession is advisory only — the bearer is
+// the auth boundary, and an unknown/evicted id is never hard-rejected.
+func (h *HTTPHandler) newIssuedSession() string {
+	id := newSessionID()
+	h.issuedMu.Lock()
+	defer h.issuedMu.Unlock()
+	if h.issuedSessions == nil {
+		h.issuedSessions = map[string]struct{}{}
+	}
+	if _, exists := h.issuedSessions[id]; !exists {
+		h.issuedSessions[id] = struct{}{}
+		h.issuedOrder = append(h.issuedOrder, id)
+		for len(h.issuedOrder) > maxIssuedSessions {
+			oldest := h.issuedOrder[0]
+			h.issuedOrder = h.issuedOrder[1:]
+			delete(h.issuedSessions, oldest)
+		}
+	}
+	return id
+}
+
+// isIssuedSession reports whether id is one this handler minted. It is advisory:
+// callers MUST NOT hard-reject an unknown id, because the bearer is the real
+// auth and a client that reconnects (or a request that omits the header) must
+// still be served. It exists only so diagnostics/future correlation can tell an
+// echoed-back id from a forged one without changing the request's fate.
+func (h *HTTPHandler) isIssuedSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	h.issuedMu.Lock()
+	defer h.issuedMu.Unlock()
+	_, ok := h.issuedSessions[id]
+	return ok
 }
 
 func (h *HTTPHandler) endpointURL(r *http.Request, sessionID string) string {
