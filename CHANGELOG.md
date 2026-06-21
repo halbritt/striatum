@@ -17,7 +17,7 @@
   fresh-session retry, so one blip no longer takes down a committee run. New
   per-workflow override `recovery_policy.max_reviewer_unsealed_requeues`.
 - **recovery: a deliverable a per-job lane WROTE but never sealed is salvaged from
-  its per-job worktree instead of discarded (#530 / D254).** When a `claude_code`
+  its per-job worktree instead of discarded (#530 / D256).** When a `claude_code`
   (or any per-job) lane committed its required artifact into its isolated worktree
   and then exited unsealed before `artifact.publish` (e.g. a transient API outage
   during optional memory wind-down), recovery used to find nothing — the
