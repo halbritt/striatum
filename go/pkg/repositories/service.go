@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/admin"
 	"github.com/halbritt/striatum/go/pkg/blob"
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/rpc"
@@ -49,9 +50,24 @@ func (s Service) Add(ctx context.Context, envelope rpc.Envelope) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	stateDir, err := operationalScratch(repo, boolParam(envelope.Params, "init"))
+	init := boolParam(envelope.Params, "init")
+	stateDir, err := operationalScratch(repo, init)
 	if err != nil {
 		return nil, err
+	}
+	// #537 / #539: when the operator initializes operational scratch
+	// (`repo add --init`), provision the committee POSIX ACLs so a freshly
+	// clone/worktree-registered repo supports `review_only_artifact` lanes (the
+	// lane can write its staging path) and so lane-written committee provenance
+	// stays operator-manageable without sudo (inheritable owner default ACL).
+	// Mirrors the convention repos set up before the ACL convention already carry.
+	// Best-effort and idempotent: applies on both fresh registration and re-adopt,
+	// no-op for owner-run lanes / missing lane user / no setfacl; a failure is
+	// surfaced in the result, never fatal to registration.
+	var aclProvisioned bool
+	var aclErr error
+	if init {
+		aclProvisioned, aclErr = admin.ProvisionCommitteeACLsResult(repo)
 	}
 	identity, err := repoIdentity(repo)
 	if err != nil {
@@ -82,6 +98,9 @@ func (s Service) Add(ctx context.Context, envelope rpc.Envelope) (map[string]any
 		result["already_registered"] = true
 		if bucket := rowBlobBucket(existing); bucket != "" {
 			result["blob_bucket"] = bucket
+		}
+		if init {
+			result = admin.WithCommitteeACLResult(result, aclProvisioned, aclErr)
 		}
 		return result, nil
 	}
@@ -147,6 +166,9 @@ func (s Service) Add(ctx context.Context, envelope rpc.Envelope) (map[string]any
 	}
 	if blobBucket != "" {
 		result["blob_bucket"] = blobBucket
+	}
+	if init {
+		result = admin.WithCommitteeACLResult(result, aclProvisioned, aclErr)
 	}
 	return result, nil
 }
