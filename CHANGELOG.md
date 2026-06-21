@@ -4,6 +4,25 @@
 
 ### Fixed
 
+- **Review findings are operator-readable from `striatum status` / dashboard, and a
+  first-dissent revision route records how many sibling final reviewers were still in
+  flight (#476, #506 — legibility).** A blocking review's actual objections (its
+  `REVIEW.md` finding) are commonly published `placement: blob_exhaust` — off the run
+  branch and absent from `evidence export` bodies — so adjudicating a `needs_revision`
+  (override vs. another cycle) previously meant reconstructing the reviewer's reasoning
+  from PTY-escape noise. The `latest_non_accepting_review_verdicts` projection (in
+  `status` and the cross-run dashboard) now carries the verdict `rationale`, a bounded
+  single-line `rationale_excerpt`, the linked `findings_artifact_id`, and a
+  `findings_hint` naming the exact `striatum artifact get-content <id>` read; the
+  reviewer's reasoning is inlined into the `recovery_action`. Separately, when one
+  final reviewer records `needs_revision` while a sibling gating reviewer feeding the
+  same downstream gate is still in flight, the `revision.cycle_routed` event and the
+  route result now record `in_flight_sibling_gating_seats`, so the first-dissent
+  short-circuit is visible in `striatum why <run_id>` and the run summary. Both are
+  pure read/observability changes — no routing-behavior, schema, or wire change. The
+  accepted-semantics halves of these issues (the all-N/quorum debounce, RFC 0154/D250;
+  and the `code_change` cycle-width / rebuttal policy, RFC 0161/D253) remain RFC-gated
+  and are NOT changed here.
 - **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a
   SUBDIRECTORY (e.g. striatum's own `go/`), and a failing builtin surfaces its stderr
   (#515).** `striatum verifier run --check-id builtin:go-* --cwd <repo-root>` ran

@@ -118,9 +118,14 @@ func dashboardAllStatus(ctx context.Context, runner db.Runner, repositoryID stri
 		return nil, err
 	}
 	nonAccepting, err := collectRows(ctx, runner,
+		// #506: carry the rationale + linked findings artifact so the cross-run
+		// dashboard surfaces WHY a review blocked, not just THAT it did. Enriched
+		// below with a rationale excerpt and an `artifact get-content` hint, matching
+		// the per-run status projection.
 		`SELECT DISTINCT ON (v.job_id)
 		        v.verdict_id, v.run_id, v.job_id, j.workflow_job_id,
-		        v.verdict, v.posture, v.created_at
+		        v.verdict, v.posture, v.created_at,
+		        v.rationale, v.findings_artifact_id
 		   FROM striatumd.verdicts v
 		   JOIN striatumd.jobs j
 		     ON j.repository_id = v.repository_id
@@ -132,6 +137,9 @@ func dashboardAllStatus(ctx context.Context, runner db.Runner, repositoryID stri
 	)
 	if err != nil {
 		return nil, err
+	}
+	for _, row := range nonAccepting {
+		decorateReviewFindings(row)
 	}
 	verdictPostures, err := collectRows(ctx, runner,
 		`SELECT v.posture, v.verdict, COUNT(*) AS count

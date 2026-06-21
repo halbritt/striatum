@@ -42,14 +42,14 @@ func TestStatusExcludesSupersededNonAcceptingVerdicts(t *testing.T) {
 		createdAt:              now,
 	})
 	seedReviewJobVerdictOnly(t, ctx, runner, statusVerdictFixture{
-		repoID:        repoID,
-		runID:         supersededRunID,
-		jobID:         "job_review_superseded",
-		sessionID:     "sess_review_superseded_2",
-		ordinal:       2,
-		verdictID:     "verdict_superseded_a2_accept",
-		verdict:       "accept",
-		createdAt:     now.Add(time.Hour),
+		repoID:    repoID,
+		runID:     supersededRunID,
+		jobID:     "job_review_superseded",
+		sessionID: "sess_review_superseded_2",
+		ordinal:   2,
+		verdictID: "verdict_superseded_a2_accept",
+		verdict:   "accept",
+		createdAt: now.Add(time.Hour),
 	})
 
 	// Run B: a review job with a live, non-superseded needs_revision verdict.
@@ -119,7 +119,14 @@ type statusVerdictFixture struct {
 	verdictID              string
 	verdict                string
 	supersededByDecisionID string
-	createdAt              time.Time
+	// rationale defaults to "rev" when empty (preserving existing callers); set it
+	// to exercise the #506 rationale_excerpt legibility projection.
+	rationale string
+	// findingsArtifactID, when set, links the verdict to a findings artifact so the
+	// #506 findings_hint surfaces (the verdict's FK requires the artifact to exist;
+	// callers that set this must seed the artifact row first).
+	findingsArtifactID string
+	createdAt          time.Time
 }
 
 // seedReviewJobWithVerdict inserts a review job (its own job row + author-distinct
@@ -162,13 +169,21 @@ func seedReviewJobVerdictOnly(t *testing.T, ctx context.Context, runner db.Runne
 	if f.supersededByDecisionID != "" {
 		superseded = f.supersededByDecisionID
 	}
+	rationale := f.rationale
+	if rationale == "" {
+		rationale = "rev"
+	}
+	var findingsArtifactID any
+	if f.findingsArtifactID != "" {
+		findingsArtifactID = f.findingsArtifactID
+	}
 	if err := runner.Exec(ctx, `
 		INSERT INTO striatumd.verdicts (
 		  repository_id, verdict_id, run_id, job_id, session_id, verdict,
-		  rationale, created_at, posture, superseded_by_decision_id
-		) VALUES ($1,$2,$3,$4,$5,$6,'rev',$7,'neutral',$8)`,
+		  rationale, created_at, posture, superseded_by_decision_id, findings_artifact_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'neutral',$9,$10)`,
 		f.repoID, f.verdictID, f.runID, f.jobID, f.sessionID, f.verdict,
-		f.createdAt, superseded); err != nil {
+		rationale, f.createdAt, superseded, findingsArtifactID); err != nil {
 		t.Fatalf("seed verdict %s: %v", f.verdictID, err)
 	}
 }

@@ -123,14 +123,28 @@ func routeRevisionCycle(
 	}
 
 	iteration := priorRoutings + 1
+	// #476 legibility (RFC 0154 alternative A): record how many SIBLING gating review
+	// seats — other reviewers feeding the same downstream gate — were still in flight
+	// (non-terminal) at the instant this needs_revision routed to the cycle target.
+	// Today's behavior routes on the FIRST blocking dissent regardless of siblings
+	// (the debounce that would WAIT for them is the RFC 0154 / D250 opt-in, not yet
+	// implemented). Surfacing the count makes the short-circuit visible in
+	// `striatum why <run_id>` and the run summary so an operator can apply the
+	// "wait for the cohort" best-practice by hand. This is pure observability — it
+	// does NOT change the routing decision (gate semantics are unchanged).
+	inFlightSiblings, sibErr := inFlightSiblingGatingSeats(ctx, runner, repositoryID, job)
+	if sibErr != nil {
+		return nil, false, sibErr
+	}
 	if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "revision.cycle_routed", sessionID, job["job_id"], nil, nil, leaseID, map[string]any{
-		"from_workflow_job_id": cycle.from,
-		"to_workflow_job_id":   cycle.to,
-		"target_job_id":        target["job_id"],
-		"verdict":              verdict,
-		"iteration":            iteration,
-		"max_iterations":       cycle.maxIterations,
-		"allow_same_lane":      cycle.allowSameLane,
+		"from_workflow_job_id":           cycle.from,
+		"to_workflow_job_id":             cycle.to,
+		"target_job_id":                  target["job_id"],
+		"verdict":                        verdict,
+		"iteration":                      iteration,
+		"max_iterations":                 cycle.maxIterations,
+		"allow_same_lane":                cycle.allowSameLane,
+		"in_flight_sibling_gating_seats": inFlightSiblings,
 	}); err != nil {
 		return nil, false, err
 	}
@@ -150,15 +164,16 @@ func routeRevisionCycle(
 			return nil, false, err
 		}
 		return map[string]any{
-			"status":               "revision_routed",
-			"job_id":               job["job_id"],
-			"verdict":              verdict,
-			"cycle_target_job_id":  target["job_id"],
-			"cycle_to":             cycle.to,
-			"cycle_iteration":      iteration,
-			"cycle_max_iterations": cycle.maxIterations,
-			"target_message_id":    nil,
-			"target_already_open":  true,
+			"status":                         "revision_routed",
+			"job_id":                         job["job_id"],
+			"verdict":                        verdict,
+			"cycle_target_job_id":            target["job_id"],
+			"cycle_to":                       cycle.to,
+			"cycle_iteration":                iteration,
+			"cycle_max_iterations":           cycle.maxIterations,
+			"target_message_id":              nil,
+			"target_already_open":            true,
+			"in_flight_sibling_gating_seats": inFlightSiblings,
 		}, true, nil
 	}
 
@@ -180,15 +195,63 @@ func routeRevisionCycle(
 	}
 
 	return map[string]any{
-		"status":               "revision_routed",
-		"job_id":               job["job_id"],
-		"verdict":              verdict,
-		"cycle_target_job_id":  target["job_id"],
-		"cycle_to":             cycle.to,
-		"cycle_iteration":      iteration,
-		"cycle_max_iterations": cycle.maxIterations,
-		"target_message_id":    messageID,
+		"status":                         "revision_routed",
+		"job_id":                         job["job_id"],
+		"verdict":                        verdict,
+		"cycle_target_job_id":            target["job_id"],
+		"cycle_to":                       cycle.to,
+		"cycle_iteration":                iteration,
+		"cycle_max_iterations":           cycle.maxIterations,
+		"target_message_id":              messageID,
+		"in_flight_sibling_gating_seats": inFlightSiblings,
 	}, true, nil
+}
+
+// inFlightSiblingGatingSeats counts how many OTHER gating review seats — reviewers
+// feeding the same downstream gate as the routing review job — are still in flight
+// (a non-terminal latest-attempt job state) at the moment this review's
+// needs_revision routes to its revision cycle (#476 legibility / RFC 0154
+// alternative A). It is read-only: it never alters the route. The cohort is the
+// frozen gating-seat denominator the accept-path quorum already freezes
+// (resolveQuorumDeclaration), so the count is consistent with the downstream gate's
+// declared panel. The routing seat itself is excluded. When the review feeds no gate
+// with a declared gating panel, the count is 0 (a single-reviewer cycle has no
+// siblings to wait on).
+func inFlightSiblingGatingSeats(ctx context.Context, runner any, repositoryID string, job map[string]any) (int, error) {
+	runID := fmt.Sprint(job["run_id"])
+	selfSeat := fmt.Sprint(job["workflow_job_id"])
+	gates, err := downstreamJobs(ctx, runner, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil {
+		return 0, err
+	}
+	// Deduplicate sibling seats across all downstream gates the review feeds; a seat
+	// is "in flight" if its latest-attempt job is in a non-terminal state. Count each
+	// distinct sibling seat at most once.
+	counted := map[string]bool{}
+	inFlight := 0
+	for _, gate := range gates {
+		decl, derr := resolveQuorumDeclaration(ctx, runner, repositoryID, fmt.Sprint(gate["job_id"]))
+		if derr != nil {
+			return 0, derr
+		}
+		for _, seatID := range decl.Seats {
+			if seatID == selfSeat || counted[seatID] {
+				continue
+			}
+			counted[seatID] = true
+			seatJob, jerr := latestJobForWorkflowID(ctx, runner, repositoryID, runID, seatID)
+			if jerr != nil {
+				return 0, jerr
+			}
+			if seatJob == nil {
+				continue
+			}
+			if !isTerminalJobState(fmt.Sprint(seatJob["state"])) {
+				inFlight++
+			}
+		}
+	}
+	return inFlight, nil
 }
 
 // isDeclaredCycleTarget reports whether the given job's workflow_job_id is the

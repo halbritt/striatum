@@ -673,9 +673,19 @@ func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryI
 		// never refreshed) that silently blocks finalization with an
 		// otherwise-complete job graph. Surfacing it lets status hand the operator a
 		// precise recovery action instead of a buried verdict row.
+		//
+		// #506: also project the verdict's rationale and the linked findings
+		// artifact id. A blocking review's actual objections (its REVIEW.md finding)
+		// are commonly published with placement=blob_exhaust — off the run branch and
+		// not in `evidence export` bodies — so an operator adjudicating a
+		// needs_revision (override vs. another cycle) previously had to reconstruct
+		// them from the PTY trajectory. Carrying findings_artifact_id + a rationale
+		// excerpt here, plus a `findings_hint` naming `artifact get-content`, makes
+		// the reviewer's reasoning operator-readable from `striatum status` itself.
 		`SELECT DISTINCT ON (v.job_id)
 		        v.verdict_id, v.run_id, v.job_id, j.workflow_job_id,
 		        v.verdict, v.posture, v.created_at,
+		        v.rationale, v.findings_artifact_id,
 		        EXISTS (
 		          SELECT 1
 		            FROM striatumd.job_dependencies dep
@@ -701,17 +711,78 @@ func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryI
 		jobID := stringFrom(row, "job_id")
 		workflowJobID := stringFrom(row, "workflow_job_id")
 		verdict := stringFrom(row, "verdict")
+		decorateReviewFindings(row)
 		if row["upstream_revised_after_verdict"] == true {
 			row["recovery_action"] = fmt.Sprintf(
-				"stale review: %s was revised after this %s verdict — rerun review job %s (run.retry_job), or supersede the verdict via `recovery invalidate-job %s <decision_id>` after recording the decision. Finalization stays blocked until this review's latest verdict is accepting.",
-				workflowJobID, verdict, jobID, jobID)
+				"stale review: %s was revised after this %s verdict — rerun review job %s (run.retry_job), or supersede the verdict via `recovery invalidate-job %s <decision_id>` after recording the decision. Finalization stays blocked until this review's latest verdict is accepting.%s",
+				workflowJobID, verdict, jobID, jobID, reviewFindingsSuffix(row))
 		} else {
 			row["recovery_action"] = fmt.Sprintf(
-				"non-accepting review %s (%s): address the findings and rerun, or accept-with-override via `override-verdict`.",
-				workflowJobID, verdict)
+				"non-accepting review %s (%s): address the findings and rerun, or accept-with-override via `override-verdict`.%s",
+				workflowJobID, verdict, reviewFindingsSuffix(row))
 		}
 	}
 	return rows, nil
+}
+
+// reviewRationaleExcerptLimit bounds how many bytes of a verdict's rationale are
+// inlined into a non-accepting verdict projection. The full rationale stays in
+// the `rationale` field; the excerpt is the human-glanceable head so a status
+// frame stays compact (#506).
+const reviewRationaleExcerptLimit = 280
+
+// decorateReviewFindings enriches one non-accepting verdict row with the
+// operator-readable findings legibility fields (#506): a bounded `rationale_excerpt`
+// (the head of the verdict's free-text rationale) and a `findings_hint` naming the
+// exact read that fetches the linked finding body. The full `rationale` and
+// `findings_artifact_id` projected by the query are left intact for programmatic
+// consumers (dashboard / web UI). When no finding artifact is linked and the
+// rationale is empty, no hint is added — there is nothing to point at.
+func decorateReviewFindings(row map[string]any) {
+	rationale := strings.TrimSpace(stringFrom(row, "rationale"))
+	if excerpt := rationaleExcerpt(rationale); excerpt != "" {
+		row["rationale_excerpt"] = excerpt
+	}
+	findingsArtifactID := strings.TrimSpace(stringFrom(row, "findings_artifact_id"))
+	if findingsArtifactID != "" {
+		row["findings_hint"] = fmt.Sprintf(
+			"read the reviewer's findings: `striatum artifact get-content %s` (the REVIEW finding may be placement=blob_exhaust — off the run branch and not in `evidence export` bodies).",
+			findingsArtifactID)
+	}
+}
+
+// reviewFindingsSuffix returns the trailing legibility clause appended to a
+// non-accepting verdict's recovery_action (#506), so the operator sees the
+// reviewer's actual objection (or how to fetch it) in the same line that tells
+// them how to recover, instead of having to spelunk the PTY trajectory.
+func reviewFindingsSuffix(row map[string]any) string {
+	excerpt, _ := row["rationale_excerpt"].(string)
+	hint, _ := row["findings_hint"].(string)
+	switch {
+	case excerpt != "" && hint != "":
+		return " Reviewer said: " + excerpt + " — " + hint
+	case excerpt != "":
+		return " Reviewer said: " + excerpt
+	case hint != "":
+		return " " + hint
+	default:
+		return ""
+	}
+}
+
+// rationaleExcerpt returns the head of a rationale bounded to
+// reviewRationaleExcerptLimit bytes, collapsing interior runs of whitespace to
+// single spaces so a multi-line rationale renders on one status line. Truncation
+// is marked with an ellipsis. An empty rationale yields an empty excerpt.
+func rationaleExcerpt(rationale string) string {
+	collapsed := strings.Join(strings.Fields(rationale), " ")
+	if collapsed == "" {
+		return ""
+	}
+	if len(collapsed) <= reviewRationaleExcerptLimit {
+		return collapsed
+	}
+	return strings.TrimSpace(collapsed[:reviewRationaleExcerptLimit]) + "…"
 }
 
 func statusVerdictsByPosture(ctx context.Context, runner db.Runner, repositoryID, runID string) (map[string]map[string]int, error) {
