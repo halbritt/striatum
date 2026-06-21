@@ -56,13 +56,17 @@ type BuiltinCheck struct {
 // offline and deterministic (no module fetch) so a builtin run never needs network.
 var builtinRegistry = map[string]BuiltinCheck{
 	"builtin:go-test": {
-		ID:          "builtin:go-test",
-		Argv:        []string{"go", "test", "./..."},
+		ID: "builtin:go-test",
+		// -buildvcs=false: per-job worktrees have a .git pointer file, not a real
+		// repository. Go's VCS-status probe fails under the strict bubblewrap sandbox
+		// (exit 128 "error obtaining VCS status"). The verifier self-pins the striatum
+		// binary SHA and does not rely on Go's VCS stamp, so disabling it is safe.
+		Argv:        []string{"go", "test", "-buildvcs=false", "./..."},
 		Description: "Run the project's Go test suite (go test ./...).",
 		NegativeControl: &NegativeControl{
 			// `go test` of a nonexistent package fails to compile/load → non-zero.
 			// A `go` that exits 0 here is not running tests at all → void.
-			Argv:        []string{"go", "test", "./striatum-negative-control-nonexistent-pkg-do-not-create/..."},
+			Argv:        []string{"go", "test", "-buildvcs=false", "./striatum-negative-control-nonexistent-pkg-do-not-create/..."},
 			Description: "go test against a nonexistent package must fail to load (non-zero).",
 		},
 	},
@@ -76,11 +80,15 @@ var builtinRegistry = map[string]BuiltinCheck{
 		},
 	},
 	"builtin:go-build": {
-		ID:          "builtin:go-build",
-		Argv:        []string{"go", "build", "./..."},
+		ID: "builtin:go-build",
+		// -buildvcs=false: per-job worktrees have a .git pointer file, not a real
+		// repository. Go's VCS-status probe fails under the strict bubblewrap sandbox
+		// (exit 128 "error obtaining VCS status"). The verifier self-pins the striatum
+		// binary SHA and does not rely on Go's VCS stamp, so disabling it is safe.
+		Argv:        []string{"go", "build", "-buildvcs=false", "./..."},
 		Description: "Build every package in the module (go build ./...).",
 		NegativeControl: &NegativeControl{
-			Argv:        []string{"go", "build", "./striatum-negative-control-nonexistent-pkg-do-not-create/..."},
+			Argv:        []string{"go", "build", "-buildvcs=false", "./striatum-negative-control-nonexistent-pkg-do-not-create/..."},
 			Description: "go build against a nonexistent package must fail (non-zero).",
 		},
 	},

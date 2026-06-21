@@ -415,6 +415,55 @@ func TestNegativeControlVoids(t *testing.T) {
 	}
 }
 
+// TestBuiltinGoBuildAndTestHaveBuildVCSFalse is the regression guard for #554:
+// per-job worktrees have a .git pointer file, and Go's VCS-status probe exits 128
+// under the strict bubblewrap sandbox. go-build and go-test must carry
+// -buildvcs=false so the probe is skipped. go-vet is unaffected (it stamps no
+// binary) and must NOT carry the flag.
+func TestBuiltinGoBuildAndTestHaveBuildVCSFalse(t *testing.T) {
+	for _, id := range []string{"builtin:go-build", "builtin:go-test"} {
+		bc, ok := ResolveBuiltin(id)
+		if !ok {
+			t.Fatalf("%s: not in registry", id)
+		}
+		var found bool
+		for _, arg := range bc.Argv {
+			if arg == "-buildvcs=false" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: registry argv must contain -buildvcs=false (worktree .git pointer + sandbox VCS probe exits 128); got %v", id, bc.Argv)
+		}
+		// Negative control must also carry the flag (parallel shape).
+		if bc.NegativeControl == nil {
+			t.Fatalf("%s: missing negative control", id)
+		}
+		var ncFound bool
+		for _, arg := range bc.NegativeControl.Argv {
+			if arg == "-buildvcs=false" {
+				ncFound = true
+				break
+			}
+		}
+		if !ncFound {
+			t.Errorf("%s: negative control argv must also contain -buildvcs=false; got %v", id, bc.NegativeControl.Argv)
+		}
+	}
+
+	// go-vet stamps no binary and must NOT carry the flag.
+	vetBC, ok := ResolveBuiltin("builtin:go-vet")
+	if !ok {
+		t.Fatal("builtin:go-vet: not in registry")
+	}
+	for _, arg := range vetBC.Argv {
+		if arg == "-buildvcs=false" {
+			t.Errorf("builtin:go-vet must NOT carry -buildvcs=false (it stamps no binary); got %v", vetBC.Argv)
+		}
+	}
+}
+
 // TestBuiltinResolvedExecSelfPins — a builtin resolves to the registry argv and
 // stamps the striatum self-pin + builtin markers (never VerifyBinary on argv[0]).
 func TestBuiltinResolvedExecSelfPins(t *testing.T) {
