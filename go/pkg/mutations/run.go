@@ -1137,7 +1137,8 @@ func runPrepare(ctx context.Context, runner any, repositoryID string, workflowPa
 			return nil, err
 		}
 	}
-	for _, edge := range edgeDependencyPairs(workflow, phaseIndex, true) {
+	dependencyEdges := edgeDependencyPairs(workflow, phaseIndex, true)
+	for _, edge := range dependencyEdges {
 		fromID := edge.fromID
 		toID := edge.toID
 		fromJobID := jobIDs[fromID]
@@ -1160,6 +1161,24 @@ func runPrepare(ctx context.Context, runner any, repositoryID string, workflowPa
 			VALUES ($1,$2,$3,$4::jsonb)
 			ON CONFLICT (repository_id, job_id, depends_on_job_id) DO NOTHING`,
 			repositoryID, toJobID, fromJobID, gateArg); err != nil {
+			return nil, err
+		}
+	}
+	// RFC 0133 fan-in barrier cutover — the live fan-out seam (#527). Record an
+	// immutable fan-in freeze point for every downstream join seat that has two or more
+	// upstream siblings, frozen at the confirmed run-branch tip. This is the missing
+	// production caller of recordFaninFreezePoint (D246's revisit trigger). It is a
+	// STRICT NO-OP unless STRIATUM_BARRIER_FANIN=1 (shadow default off) AND the branch
+	// is already confirmed, so on the default path it records nothing and the shipped
+	// D206 per-completion merge stays the sole, byte-for-byte-unchanged fan-in path.
+	frozenTip := ""
+	if state == "ready" && suggestedBranch != "" {
+		if tip, ferr := gitRevParseCommit(ctx, repoRoot, "refs/heads/"+suggestedBranch); ferr == nil {
+			frozenTip = tip
+		}
+	}
+	if tx, ok := runner.(db.TxRunner); ok {
+		if err := recordRunFaninFreezePoints(ctx, tx, repositoryID, runID, frozenTip, dependencyEdges); err != nil {
 			return nil, err
 		}
 	}

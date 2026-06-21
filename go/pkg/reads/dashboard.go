@@ -35,8 +35,11 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 			return nil, err
 		}
 		if len(latest) == 0 {
+			// RFC 0157 (D251): no run in scope -> the canonical projection is the
+			// repo-wide null/empty form, and the top-level `state` mirror is null.
 			return map[string]any{
 				"run_id":                     nil,
+				"state":                      nil,
 				"jobs_by_state":              map[string]int{},
 				"verdicts_by_state":          map[string]int{},
 				"blockers":                   map[string]int{},
@@ -44,6 +47,7 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 				"sessions":                   []any{},
 				"recent_events":              []any{},
 				"artifact_provenance_counts": map[string]int{},
+				"state_projection":           stateProjectionEmpty(),
 			}, nil
 		}
 		runID = stringFrom(latest[0], "run_id")
@@ -275,8 +279,21 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	}
 	decorateArtifactProvenance(artifactRows)
 
+	// RFC 0157 (D251): the additive canonical state projection. The dashboard is
+	// always single-run scoped (an explicit run_id, or the latest run resolved
+	// above), so the projection is populated. The dashboard ALSO gains a top-level
+	// `state` mirroring state_projection.run_state — the spec's TUI prose says the
+	// dashboard "shows run state," and a `--once` script consumer reasonably expects
+	// that scalar at the top level for parity with the rendered view. Existing keys
+	// (jobs_by_state, etc.) are untouched.
+	stateProjection, err := buildStateProjection(ctx, runner, repositoryID, runID)
+	if err != nil {
+		return nil, err
+	}
+
 	return map[string]any{
 		"run_id":                     runID,
+		"state":                      stateProjection["run_state"],
 		"jobs_by_state":              jobsByState,
 		"verdicts_by_state":          verdictCounts,
 		"blockers":                   blockerCounts,
@@ -284,5 +301,6 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 		"sessions":                   sessions,
 		"recent_events":              events,
 		"artifact_provenance_counts": artifactProvenanceCounts(artifactRows),
+		"state_projection":           stateProjection,
 	}, nil
 }

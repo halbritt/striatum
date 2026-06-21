@@ -12,6 +12,35 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-21 delta — lane-perms ACL cluster: #537/#539 FIXED, #512 → RFC 0143 (PR pending)
+
+Committee-run permission cluster surfaced by the prompt-committee dogfood:
+
+- **#537 (lane can't write) + #539 (daemon/operator can't manage) — FIXED.**
+  `striatum repo add --init` (live path `repo.add` → `repositories.Service.Add`;
+  also `repo.init`) now provisions the committee POSIX ACLs when lanes run as a
+  non-owner OS user (`STRIATUM_LANE_OS_USER`): `setfacl -R -m u:<lane>:rwx
+  -m d:u:<lane>:rwx -m d:u:<owner>:rwx` on the repo tree and `.striatum/worktrees`.
+  Same convention older repos carry; new helper `go/pkg/admin/repo_acl.go`
+  (mirrors `socket_acl.go`/`scratch_acl.go`). Best-effort/idempotent, no-op for
+  owner-run lanes / missing lane user / no setfacl; outcome surfaced as
+  `committee_acl_provisioned` / `committee_acl_error`. NB the system has **no**
+  shared lane/owner group — the convention is POSIX ACLs, and the inheritable
+  owner default ACL is what makes lane-created committee dirs daemon/operator-
+  manageable without sudo (#539). NOT deployed (PR pending); no daemon restart
+  needed (filesystem provisioning at adopt time).
+- **#512 (lane can't reseal across a daemon boot-epoch rotation) — routed RFC,
+  NOT implemented.** Security/authz: the lane's credential-resolution fallback
+  reaches the daemon's owner-only `0600` runtime `client-token`, which is the
+  full-authority **bootstrap admin** token; group-reading it (the issue's literal
+  suggestion) widens admin-token exposure to every lane and dissolves the
+  session-bound token trust model (#135/#296). The alternative (a durable
+  lane-readable session-scoped reseal token) is a new credential-distribution
+  mechanism. Both are decisions, not triage edits → **RFC 0143** stub on the PR
+  branch (`docs/rfcs/0143-lane-credential-survival-across-boot-epoch-rotation.md`,
+  status proposed). No token code touched. Interim recovery stays the operator
+  requeue (`supervise stop` → `session close` → `recovery auto`).
+
 ## 2026-06-20 delta — #515 builtin verifier verifies a nested Go module (merged + CLI deployed)
 
 The RFC 0134/0141 **builtin verifier** could not mint a passing receipt for

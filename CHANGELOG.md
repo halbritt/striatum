@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Added
+
+- **RFC 0133 fan-in barrier: `recordFaninFreezePoint` is now wired into a live
+  fan-out, in SHADOW (#527, the last build leg of #354; D254).** At run
+  materialization (`run.prepare`) the daemon now records an immutable fan-in
+  freeze point for every downstream join seat with two or more upstream siblings
+  (a single-upstream chain edge is skipped), declaring the sibling set against
+  the confirmed run-branch tip. This is the missing production caller D246's
+  revisit trigger named: with it, an opted-in run finally exercises the fan-in
+  barrier end-to-end (recorder → staging-at-completion hook → `barrier_assembly`
+  dispatcher → assembly). It is a **strict no-op unless `STRIATUM_BARRIER_FANIN=1`**
+  (the existing shadow opt-in, default OFF) and is **additive** — it only writes
+  the freeze record; the shipped D206 per-completion run-branch merge stays the
+  sole, byte-for-byte-unchanged fan-in path for every non-opted-in run. **The
+  default is NOT flipped**; the operator go-live flip (apply owner bundle 0013,
+  confirm the same-final-tree fixture against a real deployment, set
+  `STRIATUM_BARRIER_FANIN=1`, retire `fanInIntegrateRunBranch`) remains, and #354
+  stays open until then.
+- **Canonical operator read-surface `state_projection` (RFC 0157 / D251, #481).**
+  `run summary --json`, `dashboard --once`, and `status --json` now all emit one
+  additive, identical `state_projection` block — `{run_state, jobs:[{id,state}]}`
+  — so a script or AFK agent reads run/job state uniformly across the three verbs
+  instead of special-casing `.run.state` (summary) vs `.jobs_by_state` (dashboard)
+  vs `.runs[].state`/`.jobs{}` (status). `jobs[].id` is the stable
+  `workflow_job_id`; richer per-job fields (`attempt`, `role_id`) stay on
+  `run.summary`'s own `.jobs[]`. The block is strictly additive (no existing key
+  changes, no `schema_version` bump per RFC 0030), and `dashboard --once` also
+  gains a top-level `state` mirroring `state_projection.run_state`. A repo-wide
+  call (no single run in scope) yields `run_state: null` and an empty `jobs`.
+
 ### Fixed
 
 - **recovery: a transient unsealed exit on a READ-ONLY reviewer lane no longer
@@ -29,6 +59,43 @@
   provenance. The salvaged file's byline must still match the lane's expected
   author line, so a forged file cannot be adopted. `recovery complete-stalled`
   reports `salvaged_artifact_count` when it salvaged.
+- **`striatum repo add --init` now provisions the committee POSIX ACLs on
+  clone/worktree-registered repos, so `review_only_artifact` lanes can publish
+  and lane-written committee provenance stays operator-manageable without `sudo`
+  (#537, #539).** When lanes run as a non-owner OS user (`STRIATUM_LANE_OS_USER`,
+  the PG-less lane sandbox), `repo add --init` (and `repo.init`) now apply
+  `setfacl -R -m u:<lane>:rwx -m d:u:<lane>:rwx -m d:u:<owner>:rwx` to the repo
+  tree and `.striatum/worktrees` — the same ACL convention repos set up before
+  the convention already carry. The lane access + inheritable lane default fix
+  the `review_only_artifact` lane that relies on the ambient repo ACL for its
+  staging path (#537, previously failing `agent_exited_unsealed`); the
+  inheritable **owner** default means committee/provenance dirs the lane later
+  creates stay manageable by the daemon (it can `decision record` into them) and
+  the operator (landing needs no `sudo chown`) (#539). Best-effort and
+  idempotent: a strict no-op for owner-run lanes / a missing lane user / a
+  platform without `setfacl`, and a provisioning failure is surfaced in the
+  result (`committee_acl_provisioned` / `committee_acl_error`) rather than
+  blocking registration. No new RPC method and no widening of who can read any
+  daemon capability token; this only extends an accepted target-repository
+  filesystem convention to a path that lacked it.
+- **driver self-heal: the detached `run drive` auto-driver survives a daemon
+  restart instead of abandoning a live run, and is re-armed after an escalation
+  resolve (#513, #505, #261).** A daemon restart briefly drops the unix socket;
+  the next `run drive` invoke used to surface `daemon_unreachable` (exit 11) and
+  exit, abandoning a 9-job resumable run until an operator noticed (#513). The
+  driver now reconnects with bounded exponential backoff (default 30s budget,
+  250ms→2s steps) on transient `daemon_unreachable`/socket-missing errors, then
+  gives up loudly so a genuinely dead daemon still fails; and the generated
+  `striatum-drive-<run>` transient unit now carries `Restart=on-failure` +
+  `RestartSec=2s` (bounded by `StartLimit*`) so a driver that crashes before the
+  in-loop reconnect catches it is restarted by systemd. Separately,
+  `escalation resolve` now advertises `run drive --run-id <id>` in its
+  `next_actions` when it leaves the run `running` with claimable work — parity
+  with `checkpoint resolve`'s re-arm hint (#505), so resolving a blocker no
+  longer silently stalls the run with no driver attached. (#261's launched-lane
+  teardown on `needs_operator`/`waiting_human` was already shipped; it is closed
+  by the above self-heal cluster.)
+
 - **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a
   SUBDIRECTORY (e.g. striatum's own `go/`), and a failing builtin surfaces its stderr
   (#515).** `striatum verifier run --check-id builtin:go-* --cwd <repo-root>` ran

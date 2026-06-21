@@ -52,11 +52,12 @@ func barrierFaninAssemblyEnabled() bool {
 // shadow deployment accumulates the durable staging witness without changing how the
 // run branch advances.
 //
-// It is a strict NO-OP on the default path: with STRIATUM_BARRIER_FANIN unset, or
-// when the seat belongs to no recorded fan-in freeze point (every run today, since
-// recordFaninFreezePoint has no live fan-out caller yet), it returns ("", nil)
-// without touching git or PG. So wiring this into the completion path cannot change
-// any current run's outcome.
+// It is a strict NO-OP on the default path: with STRIATUM_BARRIER_FANIN unset (every
+// run on the default path, since recordRunFaninFreezePoints — the live fan-out caller,
+// #527 — also no-ops when the opt-in is off, so no run declares a fan-in freeze
+// point), or when the seat belongs to no recorded fan-in freeze point, it returns
+// ("", nil) without touching git or PG. So wiring this into the completion path cannot
+// change any default-path run's outcome.
 //
 // commitSHA is the seat's completed worktree HEAD (the same head the per-completion
 // merge folds). attempt is the seat's live attempt (the seal). It returns the
@@ -81,8 +82,10 @@ func stageFaninContributionAtCompletion(ctx context.Context, runner db.TxRunner,
 // is a DECLARED in-edge of, scoped to the seat's run. A seat appears in at most one
 // fan-in barrier per run (the freeze record declares its sibling set once at
 // fan-out). It returns ("", false, nil) when the seat is not a declared fan-in
-// in-edge — the common case until recordFaninFreezePoint is wired into a live
-// fan-out, which keeps the staging hook a no-op on every current run.
+// in-edge — the case for every run on the default path, since the live fan-out caller
+// (recordRunFaninFreezePoints, #527) records a freeze point only when the
+// STRIATUM_BARRIER_FANIN shadow opt-in is on, which keeps the staging hook a no-op
+// for every default-path run.
 func faninBarrierForSeat(ctx context.Context, runner db.TxRunner, repositoryID, runID, workflowJobID string) (string, bool, error) {
 	// Match the seat against each freeze record's declared sibling set via
 	// jsonb_array_elements_text — the same expansion the barrier evaluator

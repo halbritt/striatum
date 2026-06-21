@@ -143,17 +143,29 @@ func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelo
 	// rather than silence.
 	recoveryGate := recoveryGateSummary(ctx, runner, repositoryID, runID)
 
+	// RFC 0157 (D251): the additive canonical cross-surface state projection.
+	// run.summary keeps its rich `.run.state` + `.jobs[]` (attempt/role_id); this
+	// adds the lowest-common-denominator `{run_state, jobs:[{id,state}]}` block so a
+	// script reading run.summary, dashboard, or status sees run/job state in one
+	// identical shape. Single-run scope (run.summary always has a run_id), so the
+	// projection is populated.
+	stateProjection, err := buildStateProjection(ctx, runner, repositoryID, runID)
+	if err != nil {
+		return nil, err
+	}
+
 	result := map[string]any{
-		"run":            runs[0],
-		"jobs":           jobs,
-		"artifacts":      artifacts,
-		"verdicts":       verdicts,
-		"overrides":      overrides,
-		"sessions":       sessionsBlock,
-		"doctor":         doctor,
-		"operator_mode":  workflowOperatorMode(workflow),
-		"quorum_dissent": quorumDissent,
-		"recovery_gate":  recoveryGate,
+		"run":              runs[0],
+		"jobs":             jobs,
+		"artifacts":        artifacts,
+		"verdicts":         verdicts,
+		"overrides":        overrides,
+		"sessions":         sessionsBlock,
+		"doctor":           doctor,
+		"operator_mode":    workflowOperatorMode(workflow),
+		"quorum_dissent":   quorumDissent,
+		"recovery_gate":    recoveryGate,
+		"state_projection": stateProjection,
 	}
 	if len(completionRecord) > 0 {
 		result["completion_record"] = completionRecord

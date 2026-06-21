@@ -194,6 +194,15 @@ func (r statusFakeRunner) Query(_ context.Context, sql string, args ...any) (pgx
 			"job_id": "job_review", "verdict_id": "verdict_latest",
 			"verdict": "needs_revision", "posture": "blocking", "created_at": now,
 		}}), nil
+	case strings.Contains(sql, "SELECT state FROM striatumd.runs") && strings.Contains(sql, "LIMIT 1"):
+		// RFC 0157 state_projection's run-state read.
+		return dashboardAllRowsFromMaps([]map[string]any{{"state": "running"}}), nil
+	case strings.Contains(sql, "SELECT workflow_job_id, state") && strings.Contains(sql, "FROM striatumd.jobs"):
+		// RFC 0157 state_projection's per-job (id, state) read.
+		return dashboardAllRowsFromMaps([]map[string]any{
+			{"workflow_job_id": "draft", "state": "completed"},
+			{"workflow_job_id": "review", "state": "running"},
+		}), nil
 	default:
 		return nil, errors.New("unexpected query: " + sql)
 	}
