@@ -84,3 +84,17 @@ func foldDoctorProblemRecords(records []map[string]any) map[string]int {
 	}
 	return counts
 }
+
+// foldableDoctorRecords returns the problem records one per-repo doctor run may
+// contribute to the doctor_problems gauge, or nil when the run was DEGRADED: a hard
+// error (derr), or a deadline-exceeded context (ctxErr — captured before the per-repo
+// context is cancelled). A degraded run can carry FALSE problem records: under the
+// sweep-tick doctorFoldTimeout the worktree-ref reachability probe is starved and a
+// cancelled readGitAncestor reads as "unreachable" rather than "unknown". A page must
+// never ride on a timed-out fold, so a degraded run contributes nothing.
+func foldableDoctorRecords(result map[string]any, derr, ctxErr error) []map[string]any {
+	if derr != nil || ctxErr != nil {
+		return nil
+	}
+	return extractDoctorProblemRecords(result)
+}

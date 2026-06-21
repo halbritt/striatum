@@ -284,11 +284,12 @@ func (c *Collector) doctorProblemRecords(ctx context.Context) []map[string]any {
 				"verbose": true,
 			},
 		})
+		// Capture the deadline state BEFORE cancel() (which would itself set repoCtx.Err()).
+		// foldableDoctorRecords drops a DEGRADED run (hard error, or doctorFoldTimeout
+		// exceeded) so a partial, possibly-false result never reaches the gauge.
+		ctxErr := repoCtx.Err()
 		cancel()
-		if derr != nil {
-			continue
-		}
-		records = append(records, extractDoctorProblemRecords(result)...)
+		records = append(records, foldableDoctorRecords(result, derr, ctxErr)...)
 	}
 	return records
 }

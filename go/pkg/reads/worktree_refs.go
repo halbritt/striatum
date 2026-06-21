@@ -102,13 +102,28 @@ func doctorWorktreeRefSafety(ctx context.Context, runner any, repositoryID strin
 		// should still create a refs/striatum pin, so keep it visible as a warning
 		// rather than an ok-reddening problem.
 		defaultRef := resolveDefaultRefCached(ctx, repoRoot, defaultRefByRoot)
-		if defaultRef != "" && head != "" && readGitAncestor(ctx, repoRoot, head, defaultRef) {
-			warnings = append(warnings, fmt.Sprintf(
-				"worktree_unanchored_on_default_branch.%s: worktree HEAD %s is preserved on the default branch (%s) but has no refs/striatum pin; run %s to anchor it",
-				worktreeID, head, defaultRef, remediation,
-			))
-			warningRecords = append(warningRecords, worktreeReclassRecord("worktree_unanchored_on_default_branch", worktreeID, row, defaultRef))
-			continue
+		if defaultRef != "" && head != "" {
+			reachable, inconclusive := readGitAncestorChecked(ctx, repoRoot, head, defaultRef)
+			switch {
+			case reachable:
+				warnings = append(warnings, fmt.Sprintf(
+					"worktree_unanchored_on_default_branch.%s: worktree HEAD %s is preserved on the default branch (%s) but has no refs/striatum pin; run %s to anchor it",
+					worktreeID, head, defaultRef, remediation,
+				))
+				warningRecords = append(warningRecords, worktreeReclassRecord("worktree_unanchored_on_default_branch", worktreeID, row, defaultRef))
+				continue
+			case inconclusive:
+				// The default-branch ancestry probe was cancelled (e.g. the sweep-tick
+				// doctorFoldTimeout) — "unknown", not a confirmed miss. Reclassify to a
+				// warning so a starved probe never reds the doctor. (The catch-all below
+				// covers the rarer cases where the cancellation lands before this point.)
+				warnings = append(warnings, fmt.Sprintf(
+					"worktree_probe_inconclusive.%s: default-branch reachability probe was cancelled (context deadline); rerun doctor without the sweep-tick budget to classify",
+					worktreeID,
+				))
+				warningRecords = append(warningRecords, worktreeReclassRecord("worktree_probe_inconclusive", worktreeID, row, ""))
+				continue
+			}
 		}
 
 		// Legibility rule 2: a worktree whose run is in a terminal debris state
@@ -122,6 +137,22 @@ func doctorWorktreeRefSafety(ctx context.Context, runner any, repositoryID strin
 				worktreeID, head, stringFrom(row, "run_state"),
 			))
 			warningRecords = append(warningRecords, worktreeReclassRecord("worktree_debris_terminal_run", worktreeID, row, ""))
+			continue
+		}
+
+		// Catch-all: if the context expired anywhere before this point (e.g.
+		// resolveDefaultRefCached returning "" under cancellation, or a starved probe loop),
+		// the unreachable verdict is inconclusive, not confirmed. A cancelled probe is
+		// "unknown", not "unreachable" — do NOT red the doctor on it. Emit a degraded warning
+		// (warnings/warningRecords are not folded into striatum_doctor_problems) so a timed-out
+		// fold cannot publish false worktree_head_unreachable / job_completed_without_anchor
+		// records. The next budgeted/on-demand doctor run classifies it for real.
+		if ctx.Err() != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"worktree_probe_inconclusive.%s: reachability probe was cancelled (context deadline) before classification; rerun doctor without the sweep-tick budget to classify",
+				worktreeID,
+			))
+			warningRecords = append(warningRecords, worktreeReclassRecord("worktree_probe_inconclusive", worktreeID, row, ""))
 			continue
 		}
 
@@ -392,6 +423,22 @@ func readGitAncestor(ctx context.Context, repoRoot, ancestor, descendantRef stri
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "merge-base", "--is-ancestor", ancestor, descendantRef)
 	return cmd.Run() == nil
+}
+
+// readGitAncestorChecked is readGitAncestor that distinguishes a CONFIRMED negative
+// (the descendant ref exists and `ancestor` is not its ancestor) from an INCONCLUSIVE
+// result caused by context cancellation — e.g. the sweep-tick doctorFoldTimeout killing
+// the underlying `git` process. `reachable` is only meaningful when `inconclusive` is
+// false. A starved probe is "unknown", not "not an ancestor", so callers must not red
+// the doctor on it.
+func readGitAncestorChecked(ctx context.Context, repoRoot, ancestor, descendantRef string) (reachable, inconclusive bool) {
+	if readGitAncestor(ctx, repoRoot, ancestor, descendantRef) {
+		return true, false
+	}
+	if ctx.Err() != nil {
+		return false, true
+	}
+	return false, false
 }
 
 func readGitOutput(ctx context.Context, repoRoot string, args ...string) (string, error) {
