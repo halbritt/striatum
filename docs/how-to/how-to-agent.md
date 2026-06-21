@@ -92,6 +92,15 @@ You will repeat this loop until the run reaches a terminal state.
 7b. review.submit    (review jobs — publishes finding + verdict)
 ```
 
+**Seal (step 7) before any optional wind-down.** `work.complete` /
+`review.submit` is the seal — the final *required* act for a packet. Once the
+deliverable is published (step 6), seal it immediately; do not interleave or
+defer the seal behind voluntary end-of-session activity (updating your own
+memory, reflections, summaries). If your session stalls or exits during
+wind-down *before* the seal, the runner records `agent_exited_unsealed` and the
+completed deliverable can be lost, forcing a full re-run. Everything after the
+seal is best-effort and disposable.
+
 When `work.await_packet` returns no work, inspect the run through daemon MCP,
 the local web UI, or CLI diagnostics such as `striatum status`. The run may be
 done, blocked on a human checkpoint, or waiting on a dependency.

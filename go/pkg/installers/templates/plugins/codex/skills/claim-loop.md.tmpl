@@ -52,6 +52,25 @@ local work such as source reading, edits, tests, or external review. Honor the
 packet's `lease.heartbeat_after_seconds`; a lease that stops heartbeating can be
 classified as stalled even while you are active locally.
 
+## Seal before wind-down
+
+`work.complete` (or `review.submit` for review jobs) is the **seal** — the
+final *required* act for a packet. Order your end of the loop so the seal is the
+last thing you do for the job:
+
+1. Produce the deliverable and `artifact.publish` it.
+2. **Immediately call `work.complete` / `review.submit`** to seal the job. Do not
+   wait, defer, or interleave anything between publishing and sealing.
+3. Only *after* the seal succeeds may you do optional, voluntary end-of-session
+   wind-down — updating your own memory, writing reflections or summaries,
+   tidying notes.
+
+Optional wind-down must **never** gate the seal. If your session stalls, exits,
+or loses its API connection during wind-down *before* the seal, the runner sees
+`agent_exited_unsealed` and the completed deliverable can be lost — the work has
+to be redone from scratch. Treat "deliverable published" as the trigger to seal
+right now; everything after the seal is best-effort and disposable.
+
 ## Front-matter kinds (V1)
 
 When publishing Markdown artifacts whose kind has a registered
