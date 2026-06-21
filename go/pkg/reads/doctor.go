@@ -216,6 +216,21 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		}
 	}
 
+	// RFC 0141 / D252 (#483): two read-only verifier pin-drift pre-flights. Both are
+	// ADVISORY ONLY (warnings, never hard problems) and change NOTHING about the
+	// allowlist trust contract — they only OBSERVE host-specific state that already
+	// determines a run's rungs, so a 3am gate failure becomes a doctor-time warning.
+	//
+	// Slice 1: surface the `make install`-without-restart self-pin drift (the running
+	// daemon image vs the on-disk binary). Daemon-global; reads no secret.
+	verifierSelfpinBlock, verifierSelfpinWarnings := verifierSelfpinDriftBlock()
+	warnings = append(warnings, verifierSelfpinWarnings...)
+
+	// Slice 2: surface the per-host intent⋈pins drift (named-but-unpinned, argv
+	// drift, pinned-bytes drift) for the repo's committed verifier intent.
+	verifierPinBlock, verifierPinWarnings := verifierPinDriftBlock(doctorRepoRoot(ctx, runner, repositoryID))
+	warnings = append(warnings, verifierPinWarnings...)
+
 	blobBlock := blobDoctorBlock(ctx, runner, repositoryID)
 	artifactAnchorBlock, artifactAnchorProblems, artifactAnchorRecords, artifactAnchorWarnings, artifactAnchorWarningRecords := doctorArtifactAnchorIntegrity(ctx, runner, repositoryID, blobBlock)
 	problems = append(problems, artifactAnchorProblems...)
@@ -308,6 +323,8 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		"recovery_escape_valve":        recoveryGateBlock,
 		"job_stuck_no_live_session":    stuckJobBlock,
 		"event_chain_segment_seams":    eventSegmentBlock,
+		"verifier_selfpin_drift":       verifierSelfpinBlock,
+		"verifier_pin_drift":           verifierPinBlock,
 		"skills":                       skillsBlock,
 		"blob":                         blobBlock,
 	}

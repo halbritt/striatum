@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
 
@@ -880,5 +881,146 @@ func TestClaimAdvisoryMarkerForceConcurrentCoDrives(t *testing.T) {
 	defer cleanup2()
 	if !strings.Contains(stderr.String(), "co-driving") {
 		t.Errorf("force-concurrent should warn about co-driving, got %q", stderr.String())
+	}
+}
+
+// --- #513: reconnect-with-backoff on transient daemon_unreachable ---
+
+// flakyInvoker fails its first failFor Invoke calls with err, then delegates to
+// the wrapped invoker. It lets a reconnect test simulate "the daemon socket
+// disappeared during a restart and returned within seconds".
+type flakyInvoker struct {
+	inner   Invoker
+	err     error
+	failFor int
+	calls   int
+}
+
+func (f *flakyInvoker) Invoke(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+	f.calls++
+	if f.calls <= f.failFor {
+		return nil, f.err
+	}
+	return f.inner.Invoke(ctx, method, params)
+}
+
+// reconnectDriver builds a Driver with an advancing clock and a counting,
+// instant Sleep so the reconnect-budget deadline can actually expire in a unit
+// test. step is how far the clock advances per Sleep.
+func reconnectDriver(inv Invoker, step time.Duration, sleeps *int, budget time.Duration) *Driver {
+	now := time.Date(2026, 6, 20, 14, 50, 0, 0, time.UTC)
+	d := New(inv, Options{
+		RepositoryID:    "repo_1",
+		RunID:           "run_1",
+		Once:            true,
+		ReconnectBudget: budget,
+		ReconnectStep:   time.Millisecond,
+		Now:             func() time.Time { return now },
+		Sleep: func(_ context.Context, _ time.Duration) error {
+			*sleeps++
+			now = now.Add(step)
+			return nil
+		},
+		Stderr: &bytes.Buffer{},
+	})
+	return d
+}
+
+// #513: a transient daemon_unreachable (the socket vanished during a daemon
+// restart and returns within seconds) must be retried with backoff, NOT exit
+// the driver with status=11 abandoning a live, resumable run.
+func TestRunDriveReconnectsTransientDaemonUnreachable(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeDrive()
+	fake.jobs = []map[string]any{job("j1", "w1", "author", "codex", "queued", 1)}
+	sleeps := 0
+	// Clock advances 100ms per reconnect attempt; budget 30s; fail twice then heal.
+	flaky := &flakyInvoker{
+		inner:   fake,
+		err:     &rpcclient.Error{Code: "daemon_unreachable", Message: "daemon unreachable at /run/striatum/rpc/daemon-go.sock: dial unix: connect: no such file or directory", ExitCode: 11},
+		failFor: 2,
+	}
+	d := reconnectDriver(flaky, 100*time.Millisecond, &sleeps, 30*time.Second)
+	actions, _, _, err := d.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcile should recover after transient unreachable, got %v", err)
+	}
+	if sleeps == 0 {
+		t.Fatalf("expected at least one reconnect backoff sleep, got 0")
+	}
+	if fake.count("session.register") != 1 {
+		t.Fatalf("driver should have resumed and registered the queued lane after reconnect; actions=%#v calls=%#v", actions, fake.calls)
+	}
+}
+
+// #513: if the daemon never comes back within the reconnect budget, the invoke
+// must give up and surface the unreachable error (so a genuinely dead daemon
+// still fails loudly / lets systemd Restart=on-failure take over) rather than
+// looping forever.
+func TestRunDriveReconnectGivesUpAfterBudget(t *testing.T) {
+	ctx := context.Background()
+	unreach := &rpcclient.Error{Code: "daemon_unreachable", Message: "daemon unreachable: no such file or directory", ExitCode: 11}
+	sleeps := 0
+	// Always fail; clock advances 5s per attempt; budget 30s => bounded loop.
+	flaky := &flakyInvoker{inner: newFakeDrive(), err: unreach, failFor: 1 << 30}
+	d := reconnectDriver(flaky, 5*time.Second, &sleeps, 30*time.Second)
+	_, _, _, err := d.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected unreachable error after budget exhausts, got nil")
+	}
+	if !isTransientUnreachable(err) {
+		t.Fatalf("expected the surfaced error to be the unreachable error, got %v", err)
+	}
+	if sleeps == 0 {
+		t.Fatalf("expected the driver to have attempted reconnect before giving up")
+	}
+	// Bounded: 30s budget / 5s per attempt is well under 100 attempts.
+	if flaky.calls > 100 {
+		t.Fatalf("reconnect loop is not bounded: %d invoke attempts", flaky.calls)
+	}
+}
+
+// #513: a non-transient error (e.g. an ordinary daemon-side rejection) must NOT
+// be retried — only transient unreachability is recoverable.
+func TestRunDriveDoesNotRetryNonTransientError(t *testing.T) {
+	ctx := context.Background()
+	sleeps := 0
+	flaky := &flakyInvoker{inner: newFakeDrive(), err: errors.New("invalid_transition: nope"), failFor: 1 << 30}
+	d := reconnectDriver(flaky, time.Second, &sleeps, 30*time.Second)
+	_, _, _, err := d.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected the non-transient error to propagate")
+	}
+	if sleeps != 0 {
+		t.Fatalf("a non-transient error must not trigger reconnect backoff, got %d sleeps", sleeps)
+	}
+	if flaky.calls != 1 {
+		t.Fatalf("a non-transient error must fail on the first attempt, got %d", flaky.calls)
+	}
+}
+
+func TestIsTransientUnreachable(t *testing.T) {
+	transient := []error{
+		&rpcclient.Error{Code: "daemon_unreachable", Message: "x"},
+		&rpc.Error{Code: "daemon_unreachable", Message: "x"},
+		errors.New("daemon unreachable at /run/striatum/rpc/daemon-go.sock: dial unix: connect: no such file or directory"),
+		errors.New("connect: connection refused"),
+	}
+	for _, err := range transient {
+		if !isTransientUnreachable(err) {
+			t.Errorf("isTransientUnreachable(%v) = false, want true", err)
+		}
+	}
+	notTransient := []error{
+		nil,
+		errors.New("invalid_transition"),
+		&rpcclient.Error{Code: "capability_missing", Message: "x"},
+		context.Canceled,
+		context.DeadlineExceeded,
+	}
+	for _, err := range notTransient {
+		if isTransientUnreachable(err) {
+			t.Errorf("isTransientUnreachable(%v) = true, want false", err)
+		}
 	}
 }

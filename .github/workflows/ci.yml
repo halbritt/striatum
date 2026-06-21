@@ -61,6 +61,14 @@ jobs:
           --health-retries 12
     env:
       STRIATUM_PG_TEST_URL: postgres://striatum:striatum@localhost:5432/striatum_test?sslmode=disable
+    # Two-role migration coverage (#526 / D236 / #508): the PostgreSQL service is
+    # reached by a superuser (the postgres:16 image's POSTGRES_USER), so the
+    # check-tests pass below runs pkg/db's TestFullMigrationSetAppliesAsNonOwnerRoleOnTwoRoleDB,
+    # which CREATEs an isolated DB, stages the floor migrations + owner bundles as
+    # the owner, and applies the above-floor migrations as the NON-owner runtime
+    # role striatumd_rw — the live two-role posture. This closes the single-role
+    # blind spot that let migration 0041's owner-held FK pass CI and crash-loop the
+    # two-role prod daemon (the dynamic complement to the static #508 build guard).
     steps:
       - uses: actions/checkout@v5
 
