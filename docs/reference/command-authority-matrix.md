@@ -88,7 +88,7 @@ state changes must route through daemon RPC.
 | `run.summary` | `run summary` | read | single_repo | pg | real | no | no | stable |
 | `run.detail` | web run detail DTO | read | single_repo | pg | real | no | no | stable |
 | `job.detail` | web job detail DTO | read | single_repo | pg | real | no | no | stable |
-| `artifact.get_content` | web artifact content DTO; `invoke` | read | single_repo | not implemented in Python RPC | real | no | no | Go blob/repo-path artifact content read |
+| `artifact.get_content` | `artifact get-content`; web artifact content DTO | read | single_repo | not implemented in Python RPC | real | no | no | Go blob/repo-path/git-anchor artifact content read; exposes body_base64 for blob_exhaust findings not surfaced by evidence/corpus export (#506 part 2) |
 | `artifact.list_for_run` | `invoke` | read | single_repo | not implemented in Python RPC | real | no | no | Go blob migration verification read |
 | `corpus.migrate_historical_dogfood_file` | `corpus migrate-historical-dogfoods` helper | write | single_repo | not implemented in Python RPC | real | no | no | Go historical dogfood blob migration upload |
 | `artifact.backfill_blob` | `invoke` | write | single_repo | not implemented in Python RPC | real | no | no | Go artifact blob-reference backfill |

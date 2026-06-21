@@ -447,6 +447,38 @@ func TestDispatchSessionRegisterAliasResolvesToSessionRegister(t *testing.T) {
 	}
 }
 
+// #506 part 2: `striatum artifact get-content <artifact-id>` must route to
+// artifact.get_content with artifact_id mapped from the positional argument and
+// repository_id from the ambient STRIATUM_REPOSITORY_ID. Operators use this to
+// read a blob_exhaust finding body that evidence/corpus export only surfaces as
+// metadata (content_sha256, no body), making needs_revision adjudication
+// possible without reconstructing the reviewer's reasoning from PTY noise.
+func TestDispatchArtifactGetContentRoutesBodyFetch(t *testing.T) {
+	invoker := &fakeInvoker{}
+	var stdout, stderr bytes.Buffer
+	exit := Run(context.Background(), []string{"artifact", "get-content", "art_abc123"},
+		&stdout, &stderr, Options{
+			Invoker: invoker,
+			Env:     []string{"STRIATUM_REPOSITORY_ID=repo_1"},
+		})
+	if exit != 0 {
+		t.Fatalf("exit = %d stderr=%s", exit, stderr.String())
+	}
+	if len(invoker.calls) != 1 {
+		t.Fatalf("expected 1 RPC call, got %#v", invoker.calls)
+	}
+	got := invoker.calls[0]
+	if got.method != "artifact.get_content" {
+		t.Fatalf("method = %q, want artifact.get_content", got.method)
+	}
+	if got.params["artifact_id"] != "art_abc123" {
+		t.Fatalf("artifact_id = %#v, want art_abc123", got.params["artifact_id"])
+	}
+	if got.params["repository_id"] != "repo_1" {
+		t.Fatalf("repository_id = %#v, want repo_1", got.params["repository_id"])
+	}
+}
+
 func TestDispatchUsesExitCodeMapper(t *testing.T) {
 	wantErr := errors.New("daemon down")
 	var stdout, stderr bytes.Buffer
