@@ -91,6 +91,60 @@ func TestPorterLeavesResidualWhenBodyAbsent(t *testing.T) {
 	}
 }
 
+// #551 regression: a repo-write review / phase_synthesis job (e.g. a
+// falsification_gate or verification_gate adjudicate) that published a
+// git_publication artifact (a collaboration_ledger) via artifact.publish MUST have
+// that body porter-committed AND anchored to the RUN BRANCH when it completes via
+// review.verdict (completeReviewJob), exactly as the work.complete path does.
+// Before the fix the body was registered in the DB (so the verdict read it and the
+// gate cleared) but left UNTRACKED in the per-job worktree, the run branch never
+// advanced, and the downstream gated job forked a run branch blind to the ledger.
+func TestCompleteReviewJobAnchorsPublishedArtifactToRunBranch(t *testing.T) {
+	if !haveGit(t) {
+		return
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "review_anchor_551", true)
+
+	// The adjudicator wrote its collaboration_ledger into the per-job worktree but
+	// (the #551 bug) never committed it: it is untracked, the worktree HEAD has not
+	// advanced, and the run branch does not contain it.
+	payload := []byte("collaboration_ledger: verdict accept_with_findings (cycle 1)")
+	repoPath := "docs/COLLABORATION_LEDGER_cycle_1.md"
+	abs := filepath.Join(ids.worktreeRoot, filepath.FromSlash(repoPath))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedPublishedArtifact(t, ctx, runner, ids, "art_ledger_551", "collaboration_ledger_1", repoPath, payload, nil)
+
+	// Precondition: the run branch does NOT yet contain the body (never committed).
+	if mustGitExit(t, repoRoot, "cat-file", "-e", "refs/heads/"+ids.runBranch+":"+repoPath) == 0 {
+		t.Fatalf("precondition failed: run branch %s already contains %s", ids.runBranch, repoPath)
+	}
+
+	job, err := rowByID(ctx, runner, ids.repoID, "jobs", "job_id", ids.jobID, false)
+	if err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+
+	// The review.verdict completion path must porter-commit + anchor the body.
+	if err := completeReviewJob(ctx, runner, ids.repoID, job, ids.sessionID, ids.leaseID, "accept_with_findings"); err != nil {
+		t.Fatalf("completeReviewJob: %v", err)
+	}
+
+	// The body is now reachable from the RUN BRANCH (committed + anchored), not just
+	// registered in the DB — the downstream gated job will see the ledger.
+	got := gitRun(t, repoRoot, "show", "refs/heads/"+ids.runBranch+":"+repoPath)
+	if strings.TrimSpace(got) != strings.TrimSpace(string(payload)) {
+		t.Fatalf("refs/heads/%s:%s = %q, want %q", ids.runBranch, repoPath, got, payload)
+	}
+}
+
 func haveGit(t *testing.T) bool {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

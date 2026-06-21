@@ -1130,6 +1130,28 @@ func completeReviewJob(ctx context.Context, runner any, repositoryID string, job
 	if !ok {
 		return fmt.Errorf("runner does not support exec")
 	}
+	// #551: a repo-write review / phase_synthesis job (e.g. a falsification_gate
+	// adjudicate that published a collaboration_ledger via artifact.publish, or a
+	// verification_gate adjudicate) must have its git_publication artifacts
+	// porter-committed AND anchored to the run branch on completion — exactly as
+	// the work.complete path does (lifecycle.go). Otherwise the published body is
+	// registered in the DB (the verdict reads it, the gate clears) but left
+	// untracked in the per-job worktree, so the downstream gated job forks a run
+	// branch that lacks it and is blind to the ledger. Both helpers no-op for a
+	// non-repo-write / no-worktree-required job (a review_only reviewer publishing
+	// a blob_exhaust finding is unaffected), so this is safe for every review job.
+	if err := ensurePublishedArtifactsDurableWithPorter(ctx, runner, repositoryID, job, "review.verdict"); err != nil {
+		return err
+	}
+	anchorPayload, err := anchorActiveWorktreeForJob(ctx, runner, repositoryID, job)
+	if err != nil {
+		return err
+	}
+	if anchorPayload != nil {
+		if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "job.commits_anchored", sessionID, job["job_id"], messageID, nil, leaseID, anchorPayload); err != nil {
+			return err
+		}
+	}
 	if err := exec.Exec(ctx, `
 		UPDATE striatumd.jobs
 		   SET state = 'completed', completed_at = $1, current_lease_id = NULL
@@ -1151,8 +1173,7 @@ func completeReviewJob(ctx context.Context, runner any, repositoryID string, job
 		 WHERE repository_id = $2 AND lease_id = $3`, now, repositoryID, leaseID); err != nil {
 		return err
 	}
-	_, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "job.completed", sessionID, job["job_id"], messageID, nil, leaseID, map[string]any{"summary": summary})
-	if err != nil {
+	if _, err = appendEvent(ctx, runner, repositoryID, job["run_id"], "job.completed", sessionID, job["job_id"], messageID, nil, leaseID, map[string]any{"summary": summary}); err != nil {
 		return err
 	}
 	return markJobTerminal(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), fmt.Sprint(job["job_id"]))
