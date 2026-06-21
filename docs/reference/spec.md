@@ -1793,6 +1793,16 @@ and the most recent events. `--refresh <seconds>` changes cadence; `--once`
 renders a single frame to stdout and exits, which makes the dashboard useful in
 scripts and CI assertions that should not redraw a TUI.
 
+The `--once` JSON frame carries the RFC 0157 (D251) canonical
+`state_projection` block — `{run_state, jobs:[{id,state}]}` — and a top-level
+`state` scalar that mirrors `state_projection.run_state`, so a script reads the
+dashboard's run state at the top level (parity with the rendered view) without
+descending into `jobs_by_state`. The projection is additive: `jobs_by_state`,
+`blockers`, `open_blockers`, `recent_events`, and the rest are unchanged. When no
+run is in scope (no `--run-id` and no run exists for the repository), both
+`state` and `state_projection.run_state` are `null` and `state_projection.jobs`
+is empty. See [Operator read-surface state projection](#operator-read-surface-state-projection).
+
 When the terminal is at least 100 columns wide and 30 lines tall and the
 run's workflow has at least one edge, the dashboard appends a *graph
 panel*: a layered ASCII view of the workflow's job DAG annotated with each
@@ -1835,6 +1845,35 @@ the sessions block and `completion_record` projection come from the frozen
 never from a live probe. `evidence export` renders deterministic
 `## Sessions`, `## Provenance Gate`, and `## Operator Overrides` sections
 from the same frozen state.
+
+`run.summary --json` also carries the RFC 0157 (D251) canonical
+`state_projection` block — `{run_state, jobs:[{id,state}]}` — alongside its
+existing rich `.run` object (with `.run.state`) and `.jobs[]` list (which keep
+`attempt`/`role_id`). The projection is additive and never replaces those keys;
+it is the same lowest-common-denominator shape `dashboard` and `status` emit. See
+[Operator read-surface state projection](#operator-read-surface-state-projection).
+
+### Operator read-surface state projection
+
+`run.summary`, `dashboard --once`, and `status --json` all emit one additive,
+strictly identical `state_projection` block so a script or AFK agent reads
+run/job state uniformly across the three verbs instead of special-casing each
+(RFC 0157, D251). The pinned shape is:
+
+```json
+{ "run_state": "<string|null>", "jobs": [ { "id": "<workflow_job_id>", "state": "<string>" } ] }
+```
+
+`jobs[]` carries the minimal `id` (the stable `workflow_job_id`) and `state`
+pair only — richer per-job fields (`attempt`, `role_id`) remain on
+`run.summary`'s own `.jobs[]`. The projection is meaningful only for a single
+run: when the verb is invoked repo-wide (`status`/`dashboard` with no single
+`run_id` and no resolvable run), `run_state` is `null` and `jobs` is empty.
+Every existing key on every surface is untouched (`run.summary` keeps `.run` and
+its rich `.jobs[]`; `dashboard` keeps `.jobs_by_state`; `status` keeps `.runs[]`
+and `.jobs{}`), so existing consumers do not break. Per [RFC 0030](../rfcs/0030-daemon-rpc-server-and-version-skew-protocol.md)
+an additive result field requires no `schema_version` bump. `dashboard --once`
+additionally surfaces a top-level `state` mirroring `state_projection.run_state`.
 
 ### Recovery
 

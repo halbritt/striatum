@@ -74,7 +74,7 @@ func HandleEscalationResolve(ctx context.Context, runner db.Runner, envelope rpc
 		return nil, err
 	}
 
-	_, err = withResolveRetryOnDeadlock(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
+	txResult, err := withResolveRetryOnDeadlock(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
 		// RFC 0104 (#356): escalation.resolve is a per-run write — it FOR UPDATEs
 		// the blocker below and then maybeCompleteRun FOR UPDATEs the run — so it
 		// must take the per-run advisory lock as the transaction's FIRST statement,
@@ -242,7 +242,39 @@ func HandleEscalationResolve(ctx context.Context, runner db.Runner, envelope rpc
 				}
 			}
 		}
-		return map[string]any{}, nil
+		// #505: re-read the run's final state and whether it now has claimable,
+		// non-paused work, so the response can advertise the re-drive verb. The
+		// detached auto-driver (`run drive`, unit `striatum-drive-<run>`) exits when
+		// the run hits needs_operator (runreconcile.IsTerminalRunState treats it as
+		// drive-terminal) and is not re-armed by this handler; without the hint the
+		// run silently stalls after the operator resolves the escalation until a
+		// manual re-drive. Mirrors checkpoint.resolve's re-arm hint.
+		runStateRows, err := queryAnyRows(ctx, tx, `
+			SELECT state, paused_at FROM striatumd.runs
+			 WHERE repository_id = $1 AND run_id = $2`, repositoryID, runID)
+		if err != nil {
+			return nil, err
+		}
+		finalRunState := ""
+		runPaused := false
+		if len(runStateRows) > 0 {
+			finalRunState = fmt.Sprint(runStateRows[0]["state"])
+			runPaused = nullableResolve(runStateRows[0]["paused_at"]) != nil
+		}
+		claimableRows, err := queryAnyRows(ctx, tx, `
+			SELECT 1 FROM striatumd.jobs
+			 WHERE repository_id = $1 AND run_id = $2
+			   AND state IN ('queued','blocked')
+			 LIMIT 1`, repositoryID, runID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"run_id":             runID,
+			"run_state":          finalRunState,
+			"run_paused":         runPaused,
+			"has_claimable_work": len(claimableRows) > 0,
+		}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -252,10 +284,28 @@ func HandleEscalationResolve(ctx context.Context, runner db.Runner, envelope rpc
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	out := map[string]any{
 		"status":     "resolved",
 		"escalation": escalation,
-	}, nil
+	}
+	if txResult != nil {
+		runID := fmt.Sprint(txResult["run_id"])
+		runState := fmt.Sprint(txResult["run_state"])
+		out["run_state"] = runState
+		nextActions := []string{}
+		paused, _ := txResult["run_paused"].(bool)
+		claimable, _ := txResult["has_claimable_work"].(bool)
+		// Only re-arm when the run is genuinely drivable: running, not a deliberate
+		// pause (RFC 0124 C5), with claimable work. A still-terminal or paused run
+		// gets no re-drive hint.
+		if runState == "running" && !paused && claimable && runID != "" && runID != "<nil>" {
+			nextActions = append(nextActions, fmt.Sprintf("run drive --run-id %s", runID))
+		}
+		if len(nextActions) > 0 {
+			out["next_actions"] = nextActions
+		}
+	}
+	return out, nil
 }
 
 func optionalStrictText(envelope rpc.Envelope, key string) (string, bool, error) {

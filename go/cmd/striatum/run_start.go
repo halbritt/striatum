@@ -168,30 +168,7 @@ func launchDetachedDriver(stderr io.Writer, l driverLaunch) error {
 		return fmt.Errorf("systemd-run not found")
 	}
 	unit := "striatum-drive-" + sanitizeUnit(l.RunID)
-
-	cmd := []string{
-		"--user", "--quiet",
-		"--unit=" + unit,
-		"--description=striatum run drive for " + l.RunID,
-		"--collect", // garbage-collect the transient unit once it exits
-	}
-	// Carry the daemon socket override (if the operator set one in their env) into
-	// the user-manager environment the driver inherits; the runtime client-token
-	// is discovered from XDG_RUNTIME_DIR, which user units already have.
-	if sock := envLookup(l.Env, "STRIATUM_DAEMON_SOCKET"); sock != "" {
-		cmd = append(cmd, "--setenv=STRIATUM_DAEMON_SOCKET="+sock)
-	}
-	cmd = append(cmd, "--", bin)
-	if l.Repo != "" {
-		cmd = append(cmd, "--repo", l.Repo)
-	}
-	if l.SocketPath != "" {
-		cmd = append(cmd, "--daemon-socket", l.SocketPath)
-	}
-	if l.TokenFile != "" {
-		cmd = append(cmd, "--capability-token-file", l.TokenFile)
-	}
-	cmd = append(cmd, "run", "drive", "--run-id", l.RunID)
+	cmd := driverUnitArgs(unit, bin, l)
 
 	run := exec.Command(systemdRun, cmd...)
 	out, err := run.CombinedOutput()
@@ -216,6 +193,47 @@ func launchDetachedDriver(stderr io.Writer, l driverLaunch) error {
 	}
 	_, _ = fmt.Fprintf(stderr, "run start: auto-driving %s in background (logs: journalctl --user -u %s -f; stop: systemctl --user stop %s; resume after stop: %s run drive --run-id %s)\n", l.RunID, unit, unit, resume, l.RunID)
 	return nil
+}
+
+// driverUnitArgs builds the systemd-run argv for the detached `run drive` unit.
+// It is a pure function (no exec) so the unit shape — notably the #513
+// Restart=on-failure self-heal properties — is unit-testable.
+func driverUnitArgs(unit, bin string, l driverLaunch) []string {
+	cmd := []string{
+		"--user", "--quiet",
+		"--unit=" + unit,
+		"--description=striatum run drive for " + l.RunID,
+		"--collect", // garbage-collect the transient unit once it exits
+		// #513: self-heal a driver that exits non-zero (canonically status=11 when
+		// the daemon socket briefly disappears during a daemon restart, before the
+		// in-loop reconnect-with-backoff would catch it — e.g. a crash on the very
+		// first invoke). Restart on failure with a short delay so the run is not
+		// abandoned until an operator notices. A clean exit (terminal state) is
+		// status=0 and is NOT restarted. StartLimit* bound the restart loop so a
+		// genuinely broken launch does not thrash forever.
+		"--property=Restart=on-failure",
+		"--property=RestartSec=2s",
+		"--property=StartLimitIntervalSec=120s",
+		"--property=StartLimitBurst=10",
+	}
+	// Carry the daemon socket override (if the operator set one in their env) into
+	// the user-manager environment the driver inherits; the runtime client-token
+	// is discovered from XDG_RUNTIME_DIR, which user units already have.
+	if sock := envLookup(l.Env, "STRIATUM_DAEMON_SOCKET"); sock != "" {
+		cmd = append(cmd, "--setenv=STRIATUM_DAEMON_SOCKET="+sock)
+	}
+	cmd = append(cmd, "--", bin)
+	if l.Repo != "" {
+		cmd = append(cmd, "--repo", l.Repo)
+	}
+	if l.SocketPath != "" {
+		cmd = append(cmd, "--daemon-socket", l.SocketPath)
+	}
+	if l.TokenFile != "" {
+		cmd = append(cmd, "--capability-token-file", l.TokenFile)
+	}
+	cmd = append(cmd, "run", "drive", "--run-id", l.RunID)
+	return cmd
 }
 
 // sanitizeUnit keeps only characters valid in a systemd unit name; run ids are

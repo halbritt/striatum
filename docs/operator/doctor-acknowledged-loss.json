@@ -128,6 +128,22 @@
       "reason": "Superseded dogfood draft; deliverable path absent from origin/main (never merged or fully removed). Immaterial historical loss from early incubation/runner-development dogfoods.",
       "acknowledged_by": "operator-claude-opus-4-8",
       "acknowledged_at": "2026-06-16"
+    },
+    {
+      "artifact_id": "art_09c17a1e1a6a06c922ce80a52828b66e",
+      "repo_path": "docs/operator/workflows/rfc-0115-agent-loop-telemetry/artifacts/DRAFT.md",
+      "content_sha256": "2874d144ca8da19b7438c8b0a96e2307670c73aea51e329ae114123af142cf1c",
+      "reason": "Superseded dogfood draft from the RFC 0115 agent-loop-telemetry run (run_5886381e, completed); committed at 6a23b14f then intentionally removed from origin/main during workflow-output cleanup, so it is absent from the artifact's durable git anchor. Immaterial historical loss from early runner-development dogfoods.",
+      "acknowledged_by": "operator-claude-opus-4-8",
+      "acknowledged_at": "2026-06-21"
+    },
+    {
+      "artifact_id": "art_7221852a7d0001d5e0e36e6768b3f21e",
+      "repo_path": "docs/operator/workflows/rfc-0115-agent-loop-telemetry/artifacts/SUMMARY.md",
+      "content_sha256": "8c36a554a87ee1275b0c3b58f94320f2c93709407eaf9a50c74d7e01f919ad15",
+      "reason": "Superseded dogfood summary from the RFC 0115 agent-loop-telemetry run (run_5886381e, completed); blob-exhaust artifact whose blob key/sha is missing (blob GC'd) and whose path was removed from origin/main during workflow-output cleanup. Unrecoverable, immaterial historical loss from early runner-development dogfoods.",
+      "acknowledged_by": "operator-claude-opus-4-8",
+      "acknowledged_at": "2026-06-21"
     }
   ]
 }

@@ -43,6 +43,18 @@ type Options struct {
 	// The intentional waiter composition (auto-drive in background + a foreground
 	// `run drive` used purely as a terminal-state waiter) sets this true.
 	ForceConcurrent bool
+	// ReconnectBudget bounds how long an invoke retries a transient
+	// `daemon_unreachable` error before giving up (#513). A daemon restart drops
+	// the socket for a few seconds; without this the next invoke exits the driver
+	// (status=11) and abandons a live, resumable run. Zero selects the default
+	// (30s); a negative value disables reconnect (fail fast, prior behavior).
+	ReconnectBudget time.Duration
+	// ReconnectStep is the initial backoff between reconnect attempts; it doubles
+	// up to ReconnectMaxStep. Zero selects the default (250ms).
+	ReconnectStep time.Duration
+	// ReconnectMaxStep caps the per-attempt backoff. Zero selects the default
+	// (2s).
+	ReconnectMaxStep time.Duration
 }
 
 // ConcurrentDriveError reports that a live `run drive` for the same run already
@@ -146,6 +158,15 @@ func New(invoker Invoker, options Options) *Driver {
 	}
 	if strings.TrimSpace(options.ProviderAuthGate) == "" {
 		options.ProviderAuthGate = "auto"
+	}
+	if options.ReconnectBudget == 0 {
+		options.ReconnectBudget = 30 * time.Second
+	}
+	if options.ReconnectStep <= 0 {
+		options.ReconnectStep = 250 * time.Millisecond
+	}
+	if options.ReconnectMaxStep <= 0 {
+		options.ReconnectMaxStep = 2 * time.Second
 	}
 	return &Driver{
 		invoker:  invoker,
@@ -576,7 +597,76 @@ func (d *Driver) invoke(ctx context.Context, method string, params map[string]an
 	for key, value := range params {
 		next[key] = value
 	}
-	return d.invoker.Invoke(ctx, method, next)
+	return d.invokeWithReconnect(ctx, method, next)
+}
+
+// invokeWithReconnect calls the invoker, retrying transient `daemon_unreachable`
+// errors with bounded exponential backoff (#513). A daemon restart drops the
+// unix socket for a few seconds; without this the next invoke surfaces
+// daemon_unreachable (exit 11) and the detached driver exits, abandoning a
+// live, resumable run. We retry within ReconnectBudget (default 30s) so the
+// socket can reappear, then give up so a genuinely dead daemon still fails
+// loudly. ReconnectBudget < 0 disables reconnect (fail fast). Context
+// cancellation/deadline is never retried.
+func (d *Driver) invokeWithReconnect(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+	deadline := d.options.Now().Add(d.options.ReconnectBudget)
+	step := d.options.ReconnectStep
+	announced := false
+	for attempt := 0; ; attempt++ {
+		result, err := d.invoker.Invoke(ctx, method, params)
+		if err == nil || !isTransientUnreachable(err) || d.options.ReconnectBudget < 0 {
+			return result, err
+		}
+		if ctx.Err() != nil {
+			return result, err
+		}
+		if !d.options.Now().Before(deadline) {
+			// Budget exhausted: the daemon did not come back. Surface the last
+			// transient error so the caller exits with the normal unreachable code.
+			return result, err
+		}
+		if !announced {
+			announced = true
+			_, _ = fmt.Fprintf(d.options.Stderr,
+				"run drive: daemon unreachable on %s; reconnecting (up to %s) instead of exiting: %v\n",
+				method, d.options.ReconnectBudget, err)
+		}
+		if sleepErr := d.options.Sleep(ctx, step); sleepErr != nil {
+			return result, sleepErr
+		}
+		if step < d.options.ReconnectMaxStep {
+			step *= 2
+			if step > d.options.ReconnectMaxStep {
+				step = d.options.ReconnectMaxStep
+			}
+		}
+	}
+}
+
+// isTransientUnreachable reports whether err is a transient daemon-unreachable
+// error worth retrying (the socket disappeared during a daemon restart and
+// returns within seconds). It matches the rpcclient daemon_unreachable code and
+// the rpc error code, plus the bare "no such file or directory" dial failure as
+// a defensive string fallback for invokers that do not wrap a typed error.
+func isTransientUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var clientErr *rpcclient.Error
+	if errors.As(err, &clientErr) && clientErr.Code == "daemon_unreachable" {
+		return true
+	}
+	var rpcErr *rpc.Error
+	if errors.As(err, &rpcErr) && rpcErr.Code == "daemon_unreachable" {
+		return true
+	}
+	text := err.Error()
+	return strings.Contains(text, "daemon unreachable") ||
+		strings.Contains(text, "no such file or directory") ||
+		strings.Contains(text, "connection refused")
 }
 
 func (d *Driver) emit(action Action) {

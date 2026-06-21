@@ -51,6 +51,54 @@ func TestEscalationResolveMarksBlockerAndEmitsEvent(t *testing.T) {
 	}
 }
 
+// #505: when escalation.resolve leaves the run running with claimable work, the
+// response must advertise the `run drive --run-id` re-arm verb so the detached
+// auto-driver (which exited when the run hit needs_operator) is restarted
+// instead of the run silently stalling. Mirrors checkpoint.resolve's hint.
+func TestEscalationResolveAdvertisesReArmHintWhenDrivable(t *testing.T) {
+	runner := newEscalationResolveFake("open")
+	runner.runStateAfter = "running"
+	runner.hasClaimable = true
+	response, err := HandleEscalationResolve(context.Background(), runner, rpc.Envelope{Params: map[string]any{
+		"repository_id": "repo_1",
+		"escalation_id": "blk_1",
+	}})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if response["run_state"] != "running" {
+		t.Fatalf("run_state = %#v, want running", response["run_state"])
+	}
+	next, _ := response["next_actions"].([]string)
+	found := false
+	for _, action := range next {
+		if strings.HasPrefix(action, "run drive --run-id run_1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("next_actions missing re-arm hint: %#v", response["next_actions"])
+	}
+}
+
+// #505: a run that is NOT drivable after the resolve (no claimable work, or
+// still terminal/paused) must NOT get the re-arm hint.
+func TestEscalationResolveOmitsReArmHintWhenNotDrivable(t *testing.T) {
+	runner := newEscalationResolveFake("open")
+	runner.runStateAfter = "running"
+	runner.hasClaimable = false
+	response, err := HandleEscalationResolve(context.Background(), runner, rpc.Envelope{Params: map[string]any{
+		"repository_id": "repo_1",
+		"escalation_id": "blk_1",
+	}})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if _, ok := response["next_actions"]; ok {
+		t.Fatalf("did not expect a re-arm hint when there is no claimable work: %#v", response["next_actions"])
+	}
+}
+
 func TestEscalationResolveRejectsClosedEscalation(t *testing.T) {
 	runner := newEscalationResolveFake("resolved")
 	_, err := HandleEscalationResolve(context.Background(), runner, rpc.Envelope{Params: map[string]any{
@@ -77,12 +125,18 @@ type escalationResolveFake struct {
 	eventType       string
 	eventJobID      any
 	eventPayload    map[string]any
+	// #505 re-arm-hint controls: the run's state read AFTER the resolve, and
+	// whether it has any queued/blocked job. Defaults model the common
+	// "still-running, no claimable work" case (no hint).
+	runStateAfter string
+	hasClaimable  bool
 }
 
 func newEscalationResolveFake(state string) *escalationResolveFake {
 	runner := &escalationResolveFake{
 		blockerState:   state,
 		blockerPayload: map[string]any{"existing": "kept"},
+		runStateAfter:  "running",
 	}
 	runner.tx = &escalationResolveFakeTx{parent: runner}
 	return runner
@@ -160,6 +214,21 @@ func (tx *escalationResolveFakeTx) Query(_ context.Context, sql string, _ ...any
 	// flip path. Returning no rows means run.resumed is not emitted here.
 	if strings.Contains(sql, "UPDATE striatumd.runs") {
 		return &fakeRows{fields: []string{"run_id"}, rows: [][]any{}}, nil
+	}
+	// #505: the post-resolve run-state read used to build the re-arm hint.
+	if strings.Contains(sql, "SELECT state, paused_at FROM striatumd.runs") {
+		return &fakeRows{
+			fields: []string{"state", "paused_at"},
+			rows:   [][]any{{tx.parent.runStateAfter, nil}},
+		}, nil
+	}
+	// #505: the claimable-work probe used to build the re-arm hint.
+	if strings.Contains(sql, "FROM striatumd.jobs") && strings.Contains(sql, "queued") {
+		rows := [][]any{}
+		if tx.parent.hasClaimable {
+			rows = [][]any{{int64(1)}}
+		}
+		return &fakeRows{fields: []string{"?column?"}, rows: rows}, nil
 	}
 	return &fakeRows{
 		fields: []string{"blocker_id", "run_id", "job_id", "state", "payload_json"},
