@@ -18,66 +18,18 @@ const futureRuntimeMigrationOwnerDDLFloor = 27
 
 var runtimeMigrationOwnerDDLPattern = regexp.MustCompile(`(?is)\b(?:ALTER|DROP)\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(striatumd\.[a-z_][a-z0-9_]*)`)
 
-// ownerBundleLiteralTransferPattern matches a literal
-// `ALTER TABLE [ONLY] striatumd.<name> OWNER TO striatumd_rw` ownership transfer
-// in an owner bundle (the direct, non-loop form). The captured table is then
-// alterable by a runtime migration.
-var ownerBundleLiteralTransferPattern = regexp.MustCompile(`(?is)ALTER\s+TABLE\s+(?:ONLY\s+)?striatumd\.([a-z_][a-z0-9_]*)\s+OWNER\s+TO\s+striatumd_rw`)
-
-// ownerBundleCohortTransferPattern matches the cohort-loop form owner bundle 0018
-// uses: a `format('ALTER TABLE striatumd.%I OWNER TO striatumd_rw', …)` over a
-// `v_cohort … ARRAY[ … ]` literal. When a bundle carries BOTH the cohort array
-// and the `format(... OWNER TO striatumd_rw)` transfer over it, every
-// single-quoted name inside that ARRAY[…] block is a table the bundle transfers
-// to runtime ownership.
-var ownerBundleCohortArrayPattern = regexp.MustCompile(`(?is)ARRAY\s*\[(.*?)\]`)
-var ownerBundleFormatTransferPattern = regexp.MustCompile(`(?is)format\([^)]*ALTER\s+TABLE\s+striatumd\.%I\s+OWNER\s+TO\s+striatumd_rw`)
-var cohortTableNamePattern = regexp.MustCompile(`'([a-z_][a-z0-9_]*)'`)
-
-// runtimeOwnedTablesAlterable is the set of striatumd.* tables an above-floor
-// runtime migration may legitimately ALTER, DERIVED from the owner bundles'
-// actual `ALTER TABLE … OWNER TO striatumd_rw` ownership transfers rather than a
-// name-based premise. THIS IS THE OWNERSHIP-AWARE GUARD (GH #442 / #441).
-//
-// The prior blanket allowlist (`"striatumd.job_recovery_state": true`, added by
-// #336) was UNSOUND: it reasoned "created by a runtime migration ⇒ runtime-owned,"
-// but on a two-role deploy the runbook applies the sql/NNNN runtime migrations as
-// the OWNER role (`daemon migrate-db --admin-url`), so a runtime-migration-CREATEd
-// table is owned by the BOOTSTRAP role (halbritt), NOT striatumd_rw. A runtime
-// ALTER of it then crash-loops the daemon with `must be owner of table …` (42501,
-// the prod incident #441/#442). pgtest is single-role and never reproduced it.
-//
-// The fix makes the allowlist truthful: a table is alterable-by-runtime ONLY when
-// an owner bundle has TRANSFERRED its ownership to striatumd_rw (owner bundle
-// 0018), which is applied as the owner before any runtime migration ALTERs it. So
-// the guard passes BECAUSE the table is genuinely runtime-owned at ALTER time, not
-// because of a name on a list. If owner bundle 0018 is ever dropped, the set goes
-// empty and 0035/0036 immediately FAIL the guard — exactly the trap D187/D215
-// describe, no escape.
+// runtimeOwnedTablesAlterable is the test-facing wrapper over the shared,
+// non-test derivation db.RuntimeOwnedTablesAlterable (see
+// owner_runtime_ownership.go for the regexes and the full GH #442 / #441
+// rationale). The static guards below and the live two-role pgtest fixture
+// (pgtest.TwoRole, RFC 0142 P0) read the SAME owner-bundle-derived set, so a
+// parse-time verdict and the live pg_class.relowner oracle cannot disagree
+// ("one source, no drift").
 func runtimeOwnedTablesAlterable(t *testing.T) map[string]bool {
 	t.Helper()
-	bundles, err := OwnerBundles()
+	allowed, err := RuntimeOwnedTablesAlterable()
 	if err != nil {
-		t.Fatalf("load owner bundles for ownership-transfer derivation: %v", err)
-	}
-	allowed := map[string]bool{}
-	for _, bundle := range bundles {
-		// Direct literal transfers: ALTER TABLE striatumd.<name> OWNER TO striatumd_rw.
-		for _, m := range ownerBundleLiteralTransferPattern.FindAllStringSubmatch(bundle.SQL, -1) {
-			allowed["striatumd."+strings.ToLower(m[1])] = true
-		}
-		// Cohort-loop transfers: a format('ALTER TABLE striatumd.%I OWNER TO
-		// striatumd_rw', …) over a v_cohort ARRAY[…] literal. Only extract the
-		// cohort-array names, and only when the transfer-over-the-cohort is present,
-		// so unrelated quoted strings (role names, stamp capabilities) cannot widen
-		// the allowlist.
-		if ownerBundleFormatTransferPattern.MatchString(bundle.SQL) {
-			for _, arr := range ownerBundleCohortArrayPattern.FindAllStringSubmatch(bundle.SQL, -1) {
-				for _, m := range cohortTableNamePattern.FindAllStringSubmatch(arr[1], -1) {
-					allowed["striatumd."+strings.ToLower(m[1])] = true
-				}
-			}
-		}
+		t.Fatalf("derive runtime-owned tables from owner bundles: %v", err)
 	}
 	return allowed
 }

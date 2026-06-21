@@ -18,11 +18,17 @@ import (
 )
 
 // twoRoleRuntimeFloor mirrors the unexported futureRuntimeMigrationOwnerDDLFloor
-// in migrations_test.go: migrations strictly below it were applied as the owner
+// in migrations_test.go and twoRoleRuntimeFloor in go/pkg/pgtest/two_role.go (the
+// RFC 0142 P0 fixture): migrations strictly below it were applied as the owner
 // at bootstrap, and only versions >= it must stay applyable by the runtime role
 // striatumd_rw (RFC 0110 / D215). The two-role apply test stages the floor +
 // owner bundles as the owner and then applies everything at-or-above the floor as
 // the runtime role, which is exactly the production daemon-restart migrate path.
+//
+// Collapsing this magic floor to a single home is RFC 0142 P0 review finding F-1
+// (low, deferred): migrations_test.go is white-box `package db` and cannot import
+// pgtest without an import cycle, so the three sites cross-reference each other to
+// keep the floor from drifting silently.
 const twoRoleRuntimeFloor = 27
 
 // TestFullMigrationSetAppliesAsNonOwnerRoleOnTwoRoleDB is the dynamic,
