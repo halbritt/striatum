@@ -425,6 +425,14 @@ func runRunDrive(args []string, stdout io.Writer, stderr io.Writer, globals lead
 		ProviderAuthGate: providerAuthGate,
 		ForceConcurrent:  forceConcurrent,
 	})
+	return driveExitCode(err, runID, stderr)
+}
+
+// driveExitCode maps a `run drive` outcome to its process exit status and prints
+// the operator-facing diagnostic. It is a pure function (no daemon, no exec) so
+// the exit-code contract — notably the #556 NON-RESTARTABLE refusal code and the
+// #513 transient-socket retryable code — is unit-testable.
+func driveExitCode(err error, runID string, stderr io.Writer) int {
 	if err == nil {
 		return 0
 	}
@@ -437,6 +445,25 @@ func runRunDrive(args []string, stdout io.Writer, stderr io.Writer, globals lead
 	if errors.As(err, &concurrent) {
 		_, _ = fmt.Fprintln(stderr, concurrent.Error())
 		return 2
+	}
+	var providerRefusal rundrive.ProviderAuthRefusalError
+	if errors.As(err, &providerRefusal) {
+		// #556: a deterministic provider-auth preflight refusal stops the driver.
+		// Exiting NON-ZERO here made the detached `striatum-drive-<run>` unit
+		// (Restart=on-failure) crash-loop to its StartLimitBurst and die, leaving
+		// the run running with no driver. Exit with the dedicated,
+		// NON-RESTARTABLE ProviderAuthRefusalExitCode (the unit sets
+		// RestartPreventExitStatus to it), and surface a legible operator message
+		// — what stopped the driver, why, and how to resume — so the refusal is
+		// not a silent strand. The transient-socket self-heal (#513, exit 11)
+		// is untouched.
+		_, _ = fmt.Fprintf(stderr,
+			"run drive: stopping (not restarting) — lane provider auth preflight refused launch: %s.\n"+
+				"  The lane provider login could not be confirmed for this run's lane user, so no lane was started.\n"+
+				"  Fix the lane provider auth (e.g. as the lane OS user: `codex login`; confirm `$CODEX_HOME/auth.json`),\n"+
+				"  then resume: `striatum run drive --run-id %s`. To launch without the gate: add `--provider-auth-gate off`.\n",
+			providerRefusal.Code, runID)
+		return rundrive.ProviderAuthRefusalExitCode
 	}
 	_, _ = fmt.Fprintln(stderr, err.Error())
 	return rpcclient.ExitCode(err)

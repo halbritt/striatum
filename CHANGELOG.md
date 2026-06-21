@@ -34,6 +34,28 @@
 
 ### Fixed
 
+- **Codex provider-auth preflight no longer false-refuses every lane, and a
+  deterministic refusal no longer crash-loops the auto-driver to death (#556).**
+  Two coupled reliability defects surfaced after the 2026-06-21 deploy. (A) The
+  `run drive` / `supervise.start` provider-auth preflight ran a *billed* codex
+  model turn and `classifyCodexResult` default-mapped ANY nonzero exit to
+  `lane_provider_auth_failed` — so a read-only-sandbox network block, provider
+  quota, or codex flag/version drift (codex 0.140 was new since the deploy) was
+  mislabeled an auth failure while the lane's `~/.codex/auth.json` was valid,
+  refusing every codex lane. The preflight now prefers a cheap **OFFLINE** check
+  — presence + basic JSON validity of `$CODEX_HOME/auth.json` for the LANE
+  user's HOME — and only falls back to the live smoke when that artifact is
+  unreadable; an unrecognized nonzero exit now classifies as
+  `lane_provider_unavailable`, not auth. The gate stays non-vacuous: an absent,
+  corrupt, or credential-less `auth.json` still refuses. (B) On a deterministic
+  `ProviderAuthRefusalError` the driver previously exited nonzero, so the
+  detached `striatum-drive-<run>` unit (`Restart=on-failure`, #513) restarted 10×
+  in 120s → "Start request repeated too quickly" → the driver died and the run
+  was stranded `running` with no driver. `run drive` now exits with a dedicated,
+  non-restartable code (3) and prints a legible operator diagnostic (why it
+  stopped, how to resume, the `--provider-auth-gate off` escape), and the unit
+  sets `RestartPreventExitStatus=3`. #513's transient socket-drop self-heal
+  (exit 11) is preserved.
 - **Review findings are operator-readable from `striatum status` / dashboard, and a
   first-dissent revision route records how many sibling final reviewers were still in
   flight (#476, #506 — legibility).** A blocking review's actual objections (its

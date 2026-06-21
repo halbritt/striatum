@@ -3,6 +3,7 @@ package laneproviderauth
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,12 +21,20 @@ const (
 	StatusFailed = "failed"
 
 	ProbeCodexOutputLastMessage = "codex_exec_output_last_message"
+	ProbeCodexOfflineAuthFile   = "codex_offline_auth_file"
 
 	SuccessSignalMatched  = "matched"
 	SuccessSignalMissing  = "missing"
 	SuccessSignalEmpty    = "empty"
 	SuccessSignalMismatch = "mismatch"
 	SuccessSignalNotRun   = "not_run"
+
+	// CodexAuthFileName is the credential file codex writes under $CODEX_HOME
+	// (default ~/.codex). Its presence + basic JSON validity is the cheap,
+	// OFFLINE preflight: a valid lane login leaves a parseable auth.json with a
+	// recognizable credential field, and no billed model turn is required to
+	// confirm the lane can authenticate. #556.
+	CodexAuthFileName = "auth.json"
 
 	FailureAuthFailed       = "lane_provider_auth_failed"
 	FailureBinaryMissing    = "lane_provider_binary_missing"
@@ -187,6 +196,43 @@ func Check(ctx context.Context, params Params) Result {
 	runner := params.Runner
 	if runner == nil {
 		runner = ExecRunner{}
+	}
+
+	// #556: prefer a cheap OFFLINE check over the billed model round-trip. A
+	// valid lane login leaves a parseable $CODEX_HOME/auth.json with a
+	// recognizable credential field; confirming that is sufficient to let the
+	// lane launch (the lane's own codex process re-validates/refreshes on first
+	// use). The offline check runs FOR THE LANE USER's HOME — the preflight env
+	// carries the lane user's HOME/CODEX_HOME — so it inspects the lane's
+	// auth.json, not the daemon user's. Only when the auth artifact is missing or
+	// unparseable do we fall through to the (billed) live smoke, which still
+	// distinguishes a genuine auth failure from a transient/unavailable one.
+	offline := offlineAuthProbe(ctx, runner, params)
+	if offline.attempted {
+		result.Probe = ProbeCodexOfflineAuthFile
+		result.Network = "no_network_offline_auth_file"
+		result.Costing = "no_provider_tokens_spent"
+		if offline.valid {
+			result.Status = StatusPassed
+			result.FailureClass = ""
+			result.SuccessSignal = SuccessSignalMatched
+			result.Remediation = "none"
+			result.DurationMS = elapsedMS(started)
+			return result
+		}
+		if offline.definitivelyMissing {
+			// The lane has no usable codex credential at all — a genuine auth gap
+			// the operator must fix (codex login as the lane user). This keeps the
+			// gate non-vacuous: a rotten/absent auth.json still refuses.
+			result = failed(result, FailureAuthFailed)
+			result.SuccessSignal = SuccessSignalMissing
+			result.DurationMS = elapsedMS(started)
+			return result
+		}
+		// offline.attempted && !valid && !definitivelyMissing: the probe could
+		// not reach a verdict (e.g. could not read the file for a reason other
+		// than absence). Fall through to the live smoke below rather than guess.
+		result = baseResult(params, provider)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "striatum-lane-provider-auth-*")
@@ -403,15 +449,148 @@ func classifyCodexResult(base Result, run CommandResult, successSignal string, r
 		switch {
 		case textSuggestsMissingBinary(text):
 			return failed(base, FailureBinaryMissing)
-		case textSuggestsUnavailable(text):
-			return failed(base, FailureUnavailable)
 		case textSuggestsAuthFailure(text):
 			return failed(base, FailureAuthFailed)
+		case textSuggestsUnavailable(text):
+			return failed(base, FailureUnavailable)
 		default:
-			return failed(base, FailureAuthFailed)
+			// #556: a nonzero exit that does NOT name an auth problem must NOT be
+			// classified as an auth failure. A read-only-sandbox network block,
+			// provider quota, or a codex flag/version drift (e.g. codex 0.140 new
+			// since the deploy) all exit nonzero while the lane's auth is valid;
+			// mislabeling those as lane_provider_auth_failed refused every codex
+			// lane and crash-looped the driver to death. Treat an unrecognized
+			// nonzero exit as UNAVAILABLE (a retryable/inspect class), not auth.
+			return failed(base, FailureUnavailable)
 		}
 	}
 	return base
+}
+
+// codexOfflineAuthOutcome reports the result of the offline auth.json probe.
+//   - attempted: the offline probe ran (an auth home was resolvable).
+//   - valid: auth.json was present and parsed as JSON carrying a recognizable
+//     credential field.
+//   - definitivelyMissing: auth.json was absent (or empty/zero-length), i.e. a
+//     genuine "no credential" gap.
+//
+// attempted && !valid && !definitivelyMissing means the probe could not reach a
+// verdict (e.g. an unexpected read error) and the caller should fall through to
+// the live smoke rather than assume an auth failure.
+type codexOfflineAuthOutcome struct {
+	attempted           bool
+	valid               bool
+	definitivelyMissing bool
+}
+
+// offlineAuthProbe is the seam the offline auth check runs through; it is a var
+// so the live-smoke classifier tests can bypass the offline short-circuit and
+// drive classifyCodexResult end-to-end through Check. Production always uses
+// checkCodexOfflineAuth.
+var offlineAuthProbe = checkCodexOfflineAuth
+
+// checkCodexOfflineAuth inspects $CODEX_HOME/auth.json for the lane user without
+// spending a provider token (#556). When the preflight targets a run-as lane
+// user the daemon process may not be able to read the lane-owned auth.json
+// directly, so the read is delegated through the same `sudo -n -u <user> env -i`
+// launch shape the live smoke uses; with no run-as user it reads in-process.
+func checkCodexOfflineAuth(ctx context.Context, runner Runner, params Params) codexOfflineAuthOutcome {
+	env := SanitizeEnv(params.Env, nil)
+	authHome := ResolveAuthHome(ProviderCodex, env)
+	if authHome == "" || authHome == "unknown" {
+		return codexOfflineAuthOutcome{}
+	}
+	authPath := filepath.Join(authHome, CodexAuthFileName)
+
+	runAsUser := strings.TrimSpace(params.RunAsUser)
+	if runAsUser == "" {
+		payload, err := os.ReadFile(authPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return codexOfflineAuthOutcome{attempted: true, definitivelyMissing: true}
+			}
+			// Could not read for some other reason (permissions, etc.) — let the
+			// live smoke decide.
+			return codexOfflineAuthOutcome{attempted: true}
+		}
+		return classifyOfflineAuthPayload(payload)
+	}
+
+	// Delegate the read to the lane user. `cat` of an absent file exits nonzero
+	// with a "no such file" stderr (treated as definitively missing); a readable
+	// file is validated from its stdout payload.
+	command := []string{"cat", "--", authPath}
+	spec := BuildLaunchSpec(command, "", runAsUser, env)
+	runCtx, cancel := context.WithTimeout(ctx, offlineAuthTimeout())
+	defer cancel()
+	res := runner.Run(runCtx, spec)
+	if res.ExitCode == 0 && res.Err == nil {
+		return classifyOfflineAuthPayload([]byte(res.Stdout))
+	}
+	text := strings.ToLower(res.Stderr + "\n" + errorString(res.Err))
+	if strings.Contains(text, "no such file") || strings.Contains(text, "not found") {
+		return codexOfflineAuthOutcome{attempted: true, definitivelyMissing: true}
+	}
+	// Ambiguous failure (sudo policy, timeout, unexpected) — fall through to the
+	// live smoke rather than asserting an auth failure.
+	return codexOfflineAuthOutcome{attempted: true}
+}
+
+func offlineAuthTimeout() time.Duration {
+	return 5 * time.Second
+}
+
+// classifyOfflineAuthPayload validates an auth.json payload: it must parse as a
+// JSON object and carry at least one recognizable credential field. A truly
+// empty payload is "definitively missing"; a present-but-unparseable / fieldless
+// payload is a rotten credential (definitively missing → genuine auth gap), so
+// the gate is never vacuous.
+func classifyOfflineAuthPayload(payload []byte) codexOfflineAuthOutcome {
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return codexOfflineAuthOutcome{attempted: true, definitivelyMissing: true}
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		// Present but not valid JSON — a corrupt credential. Treat as a genuine
+		// auth gap so the gate still refuses.
+		return codexOfflineAuthOutcome{attempted: true, definitivelyMissing: true}
+	}
+	if offlineAuthHasCredential(doc) {
+		return codexOfflineAuthOutcome{attempted: true, valid: true}
+	}
+	// Parseable JSON but no recognizable credential field — rotten auth.json.
+	return codexOfflineAuthOutcome{attempted: true, definitivelyMissing: true}
+}
+
+// offlineAuthHasCredential reports whether a parsed auth.json carries a
+// recognizable credential. codex writes either an OPENAI_API_KEY-style flat key
+// or an OAuth `tokens` object (id/access/refresh + account_id); we accept any of
+// those shapes (and a couple of historical key names) so a valid login of either
+// kind passes while an empty/fieldless object fails.
+func offlineAuthHasCredential(doc map[string]any) bool {
+	for _, key := range []string{"OPENAI_API_KEY", "openai_api_key", "api_key", "apiKey"} {
+		if v, ok := doc[key]; ok && nonEmptyString(v) {
+			return true
+		}
+	}
+	if tokens, ok := doc["tokens"].(map[string]any); ok {
+		for _, key := range []string{"access_token", "id_token", "refresh_token"} {
+			if v, ok := tokens[key]; ok && nonEmptyString(v) {
+				return true
+			}
+		}
+	}
+	for _, key := range []string{"access_token", "id_token", "refresh_token", "token"} {
+		if v, ok := doc[key]; ok && nonEmptyString(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func nonEmptyString(v any) bool {
+	s, ok := v.(string)
+	return ok && strings.TrimSpace(s) != ""
 }
 
 func successSignalState(successSignal string, readErr error) string {

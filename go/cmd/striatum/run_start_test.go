@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/halbritt/striatum/go/pkg/cli/rpcclient"
+	"github.com/halbritt/striatum/go/pkg/cli/rundrive"
 )
 
 // withStubbedRunStart swaps the start executor and the auto-drive launcher for
@@ -289,6 +293,10 @@ func TestDriverUnitArgsCarriesRestartOnFailure(t *testing.T) {
 		"--property=RestartSec=2s",
 		"--property=StartLimitIntervalSec=120s",
 		"--property=StartLimitBurst=10",
+		// #556: a deterministic provider-auth refusal exits with the dedicated
+		// non-restartable code, which must be excluded from Restart=on-failure so
+		// it does not crash-loop to the StartLimitBurst rate-limit.
+		"--property=RestartPreventExitStatus=3",
 		"--collect",
 		"run drive --run-id run_x",
 	} {
@@ -311,4 +319,60 @@ func TestDriverUnitArgsCarriesRestartOnFailure(t *testing.T) {
 	if sep == -1 || verb == -1 || verb < sep {
 		t.Fatalf("expected `drive` after `--`; sep=%d verb=%d args=%#v", sep, verb, args)
 	}
+}
+
+// TestDriveExitCodeProviderAuthRefusalIsNonRestartable is the #556 Defect-B
+// regression: a deterministic ProviderAuthRefusalError yields the dedicated,
+// non-restartable exit code (which the unit's RestartPreventExitStatus excludes
+// from Restart=on-failure) and a legible operator diagnostic — NOT a nonzero
+// exit that crash-loops the systemd unit to its rate-limit. A transient
+// socket-drop (daemon_unreachable, exit 11) still yields the RETRYABLE nonzero
+// exit so #513's self-heal restart is preserved.
+func TestDriveExitCodeProviderAuthRefusalIsNonRestartable(t *testing.T) {
+	t.Run("provider_auth_refusal_non_restartable", func(t *testing.T) {
+		var stderr bytes.Buffer
+		code := driveExitCode(rundrive.ProviderAuthRefusalError{Code: "lane_provider_auth_failed", SessionID: "sess_1"}, "run_1", &stderr)
+		if code != rundrive.ProviderAuthRefusalExitCode {
+			t.Fatalf("exit code = %d, want non-restartable %d", code, rundrive.ProviderAuthRefusalExitCode)
+		}
+		if code == 0 {
+			// Guard the intent in case the dedicated code is ever set to 0: the unit
+			// excludes this exact code, so it must be the one the unit excludes.
+			t.Fatalf("non-restartable code must be the RestartPreventExitStatus code, not a bare 0")
+		}
+		out := stderr.String()
+		for _, want := range []string{"stopping (not restarting)", "lane_provider_auth_failed", "run drive --run-id run_1", "provider-auth-gate off"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("diagnostic missing %q; got: %s", want, out)
+			}
+		}
+	})
+
+	t.Run("transient_socket_drop_is_retryable_nonzero", func(t *testing.T) {
+		var stderr bytes.Buffer
+		// A transient daemon_unreachable surfaces (after the in-loop reconnect
+		// budget is exhausted) as the rpcclient error with exit 11 — the code the
+		// unit RESTARTS (#513). It must not be the non-restartable refusal code.
+		transient := &rpcclient.Error{Code: "daemon_unreachable", Message: "daemon unreachable", ExitCode: 11}
+		code := driveExitCode(transient, "run_1", &stderr)
+		if code == rundrive.ProviderAuthRefusalExitCode {
+			t.Fatalf("transient socket drop must NOT use the non-restartable refusal code %d", code)
+		}
+		if code != 11 {
+			t.Fatalf("transient socket drop exit code = %d, want retryable 11 (Restart=on-failure self-heal)", code)
+		}
+	})
+
+	t.Run("terminal_and_concurrent_unchanged", func(t *testing.T) {
+		var stderr bytes.Buffer
+		if code := driveExitCode(rundrive.TerminalError{RunID: "run_1", State: "failed"}, "run_1", &stderr); code != 1 {
+			t.Fatalf("terminal exit code = %d, want 1", code)
+		}
+		if code := driveExitCode(rundrive.ConcurrentDriveError{RunID: "run_1", PID: 42}, "run_1", &stderr); code != 2 {
+			t.Fatalf("concurrent exit code = %d, want 2", code)
+		}
+		if code := driveExitCode(nil, "run_1", &stderr); code != 0 {
+			t.Fatalf("nil error exit code = %d, want 0", code)
+		}
+	})
 }

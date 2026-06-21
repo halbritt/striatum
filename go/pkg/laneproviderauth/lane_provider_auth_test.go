@@ -141,6 +141,10 @@ func TestCheckClassifiesCodexResults(t *testing.T) {
 			wantExitCode: 0,
 		},
 	}
+	// #556: this suite exercises the LIVE-smoke classifier (classifyCodexResult)
+	// end-to-end through Check, so bypass the offline auth.json short-circuit that
+	// would otherwise resolve first. The offline path has its own dedicated tests.
+	defer withoutOfflineAuthProbe()()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := Check(context.Background(), Params{
@@ -190,7 +194,19 @@ func TestUnsupportedProviderResultIsSafe(t *testing.T) {
 	}
 }
 
+// withoutOfflineAuthProbe swaps the offline auth probe for a no-op ("not
+// attempted") so a test can drive the live-smoke path (classifyCodexResult /
+// the serialization lock) deterministically. It returns a restore func.
+func withoutOfflineAuthProbe() func() {
+	prev := offlineAuthProbe
+	offlineAuthProbe = func(context.Context, Runner, Params) codexOfflineAuthOutcome {
+		return codexOfflineAuthOutcome{}
+	}
+	return func() { offlineAuthProbe = prev }
+}
+
 func TestSerializationIsPerProviderAuthHome(t *testing.T) {
+	defer withoutOfflineAuthProbe()()
 	var inFlight int32
 	var maxInFlight int32
 	runner := RunnerFunc(func(_ context.Context, spec CommandSpec) CommandResult {
@@ -225,6 +241,180 @@ func TestSerializationIsPerProviderAuthHome(t *testing.T) {
 	if atomic.LoadInt32(&maxInFlight) != 1 {
 		t.Fatalf("checks for same provider auth home ran concurrently: max=%d", maxInFlight)
 	}
+}
+
+// TestNonAuthNonzeroExitIsNotAuthFailure is the #556 Defect-A regression: a
+// nonzero codex exit that does NOT name an auth problem (a read-only-sandbox
+// network block, quota, or a flag/version drift) must classify as UNAVAILABLE,
+// not lane_provider_auth_failed. Mislabeling these refused every codex lane
+// while auth was actually valid.
+func TestNonAuthNonzeroExitIsNotAuthFailure(t *testing.T) {
+	cases := []struct {
+		name   string
+		run    CommandResult
+		expect string
+	}{
+		{
+			name:   "read_only_sandbox_network_block",
+			run:    CommandResult{ExitCode: 1, Stderr: "error sending request: connection refused (os error 111)", Err: errors.New("exit status 1")},
+			expect: FailureUnavailable,
+		},
+		{
+			name:   "unrecognized_flag_drift",
+			run:    CommandResult{ExitCode: 2, Stderr: "error: unexpected argument '--ignore-rules' found", Err: errors.New("exit status 2")},
+			expect: FailureUnavailable,
+		},
+		{
+			name:   "bare_nonzero_no_signal",
+			run:    CommandResult{ExitCode: 1, Stderr: "panic: something went wrong", Err: errors.New("exit status 1")},
+			expect: FailureUnavailable,
+		},
+		{
+			name:   "genuine_auth_still_detected",
+			run:    CommandResult{ExitCode: 1, Stderr: "not logged in; run `codex login`", Err: errors.New("exit status 1")},
+			expect: FailureAuthFailed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyCodexResult(Result{Status: StatusPassed}, tc.run, "", errors.New("missing"))
+			if got.FailureClass != tc.expect {
+				t.Fatalf("FailureClass = %q, want %q (exit=%d stderr=%q)", got.FailureClass, tc.expect, tc.run.ExitCode, tc.run.Stderr)
+			}
+		})
+	}
+}
+
+// TestOfflineCodexAuthCheck is the #556 Defect-A offline-probe contract: a valid
+// auth.json present in $CODEX_HOME passes WITHOUT any billed model round-trip,
+// and an absent or rotten auth.json fails (the gate stays non-vacuous).
+func TestOfflineCodexAuthCheck(t *testing.T) {
+	t.Run("valid_oauth_tokens_passes_offline", func(t *testing.T) {
+		home := t.TempDir()
+		codexHome := filepath.Join(home, ".codex")
+		if err := os.MkdirAll(codexHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, CodexAuthFileName),
+			[]byte(`{"tokens":{"access_token":"ya29.real","id_token":"id","refresh_token":"rt"},"OPENAI_API_KEY":null}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		smokeRan := false
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=" + home, "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				smokeRan = true
+				return CommandResult{ExitCode: 1, Stderr: "should not run"}
+			}),
+		})
+		if !result.Passed() {
+			t.Fatalf("offline-valid auth did not pass: %#v", result)
+		}
+		if smokeRan {
+			t.Fatalf("offline-valid auth should skip the billed smoke; smoke ran")
+		}
+		if result.Probe != ProbeCodexOfflineAuthFile {
+			t.Fatalf("probe = %q, want %q", result.Probe, ProbeCodexOfflineAuthFile)
+		}
+		if result.Costing != "no_provider_tokens_spent" {
+			t.Fatalf("costing = %q, want no_provider_tokens_spent", result.Costing)
+		}
+	})
+
+	t.Run("flat_api_key_passes_offline", func(t *testing.T) {
+		home := t.TempDir()
+		codexHome := filepath.Join(home, ".codex")
+		if err := os.MkdirAll(codexHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, CodexAuthFileName),
+			[]byte(`{"OPENAI_API_KEY":"sk-live-xyz"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=" + home, "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("billed smoke must not run when offline auth is valid")
+				return CommandResult{}
+			}),
+		})
+		if !result.Passed() {
+			t.Fatalf("flat-key offline auth did not pass: %#v", result)
+		}
+	})
+
+	t.Run("absent_auth_fails_as_auth_gap", func(t *testing.T) {
+		home := t.TempDir() // no .codex/auth.json
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=" + home, "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("billed smoke must not run when auth.json is definitively absent")
+				return CommandResult{}
+			}),
+		})
+		if result.Passed() || result.FailureClass != FailureAuthFailed {
+			t.Fatalf("absent auth.json must fail as auth gap: %#v", result)
+		}
+	})
+
+	t.Run("rotten_json_fails_as_auth_gap", func(t *testing.T) {
+		home := t.TempDir()
+		codexHome := filepath.Join(home, ".codex")
+		if err := os.MkdirAll(codexHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, CodexAuthFileName), []byte("not json at all"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=" + home, "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("billed smoke must not run for a present-but-corrupt auth.json")
+				return CommandResult{}
+			}),
+		})
+		if result.Passed() || result.FailureClass != FailureAuthFailed {
+			t.Fatalf("corrupt auth.json must fail as auth gap: %#v", result)
+		}
+	})
+
+	t.Run("fieldless_json_fails_as_auth_gap", func(t *testing.T) {
+		home := t.TempDir()
+		codexHome := filepath.Join(home, ".codex")
+		if err := os.MkdirAll(codexHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(codexHome, CodexAuthFileName), []byte(`{"unrelated":"value"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=" + home, "PATH=/usr/bin"},
+			Runner:   RunnerFunc(func(context.Context, CommandSpec) CommandResult { return CommandResult{} }),
+		})
+		if result.Passed() || result.FailureClass != FailureAuthFailed {
+			t.Fatalf("credential-less auth.json must fail as auth gap: %#v", result)
+		}
+	})
+
+	t.Run("codex_home_override_respected", func(t *testing.T) {
+		codexHome := t.TempDir()
+		if err := os.WriteFile(filepath.Join(codexHome, CodexAuthFileName), []byte(`{"OPENAI_API_KEY":"sk-x"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := Check(context.Background(), Params{
+			Provider: ProviderCodex,
+			Env:      []string{"HOME=/home/nope", "CODEX_HOME=" + codexHome, "PATH=/usr/bin"},
+			Runner:   RunnerFunc(func(context.Context, CommandSpec) CommandResult { return CommandResult{} }),
+		})
+		if !result.Passed() {
+			t.Fatalf("CODEX_HOME-pinned auth.json did not pass: %#v", result)
+		}
+	})
 }
 
 func outputPathFromSpec(t *testing.T, spec CommandSpec) string {

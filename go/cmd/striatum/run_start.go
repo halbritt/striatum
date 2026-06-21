@@ -5,7 +5,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+
+	"github.com/halbritt/striatum/go/pkg/cli/rundrive"
 )
 
 // Auto-drive (issue #212, the operator-token-burn / yolo-control-surface half of
@@ -215,6 +218,15 @@ func driverUnitArgs(unit, bin string, l driverLaunch) []string {
 		"--property=RestartSec=2s",
 		"--property=StartLimitIntervalSec=120s",
 		"--property=StartLimitBurst=10",
+		// #556: a DETERMINISTIC provider-auth preflight refusal exits with the
+		// dedicated, non-restartable rundrive.ProviderAuthRefusalExitCode. Without
+		// this exclusion, Restart=on-failure (#513, for TRANSIENT socket-drops)
+		// also restarts the refusal — 10 restarts in 120s → "Start request
+		// repeated too quickly" → the driver dies and the run is stranded running
+		// with no driver. RestartPreventExitStatus makes systemd treat that code
+		// as a clean stop (no restart), while the transient socket-drop self-heal
+		// (exit 11) keeps restarting.
+		"--property=RestartPreventExitStatus=" + strconv.Itoa(rundrive.ProviderAuthRefusalExitCode),
 	}
 	// Carry the daemon socket override (if the operator set one in their env) into
 	// the user-manager environment the driver inherits; the runtime client-token

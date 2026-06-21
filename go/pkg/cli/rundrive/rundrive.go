@@ -98,6 +98,20 @@ func (e TerminalError) Error() string {
 	return fmt.Sprintf("run %s reached terminal state %s", e.RunID, e.State)
 }
 
+// ProviderAuthRefusalExitCode is the dedicated, NON-RESTARTABLE exit status the
+// `run drive` command returns when a deterministic provider-auth preflight
+// refusal stops the driver (#556). The detached systemd unit sets
+// RestartPreventExitStatus to this code so a deterministic refusal does NOT
+// crash-loop to the StartLimitBurst rate-limit (the bug that left the run
+// running with no driver). It is distinct from the transient-socket exit (11),
+// whose Restart=on-failure self-heal (#513) is preserved. 3 is unused by the
+// CLI's exit-code catalog (rpcclient.exitCode uses 1,2,6,10,11,12,13).
+const ProviderAuthRefusalExitCode = 3
+
+// ProviderAuthRefusalError reports that the provider-auth preflight refused to
+// launch a lane. It is DETERMINISTIC (the same auth gap refuses every pass), so
+// the driver stops rather than thrashing, and the command exits with the
+// non-restartable ProviderAuthRefusalExitCode (#556).
 type ProviderAuthRefusalError struct {
 	Code      string
 	SessionID string
