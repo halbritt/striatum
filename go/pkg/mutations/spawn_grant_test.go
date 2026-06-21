@@ -84,6 +84,9 @@ func TestSpawnRunAsSpecResolvesLaneUser(t *testing.T) {
 		return ""
 	}
 	defer func() { laneOSUserHome = restore }()
+	restoreUser := currentOSUsername
+	currentOSUsername = func() string { return "striatumd-daemon-user" }
+	defer func() { currentOSUsername = restoreUser }()
 
 	spec, err := spawnRunAsSpec()
 	if err != nil {

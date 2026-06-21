@@ -237,7 +237,7 @@ func configuredLaneRunAsUser() string {
 	return laneUser
 }
 
-func currentOSUsername() string {
+var currentOSUsername = func() string {
 	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
 		return strings.TrimSpace(u.Username)
 	}
