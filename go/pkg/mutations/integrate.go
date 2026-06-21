@@ -60,8 +60,9 @@ func HandleRunIntegrate(ctx context.Context, runner db.Runner, envelope rpc.Enve
 		// declared job-level sealed barrier inside it has fired (job barriers compose
 		// into the run barrier). runEntityBarrierReady expresses this through the P0
 		// db.BarrierReadySQL shape (entity_kind='run'). A run that declares NO job-level
-		// barriers (every run today — recordFaninFreezePoint is not yet on the live
-		// completion path) has an empty in-edge set, so the barrier reduces EXACTLY to
+		// barriers (every run on the default path — recordFaninFreezePoint records a
+		// freeze point only when the STRIATUM_BARRIER_FANIN shadow opt-in is on, #527)
+		// has an empty in-edge set, so the barrier reduces EXACTLY to
 		// the `state == 'completed'` check above — proven byte-identical by
 		// TestRunIntegrateIsTheRunEntityBarrier and TestRunIntegrateRunEntityBarrierGate.
 		// This RETIRES the bare terminal-state default in favor of the composing

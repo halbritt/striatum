@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- **RFC 0133 fan-in barrier: `recordFaninFreezePoint` is now wired into a live
+  fan-out, in SHADOW (#527, the last build leg of #354; D254).** At run
+  materialization (`run.prepare`) the daemon now records an immutable fan-in
+  freeze point for every downstream join seat with two or more upstream siblings
+  (a single-upstream chain edge is skipped), declaring the sibling set against
+  the confirmed run-branch tip. This is the missing production caller D246's
+  revisit trigger named: with it, an opted-in run finally exercises the fan-in
+  barrier end-to-end (recorder → staging-at-completion hook → `barrier_assembly`
+  dispatcher → assembly). It is a **strict no-op unless `STRIATUM_BARRIER_FANIN=1`**
+  (the existing shadow opt-in, default OFF) and is **additive** — it only writes
+  the freeze record; the shipped D206 per-completion run-branch merge stays the
+  sole, byte-for-byte-unchanged fan-in path for every non-opted-in run. **The
+  default is NOT flipped**; the operator go-live flip (apply owner bundle 0013,
+  confirm the same-final-tree fixture against a real deployment, set
+  `STRIATUM_BARRIER_FANIN=1`, retire `fanInIntegrateRunBranch`) remains, and #354
+  stays open until then.
+
 ### Fixed
 
 - **verifier: `builtin:go-*` checks now verify a repo whose Go module is in a

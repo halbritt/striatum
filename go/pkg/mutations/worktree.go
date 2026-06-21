@@ -934,11 +934,12 @@ func anchorActiveWorktreeForJob(ctx context.Context, runner any, repositoryID st
 	if err != nil {
 		return nil, err
 	}
-	// RFC 0135 P1 (#354, D246) — the staging-at-completion hook. SHADOW: it is a
+	// RFC 0135 P1 (#354, D246/D254) — the staging-at-completion hook. SHADOW: it is a
 	// strict no-op unless the fan-in fold is opted in (STRIATUM_BARRIER_FANIN=1) AND
 	// the completing seat is a declared in-edge of a recorded fan-in freeze point.
-	// Until recordFaninFreezePoint is wired into a live fan-out, no run declares a
-	// fan-in, so this never stages on any current run and the default per-completion
+	// On the default path no run declares a fan-in (the live fan-out caller
+	// recordRunFaninFreezePoints, #527, records a freeze point only when the same
+	// opt-in is on), so this never stages on a default-path run and the per-completion
 	// merge (done above by anchorWorktreeCommitStack) remains the sole fan-in path.
 	// It is ADDITIVE to the merge: it records the durable staging witness without
 	// changing how the run branch advanced. The per-job worktree HEAD the anchor
