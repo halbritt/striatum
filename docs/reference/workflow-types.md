@@ -568,6 +568,20 @@ Two **distinct bounded budgets** — do not conflate them:
   loop returns to the synthesis/implement node — a `cycle` with
   `on_verdict: needs_revision`, `max_iterations: 2`. It does not fire if no
   reviewer dissents.
+  - **Final-review fan-in debounce (opt-in, RFC 0154 / D250 #476):** a multi-reviewer
+    panel routes the revision on the **first** gating `needs_revision` by default,
+    even while sibling final reviewers are still in flight — which can burn a
+    bounded `max_iterations` slot on a moving target. Add the opt-in
+    `debounce_cohort` field to the `cycle` to wait for the gating cohort before
+    routing one consolidated revision pass: `debounce_cohort: all` waits for every
+    gating seat that feeds the same downstream gate to report a verdict; an integer
+    waits for that many gating seats. The cohort is the frozen gating-seat
+    denominator the downstream gate already uses (advisory seats are excluded), so
+    it is referenced, not restated. Absent (the default) preserves today's
+    first-dissent routing for every existing workflow. No schema migration — it is a
+    `workflow_json` field. A late straggler that reports after the consolidated
+    route is rendered non-current by the build's bumped `review_generation` (RFC
+    0126 / D194) and never triggers a second route.
 
 Notes:
 

@@ -1,8 +1,39 @@
 # RFC 0154: Debounce multi-reviewer final-review fan-in before revision-cycle routing — should a single `needs_revision` route to author while sibling final reviewers are still in flight?
 
-Status: accepted (D250; option B -- opt-in, default-preserving final-review debounce)
+Status: implemented (D250; option B -- opt-in, default-preserving final-review debounce; #476)
 Date: 2026-06-20
 author: triager-claude-opus-4-8-001
+
+## Implementation (2026-06-21, #476)
+
+The D250 option-B debounce landed as the opt-in `cycles[].debounce_cohort`
+workflow field (no DDL/migration — a `workflow_json` field):
+
+- **Schema/lint:** `go/pkg/workflowauthoring/workflow.go` `validateDebounceCohort`
+  accepts absent/`""` (default sentinel = today's first-dissent route), `"all"`,
+  or a positive integer; anything else is rejected at authoring time.
+- **Route path:** `go/pkg/mutations/revision_routing.go`
+  `gatingCohortDebounceSatisfied` reuses the frozen gating-seat denominator
+  (`resolveQuorumDeclaration` over the downstream gate this review feeds — the same
+  cohort the accept-path panel-quorum barrier uses, advisory seats excluded). A
+  `needs_revision` whose matched cycle declares `debounce_cohort` is buffered in
+  `go/pkg/mutations/review.go` `applyVerdict` (`case "needs_revision"`): the
+  dissenting seat completes (its verdict + dissent ledger row are durable), a
+  `revision.cycle_debounced` event is emitted, and the route is DEFERRED until the
+  cohort reaches quorum — at which point the last reporting seat routes exactly
+  once, consuming a single `max_iterations` slot.
+- **Late-straggler supersession:** unchanged from D194/D216 — a verdict recorded
+  after the consolidated route is stamped against the pre-bump `review_generation`
+  and is non-current; it does not trigger a second route.
+- **Tests:** `TestNeedsRevisionDebouncesUntilGatingCohortReports` (mutations,
+  multi-reviewer straggler + consolidated route) and
+  `TestValidateCycleDebounceCohort` (workflowauthoring). The negative control —
+  default sentinel preserves first-dissent routing — is held by the unchanged
+  `TestNeedsRevisionRoutesToMatchingCycle` and
+  `TestNeedsRevisionRecordsInFlightSiblingGatingSeats`.
+
+Alternative A (legibility: `in_flight_sibling_gating_seats`) shipped earlier in
+PR #549. The remainder of this document is the accepted design as ratified.
 
 ## Affected issue
 

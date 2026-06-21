@@ -898,8 +898,40 @@ func validateCycles(workflow map[string]any, jobMap map[string]map[string]any) e
 		if !positiveWholeNumber(cycle["max_iterations"]) {
 			return fieldErr(fmt.Sprintf("cycles[%d].max_iterations", index), "workflow cycles must declare max_iterations >= 1")
 		}
+		// RFC 0154 / D250 (#476): optional, opt-in `debounce_cohort` field controls
+		// whether a needs_revision waits for the gating final-review cohort before
+		// routing to the revision target. Absent/empty => default sentinel: today's
+		// first-dissent immediate route (no change). `"all"` => wait for every gating
+		// seat in the cohort to report. A positive integer => wait for that many
+		// gating seats to report. The cohort denominator is NOT restated here; it is
+		// referenced at route time from the frozen gating-seat denominator the
+		// downstream gate already freezes (resolveQuorumDeclaration), per D250.
+		if err := validateDebounceCohort(cycle["debounce_cohort"], index); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// validateDebounceCohort validates the optional RFC 0154 / D250 `cycles[].debounce_cohort`
+// field. nil or "" is the default sentinel (no debounce); "all" waits for the whole
+// gating cohort; a positive whole number waits for that many gating seats to report.
+// Any other value is rejected so a typo (e.g. "quorum", 0, or a fraction string) cannot
+// silently disable the opt-in.
+func validateDebounceCohort(value any, index int) error {
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.(string); ok {
+		if typed == "" || typed == "all" {
+			return nil
+		}
+		return fieldErr(fmt.Sprintf("cycles[%d].debounce_cohort", index), "workflow cycle debounce_cohort string must be \"all\" or a positive integer")
+	}
+	if positiveWholeNumber(value) {
+		return nil
+	}
+	return fieldErr(fmt.Sprintf("cycles[%d].debounce_cohort", index), "workflow cycle debounce_cohort must be \"all\" or a positive integer >= 1")
 }
 
 func validateArtifactUniqueness(jobs []any) error {

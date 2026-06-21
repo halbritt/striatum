@@ -767,6 +767,54 @@ func applyVerdict(ctx context.Context, runner any, repositoryID, sessionID, jobI
 		}
 		cycle, matched := matchRevisionCycle(cycles, verdict)
 		if matched {
+			// RFC 0154 / D250 (#476): when the matched cycle declares an opt-in
+			// debounce_cohort, do NOT route the author revision on the FIRST gating
+			// dissent while sibling gating final reviewers are still in flight. Wait
+			// until the gating cohort reaches the declared quorum (all-N or an integer
+			// count), then route ONE consolidated revision pass — preventing a second
+			// straggler needs_revision from burning another bounded max_iterations slot
+			// on a moving target. The dissent itself is already durably recorded above
+			// (the verdict row + dissent ledger); only the ROUTE is debounced. The
+			// default sentinel ("" = field absent) is satisfied trivially, so existing
+			// workflows route exactly as before.
+			if cycle.debounceCohort != "" {
+				satisfied, err := gatingCohortDebounceSatisfied(ctx, runner, repositoryID, job, cycle.debounceCohort)
+				if err != nil {
+					return nil, err
+				}
+				if !satisfied {
+					// Complete the routing review seat (its dissent is recorded and
+					// durable) and DEFER the route to the last reporting gating seat,
+					// which re-evaluates the cohort with this seat now terminal and routes
+					// once. No revision cycle slot is consumed and no checkpoint is opened.
+					if err := completeReviewJob(ctx, runner, repositoryID, job, sessionID, leaseID, "needs_revision debounced: awaiting gating final-review cohort"); err != nil {
+						return nil, err
+					}
+					if err := releaseInterrogationTargetForCompletedReview(ctx, runner, repositoryID, fmt.Sprint(job["run_id"]), jobID); err != nil {
+						return nil, err
+					}
+					if err := maybeCompleteRun(ctx, runner, repositoryID, fmt.Sprint(job["run_id"])); err != nil {
+						return nil, err
+					}
+					if _, err := appendEvent(ctx, runner, repositoryID, job["run_id"], "revision.cycle_debounced", sessionID, jobID, nil, nil, leaseID, map[string]any{
+						"from_workflow_job_id": cycle.from,
+						"to_workflow_job_id":   cycle.to,
+						"verdict":              verdict,
+						"debounce_cohort":      cycle.debounceCohort,
+					}); err != nil {
+						return nil, err
+					}
+					return map[string]any{
+						"status":             "revision_debounced",
+						"job_id":             jobID,
+						"verdict":            verdict,
+						"verdict_id":         verdictID,
+						"debounce_cohort":    cycle.debounceCohort,
+						"cycle_to":           cycle.to,
+						"revision_debounced": true,
+					}, nil
+				}
+			}
 			routed, fired, err := routeRevisionCycle(ctx, runner, repositoryID, job, sessionID, leaseID, cycle, verdict)
 			if err != nil {
 				return nil, err

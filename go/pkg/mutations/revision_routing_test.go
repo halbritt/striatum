@@ -885,3 +885,253 @@ func TestNeedsRevisionRecordsInFlightSiblingGatingSeats(t *testing.T) {
 		t.Fatalf("revision.cycle_routed in_flight_sibling_gating_seats = %v, want 1", evtRow["n"])
 	}
 }
+
+// debounceCohortFixture seeds the #476 multi-reviewer prompt-committee topology:
+// a completed `author` (the shared cycle target), a blocked downstream `gate` both
+// final reviewers feed (the frozen gating-seat denominator), reviewer A (codex)
+// running with an active lease and about to record needs_revision, and reviewer B
+// (claude) seeded in `claudeState`. Both reviewers declare a revision cycle back to
+// the author carrying `debounce_cohort: "all"` (RFC 0154 / D250). It returns the run
+// + the two reviewer job ids + codex's session/lease for recording the verdict.
+func debounceCohortFixture(t *testing.T, ctx context.Context, runner db.Runner, repoID, claudeState string) (runID, authorJobID, gateJobID, reviewCodexJobID, reviewClaudeJobID, codexSession, codexLease string) {
+	t.Helper()
+	now := time.Now().UTC()
+	intgSeedRepo(t, ctx, runner, repoID)
+	runID = "run_" + repoID
+	intgSeedRun(t, ctx, runner, repoID, runID, map[string]any{
+		"workflow_id": "wf",
+		"roles":       map[string]any{"reviewer": map[string]any{}, "author": map[string]any{}, "synthesizer": map[string]any{}},
+		"lanes":       map[string]any{"codex": map[string]any{}, "claude": map[string]any{}},
+		"jobs": []any{
+			map[string]any{"id": "author", "type": "synthesis", "role_id": "author"},
+			map[string]any{"id": "review_final_codex", "type": "review", "role_id": "reviewer"},
+			map[string]any{"id": "review_final_claude", "type": "review", "role_id": "reviewer"},
+			map[string]any{"id": "gate", "type": "synthesis", "role_id": "synthesizer"},
+		},
+		"cycles": []any{
+			map[string]any{"from": "review_final_codex", "to": "author", "on_verdict": "needs_revision", "max_iterations": float64(2), "allow_same_lane": true, "debounce_cohort": "all"},
+			map[string]any{"from": "review_final_claude", "to": "author", "on_verdict": "needs_revision", "max_iterations": float64(2), "allow_same_lane": true, "debounce_cohort": "all"},
+		},
+	})
+
+	authorJobID = "job_author_" + repoID
+	gateJobID = "job_gate_" + repoID
+	reviewCodexJobID = "job_review_codex_" + repoID
+	reviewClaudeJobID = "job_review_claude_" + repoID
+	codexSession = "sess_rc_" + repoID
+	codexLease = "lease_rc_" + repoID
+
+	// Completed author (the cycle target).
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.jobs (
+		  repository_id, job_id, run_id, workflow_job_id, attempt, state, role_id,
+		  title, job_type, idempotency_key, expected_artifacts_json, created_at, completed_at
+		) VALUES ($1,$2,$3,'author',1,'completed','author','Author','synthesis','idem_author_'||$1,'[]'::jsonb,$4,$4)`,
+		repoID, authorJobID, runID, now); err != nil {
+		t.Fatalf("insert author job: %v", err)
+	}
+	// Blocked downstream gate both reviewers feed (the cohort denominator).
+	seedBlockedJob(t, ctx, runner, repoID, runID, gateJobID, "gate", "synthesis", "synthesizer")
+
+	// Reviewer A (codex): running with an active lease, about to record needs_revision.
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.jobs (
+		  repository_id, job_id, run_id, workflow_job_id, attempt, state, role_id,
+		  title, job_type, idempotency_key, expected_artifacts_json, created_at, started_at
+		) VALUES ($1,$2,$3,'review_final_codex',1,'running','reviewer','Final Review Codex','review','idem_rc_'||$1,'[]'::jsonb,$4,$4)`,
+		repoID, reviewCodexJobID, runID, now); err != nil {
+		t.Fatalf("insert reviewer codex job: %v", err)
+	}
+	msgID := "msg_rc_" + repoID
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.queue_messages (
+		  repository_id, message_id, run_id, job_id, kind, state, priority,
+		  target_role_id, target_lane_id, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,'work','acked',0,'reviewer','codex',$5,$5)`,
+		repoID, msgID, runID, reviewCodexJobID, now); err != nil {
+		t.Fatalf("insert reviewer codex message: %v", err)
+	}
+	intgSeedSession(t, ctx, runner, repoID, runID, codexSession, "reviewer", "codex", []string{"review"}, "active")
+	intgAttest(t, ctx, runner, repoID, runID, codexSession, "codex")
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.leases (
+		  repository_id, lease_id, run_id, resource_type, resource_id,
+		  owner_session_id, state, acquired_at, expires_at
+		) VALUES ($1,$2,$3,'job',$4,$5,'active',NOW(),NOW() + INTERVAL '1 hour')`,
+		repoID, codexLease, runID, reviewCodexJobID, codexSession); err != nil {
+		t.Fatalf("insert reviewer codex lease: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET current_message_id = $3, current_lease_id = $4
+		 WHERE repository_id = $1 AND job_id = $2`,
+		repoID, reviewCodexJobID, msgID, codexLease); err != nil {
+		t.Fatalf("link reviewer codex pointers: %v", err)
+	}
+
+	// Reviewer B (claude): seeded in claudeState (in-flight `claimed`, or terminal
+	// `completed`).
+	if isTerminalJobState(claudeState) {
+		if err := runner.Exec(ctx, `
+			INSERT INTO striatumd.jobs (
+			  repository_id, job_id, run_id, workflow_job_id, attempt, state, role_id,
+			  title, job_type, idempotency_key, expected_artifacts_json, created_at, started_at, completed_at
+			) VALUES ($1,$2,$3,'review_final_claude',1,$5,'reviewer','Final Review Claude','review','idem_rcl_'||$1,'[]'::jsonb,$4,$4,$4)`,
+			repoID, reviewClaudeJobID, runID, now, claudeState); err != nil {
+			t.Fatalf("insert reviewer claude job: %v", err)
+		}
+	} else {
+		if err := runner.Exec(ctx, `
+			INSERT INTO striatumd.jobs (
+			  repository_id, job_id, run_id, workflow_job_id, attempt, state, role_id,
+			  title, job_type, idempotency_key, expected_artifacts_json, created_at, started_at
+			) VALUES ($1,$2,$3,'review_final_claude',1,$5,'reviewer','Final Review Claude','review','idem_rcl_'||$1,'[]'::jsonb,$4,$4)`,
+			repoID, reviewClaudeJobID, runID, now, claudeState); err != nil {
+			t.Fatalf("insert reviewer claude job: %v", err)
+		}
+	}
+
+	// Both reviewers feed the gate (the frozen gating-seat denominator) and cycle
+	// back to the author.
+	seedDependency(t, ctx, runner, repoID, gateJobID, reviewCodexJobID, map[string]any{})
+	seedDependency(t, ctx, runner, repoID, gateJobID, reviewClaudeJobID, map[string]any{})
+	return runID, authorJobID, gateJobID, reviewCodexJobID, reviewClaudeJobID, codexSession, codexLease
+}
+
+// #476 (RFC 0154 / D250 — the DEBOUNCE half): with an opt-in
+// `debounce_cohort: "all"`, a needs_revision from one gating final reviewer while a
+// SIBLING gating final reviewer is still in flight does NOT route the author
+// revision — it is debounced. The dissent is recorded, the seat completes, but the
+// shared author cycle target stays untouched and no max_iterations slot is consumed.
+// Once the last gating reviewer reports, the cohort reaches quorum and the route
+// fires ONCE, consolidating the dissents into a single revision pass.
+func TestNeedsRevisionDebouncesUntilGatingCohortReports(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+
+	// Phase 1 — codex dissents while claude is still claimed (in flight). The route
+	// is DEBOUNCED: author stays completed, no cycle-routed event, no checkpoint.
+	repoID := "repo_revision_debounce_476"
+	runID, authorJobID, _, reviewCodexJobID, _, codexSession, codexLease := debounceCohortFixture(t, ctx, runner, repoID, "claimed")
+
+	result, err := HandleRecordVerdict(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": codexSession,
+		"job_id":     reviewCodexJobID,
+		"lease_id":   codexLease,
+		"verdict":    "needs_revision",
+	}))
+	if err != nil {
+		t.Fatalf("record codex verdict: %v", err)
+	}
+	if fmt.Sprint(result["status"]) != "revision_debounced" {
+		t.Fatalf("status = %v, want revision_debounced (claude still in flight); result=%#v", result["status"], result)
+	}
+	if result["revision_debounced"] != true {
+		t.Fatalf("expected revision_debounced=true, got %#v", result)
+	}
+	// The routing seat completed (its dissent is durable), but the SHARED author
+	// cycle target must be UNTOUCHED — no premature revision on a moving target.
+	if got := jobState(t, ctx, runner, repoID, reviewCodexJobID); got != "completed" {
+		t.Fatalf("codex review job state = %q, want completed", got)
+	}
+	if got := jobState(t, ctx, runner, repoID, authorJobID); got != "completed" {
+		t.Fatalf("author job state = %q, want completed (NOT re-opened — route debounced)", got)
+	}
+	if n := openRevisionBlockers(t, ctx, runner, repoID, reviewCodexJobID); n != 0 {
+		t.Fatalf("debounce must not open a revision_routing checkpoint, got %d", n)
+	}
+	routedCount := func(rid, rrunID string) int {
+		row, qerr := oneRow(ctx, runner, `
+			SELECT count(*) AS n FROM striatumd.events
+			 WHERE repository_id = $1 AND run_id = $2 AND event_type = 'revision.cycle_routed'`,
+			rid, rrunID)
+		if qerr != nil {
+			t.Fatalf("count routed events: %v", qerr)
+		}
+		return intValue(row["n"])
+	}
+	if n := routedCount(repoID, runID); n != 0 {
+		t.Fatalf("expected 0 revision.cycle_routed events while debounced, got %d", n)
+	}
+	// A debounce event is recorded for legibility.
+	debRow, err := oneRow(ctx, runner, `
+		SELECT count(*) AS n FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND event_type = 'revision.cycle_debounced'`,
+		repoID, runID)
+	if err != nil {
+		t.Fatalf("count debounced events: %v", err)
+	}
+	if intValue(debRow["n"]) != 1 {
+		t.Fatalf("expected 1 revision.cycle_debounced event, got %v", debRow["n"])
+	}
+
+	// Phase 2 — the LAST gating reviewer (claude) now reports. Codex has already
+	// reported (it dissented and completed in phase 1's flow), so the cohort is
+	// complete once claude records its verdict, and claude's needs_revision routes
+	// ONCE. We model this with a fresh fixture where codex is already `completed`
+	// (reported) and claude is the running seat about to record the final verdict.
+	repoID2 := "repo_revision_debounce_476_route"
+	runID2, authorJobID2, _, reviewCodexJobID2, reviewClaudeJobID2, _, _ := debounceCohortFixture(t, ctx, runner, repoID2, "claimed")
+	// Codex already reported its dissent in phase 1 of the real flow: mark it completed.
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET state = 'completed', completed_at = NOW(), current_lease_id = NULL
+		 WHERE repository_id = $1 AND job_id = $2`, repoID2, reviewCodexJobID2); err != nil {
+		t.Fatalf("mark codex completed: %v", err)
+	}
+	// Make claude the running, lease-bearing seat about to record the final verdict.
+	claudeSession := "sess_rcl_" + repoID2
+	claudeLease := "lease_rcl_" + repoID2
+	now := time.Now().UTC()
+	claudeMsg := "msg_rcl_" + repoID2
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET state = 'running', completed_at = NULL, started_at = $3
+		 WHERE repository_id = $1 AND job_id = $2`, repoID2, reviewClaudeJobID2, now); err != nil {
+		t.Fatalf("set claude running: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.queue_messages (
+		  repository_id, message_id, run_id, job_id, kind, state, priority,
+		  target_role_id, target_lane_id, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,'work','acked',0,'reviewer','claude',$5,$5)`,
+		repoID2, claudeMsg, runID2, reviewClaudeJobID2, now); err != nil {
+		t.Fatalf("insert claude message: %v", err)
+	}
+	intgSeedSession(t, ctx, runner, repoID2, runID2, claudeSession, "reviewer", "claude", []string{"review"}, "active")
+	intgAttest(t, ctx, runner, repoID2, runID2, claudeSession, "claude")
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.leases (
+		  repository_id, lease_id, run_id, resource_type, resource_id,
+		  owner_session_id, state, acquired_at, expires_at
+		) VALUES ($1,$2,$3,'job',$4,$5,'active',NOW(),NOW() + INTERVAL '1 hour')`,
+		repoID2, claudeLease, runID2, reviewClaudeJobID2, claudeSession); err != nil {
+		t.Fatalf("insert claude lease: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs SET current_message_id = $3, current_lease_id = $4
+		 WHERE repository_id = $1 AND job_id = $2`,
+		repoID2, reviewClaudeJobID2, claudeMsg, claudeLease); err != nil {
+		t.Fatalf("link claude pointers: %v", err)
+	}
+
+	result2, err := HandleRecordVerdict(ctx, runner, intgEnv(repoID2, map[string]any{
+		"session_id": claudeSession,
+		"job_id":     reviewClaudeJobID2,
+		"lease_id":   claudeLease,
+		"verdict":    "needs_revision",
+	}))
+	if err != nil {
+		t.Fatalf("record claude verdict: %v", err)
+	}
+	if fmt.Sprint(result2["status"]) != "revision_routed" {
+		t.Fatalf("status = %v, want revision_routed (cohort complete — last reviewer reported); result=%#v", result2["status"], result2)
+	}
+	if fmt.Sprint(result2["cycle_target_job_id"]) != authorJobID2 {
+		t.Fatalf("cycle_target_job_id = %v, want %s", result2["cycle_target_job_id"], authorJobID2)
+	}
+	// The author cycle target is re-opened exactly once.
+	if got := jobState(t, ctx, runner, repoID2, authorJobID2); got != "queued" {
+		t.Fatalf("author job state = %q, want queued (re-opened by the consolidated route)", got)
+	}
+	if n := routedCount(repoID2, runID2); n != 1 {
+		t.Fatalf("expected exactly 1 revision.cycle_routed event after cohort completes, got %d", n)
+	}
+}

@@ -177,6 +177,36 @@ func TestValidatePanelQuorum(t *testing.T) {
 	}
 }
 
+// TestValidateCycleDebounceCohort verifies the RFC 0154 / D250 (#476) opt-in
+// `cycles[].debounce_cohort` field: absent is the default sentinel (today's
+// first-dissent route), "all" and a positive integer are accepted, and malformed
+// values (an unknown string, zero, or a negative number) are rejected so a typo
+// cannot silently disable the opt-in.
+func TestValidateCycleDebounceCohort(t *testing.T) {
+	setCohort := func(v any) map[string]any {
+		workflow := validWorkflow()
+		workflow["cycles"].([]any)[0].(map[string]any)["debounce_cohort"] = v
+		return workflow
+	}
+
+	// Absent => valid (default sentinel; validWorkflow has no debounce_cohort).
+	if err := Validate(validWorkflow()); err != nil {
+		t.Fatalf("default workflow (no debounce_cohort) rejected: %v", err)
+	}
+	// Accepted values.
+	for _, ok := range []any{"", "all", 1, 2, float64(3)} {
+		if err := Validate(setCohort(ok)); err != nil {
+			t.Fatalf("debounce_cohort=%v (%T) rejected: %v", ok, ok, err)
+		}
+	}
+	// Rejected values.
+	for _, bad := range []any{"quorum", "majority", 0, -1, float64(0), true} {
+		if err := Validate(setCohort(bad)); err == nil || !strings.Contains(err.Error(), "debounce_cohort") {
+			t.Fatalf("debounce_cohort=%v (%T): expected a debounce_cohort error, got %v", bad, bad, err)
+		}
+	}
+}
+
 // TestValidateLaneLaunchEnv verifies #223: a lane may declare path_prefix and
 // command_env, and the validator enforces their shape and the control-plane
 // boundary (no PATH or STRIATUM_-namespaced keys in command_env).

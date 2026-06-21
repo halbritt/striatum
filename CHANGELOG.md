@@ -4,6 +4,24 @@
 
 ### Added
 
+- **Opt-in final-review fan-in debounce: `cycles[].debounce_cohort` (RFC 0154 /
+  D250, D257; #476).** A multi-reviewer final-review panel routes the author
+  revision on the **first** gating `needs_revision` by default, even while sibling
+  final reviewers are still in flight — which can burn a bounded `max_iterations`
+  slot on a moving target. A `cycle` may now set `debounce_cohort` to wait for the
+  gating cohort before routing one consolidated revision pass: `all` waits for
+  every gating seat that feeds the same downstream gate to report a verdict; a
+  positive integer waits for that many seats. The cohort is the frozen gating-seat
+  denominator the accept-path panel-quorum barrier already uses (advisory seats
+  excluded) — referenced, not restated. **Absent (the default) preserves today's
+  first-dissent routing for every existing workflow** — no wire/timing change for
+  non-opted-in runs. The debounce is enforced daemon-side in `applyVerdict`
+  (`revision.cycle_debounced` event when buffered); a late straggler that reports
+  after the consolidated route is rendered non-current by the build's bumped
+  `review_generation` (RFC 0126 / D194). **No schema migration** — it is a
+  `workflow_json` field. Alternative A (the `in_flight_sibling_gating_seats`
+  legibility count) shipped earlier in #549.
+
 - **RFC 0133 fan-in barrier: `recordFaninFreezePoint` is now wired into a live
   fan-out, in SHADOW (#527, the last build leg of #354; D254).** At run
   materialization (`run.prepare`) the daemon now records an immutable fan-in

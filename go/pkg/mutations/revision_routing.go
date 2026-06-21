@@ -14,6 +14,13 @@ type revisionCycle struct {
 	onVerdict     string
 	maxIterations int
 	allowSameLane bool
+	// debounceCohort is the RFC 0154 / D250 (#476) opt-in fan-in policy. Empty is the
+	// default sentinel: route on the first matching needs_revision (today's behavior).
+	// "all" waits for every gating seat in the cohort to report before routing one
+	// consolidated revision pass; a positive integer waits for that many gating seats
+	// to report. The cohort is the frozen gating-seat denominator the downstream gate
+	// already freezes (resolveQuorumDeclaration) — referenced, not restated here.
+	debounceCohort string
 }
 
 // workflowCyclesForJob loads the run's workflow snapshot and returns the
@@ -35,11 +42,12 @@ func workflowCyclesForJob(ctx context.Context, runner any, repositoryID string, 
 			continue
 		}
 		cycles = append(cycles, revisionCycle{
-			from:          fromID,
-			to:            fmt.Sprint(def["to"]),
-			onVerdict:     fmt.Sprint(def["on_verdict"]),
-			maxIterations: intValue(def["max_iterations"]),
-			allowSameLane: boolValue(def["allow_same_lane"]),
+			from:           fromID,
+			to:             fmt.Sprint(def["to"]),
+			onVerdict:      fmt.Sprint(def["on_verdict"]),
+			maxIterations:  intValue(def["max_iterations"]),
+			allowSameLane:  boolValue(def["allow_same_lane"]),
+			debounceCohort: debounceCohortValue(def["debounce_cohort"]),
 		})
 	}
 	return cycles, nil
@@ -252,6 +260,115 @@ func inFlightSiblingGatingSeats(ctx context.Context, runner any, repositoryID st
 		}
 	}
 	return inFlight, nil
+}
+
+// debounceCohortValue normalizes the workflow `cycles[].debounce_cohort` field
+// (RFC 0154 / D250 #476) into the runtime sentinel the route path branches on.
+// nil / "" / a non-positive number all collapse to "" (the default sentinel:
+// today's first-dissent immediate route). "all" passes through; a positive
+// integer is rendered as its decimal string. The workflow lint
+// (workflowauthoring.validateDebounceCohort) already rejects malformed values at
+// authoring time; this is the tolerant runtime read of the validated snapshot.
+func debounceCohortValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if s, ok := value.(string); ok {
+		switch s {
+		case "", "all":
+			return s
+		default:
+			// A numeric string ("2") is honored; anything else is the default sentinel.
+			if n := intValue(s); n >= 1 {
+				return fmt.Sprint(n)
+			}
+			return ""
+		}
+	}
+	if n := intValue(value); n >= 1 {
+		return fmt.Sprint(n)
+	}
+	return ""
+}
+
+// gatingCohortDebounceSatisfied reports, for a needs_revision routing seat whose
+// matched cycle declares an opt-in debounce_cohort (RFC 0154 / D250 #476), whether
+// the gating final-review cohort has REPORTED enough verdicts to route one
+// consolidated revision pass now. It is the dissent-side counterpart of the
+// accept-path panel-quorum barrier: both freeze the SAME gating-seat denominator
+// (resolveQuorumDeclaration over the downstream gate this review feeds), so the
+// route path and the accept path agree on the cohort (closing the "two are not
+// currently joined" gap RFC 0154 names). Advisory seats are excluded by
+// construction (resolveQuorumDeclaration only counts gating seats).
+//
+// A cohort seat has "reported" when its latest-attempt job is in a TERMINAL state
+// (it recorded a verdict and completed, or failed/was canceled). The routing seat
+// itself is `running` at this instant — it is about to complete on this same
+// verdict — so it is counted as reported (+1) explicitly; sibling seats are read
+// from their latest job state. When the cohort cannot be resolved (the review
+// feeds no gate with a declared gating panel, i.e. a single-reviewer cycle), the
+// cohort is just the routing seat and the debounce is trivially satisfied — a
+// single-reviewer cycle never waits.
+//
+// Wait shape: "all" requires every gating seat to have reported; a positive
+// integer N requires at least N gating seats to have reported (clamped to the
+// cohort size). The debounce never BLOCKS the run: when it is unsatisfied the
+// caller completes the routing review seat (its dissent is already durably
+// recorded) and defers the route to the LAST reporting seat, which re-evaluates
+// this predicate with the full cohort terminal and then routes once.
+func gatingCohortDebounceSatisfied(ctx context.Context, runner any, repositoryID string, job map[string]any, cohort string) (bool, error) {
+	if cohort == "" {
+		// Default sentinel: no debounce — route immediately (today's behavior).
+		return true, nil
+	}
+	runID := fmt.Sprint(job["run_id"])
+	selfSeat := fmt.Sprint(job["workflow_job_id"])
+	gates, err := downstreamJobs(ctx, runner, repositoryID, fmt.Sprint(job["job_id"]))
+	if err != nil {
+		return false, err
+	}
+	// Deduplicate cohort seats across all downstream gates this review feeds; the
+	// routing seat is always part of the cohort and is reported (it is recording
+	// its verdict now), so seed the tallies with it.
+	counted := map[string]bool{selfSeat: true}
+	cohortSize := 1
+	reported := 1
+	for _, gate := range gates {
+		decl, derr := resolveQuorumDeclaration(ctx, runner, repositoryID, fmt.Sprint(gate["job_id"]))
+		if derr != nil {
+			return false, derr
+		}
+		for _, seatID := range decl.Seats {
+			if counted[seatID] {
+				continue
+			}
+			counted[seatID] = true
+			cohortSize++
+			seatJob, jerr := latestJobForWorkflowID(ctx, runner, repositoryID, runID, seatID)
+			if jerr != nil {
+				return false, jerr
+			}
+			if seatJob == nil {
+				// A declared seat with no materialized job has not reported; it keeps the
+				// debounce waiting (silence != consent — the accept-path cohort treats an
+				// unmaterialized seat as unsatisfied too).
+				continue
+			}
+			if isTerminalJobState(fmt.Sprint(seatJob["state"])) {
+				reported++
+			}
+		}
+	}
+	required := cohortSize
+	if cohort != "all" {
+		if n := intValue(cohort); n >= 1 {
+			required = n
+		}
+		if required > cohortSize {
+			required = cohortSize
+		}
+	}
+	return reported >= required, nil
 }
 
 // isDeclaredCycleTarget reports whether the given job's workflow_job_id is the
