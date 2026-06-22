@@ -22,6 +22,93 @@ import (
 // runtime-role ApplyMigrations path (RFC 0079 §5).
 const LatestOwnerBundleVersion = 19
 
+// RequiredOwnerBundleVersion is the applied `owner_bundle_meta` watermark the
+// serving binary requires before it may apply runtime migrations and serve (RFC
+// 0142 Layer 2). It is the owner-bundle frontier the binary was built against —
+// the highest bundle it ships — so a binary that ships bundle N expects the
+// database to already carry bundle >= N. Owner bundles are applied OUT-OF-BAND
+// (`striatum daemon owner-ddl apply`) before the daemon restarts onto new code;
+// when that step is skipped, a runtime migration that depends on the bundle's
+// ownership/grant topology would die at boot with `42501` and crash-loop
+// (RFC 0142 failure #2; #442 / D248). The boot-time watermark interlock turns
+// that crash-loop into a clean, actionable halt (apoptosis, not necrosis).
+const RequiredOwnerBundleVersion = LatestOwnerBundleVersion
+
+// ErrAwaitingOwnerDDL is the sentinel for the RFC 0142 Layer 2 watermark
+// shortfall: the binary requires a higher applied owner-bundle watermark than
+// the database carries. It is the typed `awaiting_owner_ddl` halt — the database
+// is left UNTOUCHED (no runtime migration is applied) and the daemon refuses to
+// serve cleanly rather than force-committing a half-applied forward deploy.
+var ErrAwaitingOwnerDDL = errors.New("awaiting_owner_ddl")
+
+// AwaitingOwnerDDLError carries the applied-vs-required owner-bundle versions and
+// the exact remediation command for the RFC 0142 Layer 2 watermark shortfall. It
+// wraps ErrAwaitingOwnerDDL so callers can branch on the condition with
+// errors.Is / errors.As while still printing the operator-facing remediation.
+type AwaitingOwnerDDLError struct {
+	Applied  int
+	Required int
+}
+
+// Error renders the actionable halt message: the applied-vs-required versions and
+// the exact out-of-band remediation command.
+func (e *AwaitingOwnerDDLError) Error() string {
+	return fmt.Sprintf(
+		"awaiting_owner_ddl: applied owner-bundle watermark %d is below the %d this binary requires; "+
+			"apply the pending owner bundle(s) as the database owner BEFORE restarting onto this binary: "+
+			"`striatum daemon owner-ddl apply` (RFC 0142 Layer 2). The database was left untouched (no runtime migration ran).",
+		e.Applied, e.Required)
+}
+
+// Unwrap lets errors.Is(err, ErrAwaitingOwnerDDL) match an AwaitingOwnerDDLError.
+func (e *AwaitingOwnerDDLError) Unwrap() error { return ErrAwaitingOwnerDDL }
+
+// CheckOwnerBundleWatermark enforces the RFC 0142 Layer 2 owner-bundle watermark
+// interlock against the live database, returning the policy decision WITHOUT
+// mutating anything. It is called on boot BEFORE ApplyMigrations, so a shortfall
+// halts cleanly and leaves the database untouched.
+//
+//   - applied < required (SHORTFALL): return an *AwaitingOwnerDDLError. The caller
+//     must NOT apply runtime migrations — the pending owner DDL is a hard
+//     prerequisite, and applying a runtime migration that depends on it would
+//     crash-loop the single writer (RFC 0142 failure #2).
+//   - applied == required (IN SYNC): nil. Boot proceeds exactly as before.
+//   - applied  > required (DOWNGRADE): the running binary is OLDER than the
+//     applied watermark. Policy is TOLERATE-FORWARD (the explicit RFC 0142
+//     default): a newer schema under an older binary is allowed to serve, so a
+//     botched binary rollback does not crash-loop. Return nil. (The symmetric
+//     runtime-schema downgrade is already guarded in ApplyMigrations, which
+//     refuses a substrate version newer than it supports.)
+//
+// applied is read via OwnerBundleVersion, which returns 0 when no owner bundle
+// (and hence no authority schema) is present — a fresh single-role database. A
+// fresh database with no owner bundle is the bootstrap case: required is the
+// frontier the binary ships, but there is nothing to apply out-of-band yet
+// (single-role deployments never apply owner bundles), so a 0-watermark database
+// is treated as the bootstrap/single-role case and NOT halted. Only a database
+// that HAS an authority schema (applied >= 1) but lags the required frontier is a
+// genuine shortfall.
+func CheckOwnerBundleWatermark(ctx context.Context, runner Runner) error {
+	applied, err := OwnerBundleVersion(ctx, runner)
+	if err != nil {
+		return err
+	}
+	// applied == 0 is a fresh / single-role database with no authority schema.
+	// Single-role deployments never run owner bundles, so there is nothing to
+	// apply out-of-band; the runtime migrations bootstrap the substrate. Halting
+	// here would refuse a healthy first boot. Only an authority-bearing database
+	// (applied >= 1) that lags the frontier is a true shortfall.
+	if applied == 0 {
+		return nil
+	}
+	if applied < RequiredOwnerBundleVersion {
+		return &AwaitingOwnerDDLError{Applied: applied, Required: RequiredOwnerBundleVersion}
+	}
+	// applied >= RequiredOwnerBundleVersion: in-sync or a forward (downgraded
+	// binary) schema. TOLERATE-FORWARD: serve.
+	return nil
+}
+
 //go:embed sql/owner/*.sql
 var ownerBundleFS embed.FS
 

@@ -33,6 +33,14 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		problems = append(problems, "schema_meta.read_failed: "+err.Error())
 	}
 
+	// RFC 0142 Layer 2 (owner-bundle watermark interlock): surface a pending owner
+	// bundle as a precondition BEFORE the operator restarts onto a binary that
+	// would halt on it with the typed awaiting_owner_ddl exit. Daemon-global; reads
+	// no secret. A shortfall (authority schema present but below the required
+	// frontier) is a hard problem naming the gap + the `owner-ddl apply` command.
+	ownerBundleWatermarkBlock, ownerBundleWatermarkProblems := ownerBundleWatermarkDoctorBlock(ctx, runner)
+	problems = append(problems, ownerBundleWatermarkProblems...)
+
 	staleLeases := 0
 	if repositoryID != "" {
 		// #45: an expired lease row persists forever, so counting every
@@ -323,6 +331,7 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		"recovery_escape_valve":        recoveryGateBlock,
 		"job_stuck_no_live_session":    stuckJobBlock,
 		"event_chain_segment_seams":    eventSegmentBlock,
+		"owner_bundle_watermark":       ownerBundleWatermarkBlock,
 		"verifier_selfpin_drift":       verifierSelfpinBlock,
 		"verifier_pin_drift":           verifierPinBlock,
 		"skills":                       skillsBlock,

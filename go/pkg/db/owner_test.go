@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,137 @@ import (
 	"github.com/halbritt/striatum/go/pkg/sessionliveness"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// watermarkRunner is a canned Runner that answers the two queries
+// OwnerBundleVersion issues: the to_regclass presence probe and the MAX(version)
+// read. It records every statement so a test can assert the watermark check is a
+// PURE READ (no DDL, no INSERT) — the RFC 0142 Layer 2 contract that a shortfall
+// leaves the database UNTOUCHED.
+type watermarkRunner struct {
+	metaPresent  bool   // owner_bundle_meta exists
+	appliedValue string // value returned by SELECT COALESCE(MAX(version),0)
+	queries      []string
+	scalarErr    error
+}
+
+func (r *watermarkRunner) Exec(_ context.Context, sql string, _ ...any) error {
+	r.queries = append(r.queries, sql)
+	return errors.New("watermarkRunner: Exec must not be called by the read-only watermark check")
+}
+
+func (r *watermarkRunner) QueryRow(context.Context, string, ...any) Row { return nil }
+
+func (r *watermarkRunner) QueryScalar(_ context.Context, sql string, _ ...any) (string, error) {
+	r.queries = append(r.queries, sql)
+	if r.scalarErr != nil {
+		return "", r.scalarErr
+	}
+	if strings.Contains(sql, "to_regclass") {
+		if r.metaPresent {
+			return "true", nil
+		}
+		return "false", nil
+	}
+	if strings.Contains(sql, "MAX(version)") {
+		return r.appliedValue, nil
+	}
+	return "", fmt.Errorf("watermarkRunner: unexpected query %q", sql)
+}
+
+func (r *watermarkRunner) BeginTx(context.Context) (TxRunner, error) {
+	return nil, errors.New("watermarkRunner: BeginTx must not be called by the read-only watermark check")
+}
+
+func (r *watermarkRunner) wroteAnything() bool {
+	for _, q := range r.queries {
+		upper := strings.ToUpper(q)
+		if strings.Contains(upper, "INSERT") || strings.Contains(upper, "UPDATE") ||
+			strings.Contains(upper, "DELETE") || strings.Contains(upper, "ALTER") ||
+			strings.Contains(upper, "CREATE") || strings.Contains(upper, "DROP") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCheckOwnerBundleWatermarkPolicy is the RFC 0142 Layer 2 version-comparison
+// policy, exercised purely (no PostgreSQL): a shortfall halts with a typed
+// awaiting_owner_ddl error and touches NOTHING; in-sync proceeds; a downgrade
+// (applied ahead of required) tolerates-forward and proceeds; a fresh/single-role
+// database (no owner bundle) proceeds (the bootstrap case is never halted).
+func TestCheckOwnerBundleWatermarkPolicy(t *testing.T) {
+	required := RequiredOwnerBundleVersion
+	cases := []struct {
+		name        string
+		metaPresent bool
+		applied     string
+		wantHalt    bool
+	}{
+		{"shortfall_one_behind", true, fmt.Sprintf("%d", required-1), true},
+		{"shortfall_far_behind", true, "1", true},
+		{"in_sync", true, fmt.Sprintf("%d", required), false},
+		{"downgrade_one_ahead", true, fmt.Sprintf("%d", required+1), false},
+		{"fresh_no_owner_bundle", false, "0", false},
+		{"present_but_zero", true, "0", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &watermarkRunner{metaPresent: tc.metaPresent, appliedValue: tc.applied}
+			err := CheckOwnerBundleWatermark(context.Background(), runner)
+			// The check must be a pure read regardless of outcome — no mutation, ever.
+			if runner.wroteAnything() {
+				t.Fatalf("CheckOwnerBundleWatermark issued a write statement; it must be read-only: %v", runner.queries)
+			}
+			if tc.wantHalt {
+				if err == nil {
+					t.Fatalf("applied=%s required=%d: want a shortfall halt, got nil", tc.applied, required)
+				}
+				if !errors.Is(err, ErrAwaitingOwnerDDL) {
+					t.Fatalf("shortfall error must be ErrAwaitingOwnerDDL, got %v", err)
+				}
+				var typed *AwaitingOwnerDDLError
+				if !errors.As(err, &typed) {
+					t.Fatalf("shortfall error must be *AwaitingOwnerDDLError, got %T: %v", err, err)
+				}
+				if typed.Required != required {
+					t.Fatalf("AwaitingOwnerDDLError.Required = %d; want %d", typed.Required, required)
+				}
+				for _, needle := range []string{"awaiting_owner_ddl", "striatum daemon owner-ddl apply", "left untouched"} {
+					if !strings.Contains(typed.Error(), needle) {
+						t.Fatalf("halt message missing %q; got: %s", needle, typed.Error())
+					}
+				}
+			} else if err != nil {
+				t.Fatalf("applied=%s required=%d: want healthy boot (nil), got %v", tc.applied, required, err)
+			}
+		})
+	}
+}
+
+// TestCheckOwnerBundleWatermarkPropagatesReadError ensures a DB read failure is
+// surfaced (fail-closed) rather than silently treated as in-sync.
+func TestCheckOwnerBundleWatermarkPropagatesReadError(t *testing.T) {
+	sentinel := errors.New("db down")
+	runner := &watermarkRunner{metaPresent: true, scalarErr: sentinel}
+	err := CheckOwnerBundleWatermark(context.Background(), runner)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("read error must propagate, got %v", err)
+	}
+	if errors.Is(err, ErrAwaitingOwnerDDL) {
+		t.Fatal("a read failure must not be misreported as a watermark shortfall")
+	}
+}
+
+// TestRequiredOwnerBundleVersionTracksFrontier pins the RFC 0142 invariant that
+// the required watermark IS the owner-bundle frontier the binary ships. If a new
+// owner bundle bumps LatestOwnerBundleVersion, the required watermark moves with
+// it (the binary requires the frontier it was built against).
+func TestRequiredOwnerBundleVersionTracksFrontier(t *testing.T) {
+	if RequiredOwnerBundleVersion != LatestOwnerBundleVersion {
+		t.Fatalf("RequiredOwnerBundleVersion = %d; must equal LatestOwnerBundleVersion = %d (the shipped frontier)",
+			RequiredOwnerBundleVersion, LatestOwnerBundleVersion)
+	}
+}
 
 // TestIsCrossBundleDependencyError covers the FMA-007 (#458) trigger detection:
 // a missing-object SQLSTATE a re-applied later bundle raises when an earlier

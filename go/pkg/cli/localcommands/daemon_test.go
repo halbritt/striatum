@@ -86,6 +86,14 @@ func TestRenderUnitUsesSpecifiersNotHardcodedHome(t *testing.T) {
 	if !strings.Contains(unit, "RestartPreventExitStatus=78") {
 		t.Fatalf("unit missing RestartPreventExitStatus=78 (config errors must not crash-loop):\n%s", unit)
 	}
+	// RFC 0142 Layer 2: the awaiting_owner_ddl watermark halt (exit 79) is the same
+	// deterministic, restart-won't-fix shape as a config error and must NOT
+	// crash-loop; the unit must list 79 in RestartPreventExitStatus so the daemon
+	// parks in `failed` with the remediation instead of force-committing a
+	// half-applied deploy and thrashing.
+	if !strings.Contains(unit, "RestartPreventExitStatus=78 79") {
+		t.Fatalf("unit missing exit 79 in RestartPreventExitStatus (RFC 0142 owner-bundle watermark halt must not crash-loop):\n%s", unit)
+	}
 }
 
 func TestRenderUnitRepairsRuntimeDirectoryMode(t *testing.T) {

@@ -337,6 +337,18 @@ func ConnectAndMigrate(ctx context.Context, postgresURL string, daemonVersion st
 	if err != nil {
 		return nil, 0, err
 	}
+	// RFC 0142 Layer 2 (owner-bundle watermark interlock): BEFORE applying any
+	// runtime migration, verify the applied owner-bundle watermark satisfies the
+	// frontier this binary was built against. On a shortfall this returns a typed
+	// awaiting_owner_ddl error and we apply NOTHING — the database is left
+	// untouched and the daemon halts cleanly (apoptosis), instead of running a
+	// runtime migration that depends on the pending owner DDL and crash-looping
+	// the single writer (RFC 0142 failure #2; #442 / D248). The in-sync and
+	// tolerate-forward cases return nil and boot proceeds exactly as before.
+	if err := CheckOwnerBundleWatermark(ctx, pool.Runner); err != nil {
+		pool.Close()
+		return nil, 0, err
+	}
 	version, err := ApplyMigrations(ctx, pool.Runner, daemonVersion)
 	if err != nil {
 		pool.Close()

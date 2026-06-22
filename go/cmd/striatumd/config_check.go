@@ -16,6 +16,20 @@ import (
 // keep their non-78 exit and still auto-restart.
 const exitConfigError = 78
 
+// exitAwaitingOwnerDDL is the dedicated, NON-RESTARTABLE exit status striatumd
+// uses for the RFC 0142 Layer 2 owner-bundle watermark shortfall: the applied
+// `owner_bundle_meta` watermark is below the frontier this binary requires, so a
+// runtime migration that depends on the pending owner DDL would crash-loop the
+// single writer (#442 / D248). Like the config error this is a deterministic
+// condition a bare restart cannot fix — the operator must apply the pending owner
+// bundle out-of-band (`striatum daemon owner-ddl apply`) first — so the installed
+// unit adds this code to RestartPreventExitStatus and the daemon parks in
+// `failed` with the remediation in `systemctl --user status` (apoptosis, not a
+// crash loop). It is distinct from 78 so a watermark halt is legible as its own
+// condition rather than masquerading as a malformed config. BSD sysexits leaves
+// 79 unassigned; we use it for this daemon-specific deterministic halt.
+const exitAwaitingOwnerDDL = 79
+
 // daemonConfigProblems validates every configuration source the daemon reads at
 // startup WITHOUT side effects — no database connection, no socket bind, no
 // runtime reservation — and returns every problem it finds (it does not stop at

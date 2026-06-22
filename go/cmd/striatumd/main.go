@@ -197,6 +197,21 @@ func main() {
 			DaemonVersion: daemonVersion,
 		}, migrate)
 		if err != nil {
+			// RFC 0142 Layer 2: a watermark shortfall is a CLEAN, deterministic
+			// halt, not a crash. CheckOwnerBundleWatermark left the database
+			// untouched (no runtime migration ran); a bare restart cannot fix it —
+			// the operator must apply the pending owner bundle out-of-band first.
+			// Exit the dedicated non-restartable code so the unit's
+			// RestartPreventExitStatus parks the daemon in `failed` with the
+			// remediation message instead of force-committing a half-applied deploy
+			// and thrashing (apoptosis, not necrosis).
+			var awaitingOwnerDDL *db.AwaitingOwnerDDLError
+			if errors.As(err, &awaitingOwnerDDL) {
+				releaseDaemonRuntime()
+				log.Printf("striatumd refusing to start: %v", awaitingOwnerDDL)
+				log.Printf("striatumd will NOT auto-restart this condition (exit %d); apply the pending owner bundle, then restart", exitAwaitingOwnerDDL)
+				os.Exit(exitAwaitingOwnerDDL)
+			}
 			fatalf("daemon db connect/bootstrap failed: %v", err)
 		}
 		pool := booted.Pool

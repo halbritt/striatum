@@ -24,7 +24,17 @@ RestartSec=2
 # with the exact error in `systemctl --user status` instead of looping. Transient
 # failures (database briefly unreachable, stale socket) keep their non-78 exit and
 # still auto-restart. Run `striatumd -check-config` to validate before a restart.
-RestartPreventExitStatus=78
+#
+# RFC 0142 Layer 2 (owner-bundle watermark interlock): exit 79 is the
+# awaiting_owner_ddl halt — the applied owner-bundle watermark is below the
+# frontier this binary requires, so a runtime migration that depends on the
+# pending owner DDL would crash-loop the single writer (#442 / D248). It is the
+# same deterministic, restart-won't-fix shape as a config error: the operator must
+# apply the pending owner bundle out-of-band (`striatum daemon owner-ddl apply`)
+# before restarting onto the new binary. Listing 79 here parks the daemon in
+# `failed` with the remediation in `systemctl --user status` (apoptosis) instead
+# of force-committing a half-applied deploy and thrashing.
+RestartPreventExitStatus=78 79
 # RFC 0103 W3 (#141): a daemon restart must not orphan supervised lane helpers.
 # The default KillMode=control-group SIGKILLs the whole service cgroup on
 # stop/restart, taking down the Setsid-detached supervisor helpers (and their

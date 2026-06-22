@@ -4,6 +4,31 @@
 
 ### Added
 
+- **Owner-bundle watermark interlock + fail-clean boot halt (RFC 0142 Layer 2 /
+  D258; #442 / D248 class).** The daemon binary now declares
+  `db.RequiredOwnerBundleVersion` — the owner-bundle frontier it ships
+  (= `LatestOwnerBundleVersion`) — and, on boot, BEFORE applying any runtime
+  migration (`ConnectAndMigrate` → new `db.CheckOwnerBundleWatermark`), compares it
+  to the applied `owner_bundle_meta` watermark. On a **shortfall** (an
+  authority-bearing database whose applied watermark lags the required frontier)
+  it returns the typed `awaiting_owner_ddl` halt (`db.AwaitingOwnerDDLError`,
+  wrapping the `db.ErrAwaitingOwnerDDL` sentinel), applies **nothing** — the
+  database is left untouched — and `striatumd` exits the dedicated,
+  non-restartable code **79** (added to the installed unit's
+  `RestartPreventExitStatus`), printing the exact `striatum daemon owner-ddl apply`
+  remediation. This converts the prior crash-loop (restarting onto new code with a
+  pending owner bundle force-commits a half-applied deploy) into a clean,
+  actionable stop (apoptosis, not necrosis). The symmetric **downgrade** direction
+  (an older binary whose required frontier is below the applied watermark) is
+  explicit **tolerate-forward** — a newer schema under an older binary serves, so a
+  botched binary rollback does not crash-loop. The shortfall is surfaced ahead of
+  the restart as a `striatum doctor` precondition (the new
+  `owner_bundle_watermark` block / `owner_bundle_watermark_shortfall` problem) and
+  hoisted as a `striatum operator bootstrap` `next_action`. **No new runtime
+  migration and no new owner bundle**: the change is boot-guard + doctor + tests,
+  and the in-sync, tolerate-forward, and fresh/single-role (no owner bundle) cases
+  boot exactly as before.
+
 - **Opt-in final-review fan-in debounce: `cycles[].debounce_cohort` (RFC 0154 /
   D250, D257; #476).** A multi-reviewer final-review panel routes the author
   revision on the **first** gating `needs_revision` by default, even while sibling

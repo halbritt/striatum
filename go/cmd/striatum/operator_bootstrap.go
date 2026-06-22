@@ -672,6 +672,16 @@ func bootstrapNextActions(packet operatorBootstrapPacket) []string {
 	if packet.Frontier.HumanCheckpointCount > 0 {
 		actions = append(actions, "striatum checkpoint resolve --help")
 	}
+	// RFC 0142 Layer 2: a pending owner bundle would halt the daemon at the next
+	// restart with awaiting_owner_ddl. Hoist the exact out-of-band remediation as
+	// a next_action so the operator applies it BEFORE restarting, rather than
+	// discovering it as a boot-time halt.
+	for _, problem := range packet.Doctor.Problems {
+		if strings.HasPrefix(problem, "owner_bundle_watermark_shortfall") {
+			actions = append(actions, "striatum daemon owner-ddl apply")
+			break
+		}
+	}
 	if packet.Doctor.ProblemCount > 0 {
 		actions = append(actions, "striatum doctor --json")
 	}
