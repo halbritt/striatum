@@ -7,16 +7,18 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 )
 
-const futureRuntimeMigrationOwnerDDLFloor = 27
-
-var runtimeMigrationOwnerDDLPattern = regexp.MustCompile(`(?is)\b(?:ALTER|DROP)\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(striatumd\.[a-z_][a-z0-9_]*)`)
+// futureRuntimeMigrationOwnerDDLFloor, the owner-DDL/FK detection regexes
+// (runtimeMigrationOwnerDDLPattern et al.), and the detection functions
+// (runtimeMigrationOwnerDDLViolations / runtimeMigrationOwnerFKViolations) now
+// live in owner_ddl_preflight.go (non-test) so the build-time guards below and
+// the LOAD-TIME refusal the migration loader runs read the SAME source and
+// cannot drift (RFC 0142 Layer 1b "one source, no drift", D258).
 
 // runtimeOwnedTablesAlterable is the test-facing wrapper over the shared,
 // non-test derivation db.RuntimeOwnedTablesAlterable (see
@@ -32,93 +34,6 @@ func runtimeOwnedTablesAlterable(t *testing.T) map[string]bool {
 		t.Fatalf("derive runtime-owned tables from owner bundles: %v", err)
 	}
 	return allowed
-}
-
-func runtimeMigrationOwnerDDLViolations(migration Migration, runtimeOwned map[string]bool) []string {
-	matches := runtimeMigrationOwnerDDLPattern.FindAllStringSubmatch(migration.SQL, -1)
-	violations := make([]string, 0, len(matches))
-	seen := map[string]bool{}
-	for _, match := range matches {
-		cleaned := strings.Join(strings.Fields(match[0]), " ")
-		table := strings.ToLower(match[1])
-		if runtimeOwned[table] {
-			// A table an owner bundle has transferred to striatumd_rw ownership;
-			// the runtime role may legitimately ALTER it (ownership-aware, GH #442).
-			continue
-		}
-		if seen[cleaned] {
-			continue
-		}
-		seen[cleaned] = true
-		violations = append(violations, cleaned)
-	}
-	sort.Strings(violations)
-	return violations
-}
-
-// runtimeMigrationOwnerFKPattern matches an inbound foreign-key reference to a
-// striatumd.* table, in either the inline-column form
-// (`... REFERENCES striatumd.<table>`) or the table-constraint form
-// (`FOREIGN KEY (...) REFERENCES striatumd.<table>`). Both spellings contain the
-// `REFERENCES striatumd.<table>` token, so one pattern captures the FK target.
-var runtimeMigrationOwnerFKPattern = regexp.MustCompile(`(?is)\bREFERENCES\s+(striatumd\.[a-z_][a-z0-9_]*)`)
-
-// runtimeMigrationCreateTablePattern captures every striatumd.* table a single
-// migration CREATEs; a brand-new runtime table is striatumd_rw-owned at create
-// time on a two-role deploy, so a foreign key into it (including a
-// self-reference) is legitimately runtime-applyable.
-var runtimeMigrationCreateTablePattern = regexp.MustCompile(`(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(striatumd\.[a-z_][a-z0-9_]*)`)
-
-// sqlLineCommentPattern strips `-- …` to end-of-line so comment prose (every
-// above-floor runtime migration documents "NO foreign key into the owner-held …"
-// in a comment) is never mistaken for real FK DDL. The runtime migration SQL set
-// uses only `--` line comments — there are no `/* … */` block comments — so this
-// is sufficient.
-var sqlLineCommentPattern = regexp.MustCompile(`(?m)--.*$`)
-
-// runtimeMigrationOwnerFKViolations is the GENERIC complement to the owner-DDL
-// guard (issue #508): for a runtime migration it returns every inbound foreign
-// key whose target table is NOT runtime-owned — i.e. an FK into an owner-held
-// table. On a two-role production deploy (RFC 0110 / D215) runtime migrations are
-// applied as striatumd_rw, which has no REFERENCES privilege on owner-held
-// tables, so such an FK fails with `permission denied for table <owner table>`
-// (SQLSTATE 42501) at migrate time and crash-loops the daemon (the migration 0041
-// / D242 incident, fixed for that instance in D248 / #507; pgtest's single-role
-// DB masked it).
-//
-// The owner-held determination is DERIVED from the same authoritative ownership
-// split the owner-DDL guard uses: a table is runtime-owned only when an owner
-// bundle has transferred its ownership to striatumd_rw (runtimeOwned), or when
-// THIS migration itself CREATEs it (a fresh runtime-role-owned table). Anything
-// else a runtime migration references is owner-held — so this guard needs no
-// hand-maintained per-migration `forbidden` list (the hole 0041 fell through),
-// and the whole class is impossible to reintroduce above the floor.
-func runtimeMigrationOwnerFKViolations(migration Migration, runtimeOwned map[string]bool) []string {
-	body := sqlLineCommentPattern.ReplaceAllString(migration.SQL, "")
-
-	createdHere := map[string]bool{}
-	for _, match := range runtimeMigrationCreateTablePattern.FindAllStringSubmatch(body, -1) {
-		createdHere[strings.ToLower(match[1])] = true
-	}
-
-	violations := make([]string, 0)
-	seen := map[string]bool{}
-	for _, match := range runtimeMigrationOwnerFKPattern.FindAllStringSubmatch(body, -1) {
-		target := strings.ToLower(match[1])
-		if runtimeOwned[target] || createdHere[target] {
-			// A runtime-owned table (owner-bundle-transferred) or one created by
-			// this same migration: striatumd_rw owns it, so an inbound FK applies
-			// cleanly under the runtime role.
-			continue
-		}
-		if seen[target] {
-			continue
-		}
-		seen[target] = true
-		violations = append(violations, "REFERENCES "+target)
-	}
-	sort.Strings(violations)
-	return violations
 }
 
 type fakeRow struct {

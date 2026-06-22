@@ -145,6 +145,18 @@ func ApplyMigrations(ctx context.Context, runner Runner, daemonVersion string) (
 	if err != nil {
 		return 0, err
 	}
+	// RFC 0142 Layer 1b (D258): ownership pre-flight as a LOAD-TIME refusal. Run
+	// the SAME static owner-DDL/FK detection the build-time guards use over the
+	// runtime migrations BEFORE applying any of them, and refuse (applying
+	// nothing) if a runtime migration ALTER/DROPs or FK-references an owner-held
+	// relation. striatumd_rw lacks the privilege for those operations, so on a
+	// two-role deploy the apply would fail with SQLSTATE 42501 and crash-loop the
+	// single writer; refusing up front leaves the database untouched and routes
+	// the author to an owner bundle. The owner-held set comes from the same
+	// owner-bundle-derived source as the static guard ("one source, no drift").
+	if err := preflightRuntimeMigrationOwnership(migrations); err != nil {
+		return 0, err
+	}
 	for _, migration := range migrations {
 		if migration.Version <= current {
 			if err := verifyRecordedHash(ctx, runner, migration); err != nil {
