@@ -1,0 +1,335 @@
+{
+  "branch": {
+    "allow_dirty": false,
+    "mode": "auto",
+    "suggested_name": "striatum/rfc-0143-design-v4"
+  },
+  "context_docs": [
+    {
+      "path": "docs/operator/workflows/rfc-0143-design-v4/SEED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/rfc-0143-design-v3/dialogue/holder/HOLDER.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/rfc-0143-design-v3/dialogue/adjudicator/COLLABORATION_LEDGER_cycle_1.md",
+      "required": true
+    },
+    {
+      "path": "docs/rfcs/0143-lane-credential-survival-across-boot-epoch-rotation.md",
+      "required": true
+    }
+  ],
+  "coordinator": {
+    "lane_id": "author",
+    "role_id": "holder"
+  },
+  "cycles": [
+    {
+      "allow_same_lane": true,
+      "from": "adjudicate",
+      "max_iterations": 1,
+      "on_verdict": "needs_revision",
+      "to": "falsifier_1"
+    }
+  ],
+  "edges": [
+    {
+      "from": "holder",
+      "on": "completed",
+      "to": "falsifier_1"
+    },
+    {
+      "from": "falsifier_1",
+      "on": "completed",
+      "to": "falsifier_2"
+    },
+    {
+      "from": "falsifier_2",
+      "on": "completed",
+      "to": "adjudicate"
+    },
+    {
+      "from": "adjudicate",
+      "on": "completed",
+      "to": "commit_proposal"
+    },
+    {
+      "from": "commit_proposal",
+      "on": "completed",
+      "to": "final_summary"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "holder_handoff",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/dialogue/holder/HOLDER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "holder",
+      "lane_id": "author",
+      "objective": "REVISE the RFC 0143 falsifiable implementation spec so it RESOLVES the two remaining cycle-3 (design-v3) binding constraints BC1 and BC5 (see SEED.md `## The 2 binding constraints v4 MUST resolve`) while CARRYING FORWARD UNREGRESSED the design the v3 gate already credited (see SEED.md `## Carried forward — resolved by v3`): BC2 (reseal artifact identity derived from the job's `expected_artifacts` daemon state, refusing unexpected paths, reusing verifyRequiredArtifacts/ensurePerJobPublishedArtifactsDurable, front-matter failure routed to the Option-4 floor), BC3 (`CapabilityReseal` a daemon-internal marker projected by `resealInFlightJob` mapping supervisor_id->session_id with an internal AuthContext and no public Authorize prelude; public route-alternate kept test-only), BC4 (the concrete monotonic `jobs.recovery_generation` column in owner bundle 0021, LatestOwnerBundleVersion 20->21, increment points, stamped lease.recovery_generation compared under the lock), F2 (no lane-readable reseal bearer), F4 (route-specific `MethodEntry.ResealAlternate` recording reseal not write), the F7 file-mirror half (daemon-owned lane-read-only 0644 mirror, O_NOFOLLOW, atomic rename, reject MISSING boot-epoch header — closing #316), AF1 reachability-not-reminting, AF4 epoch/token decoupling, the categorical no-admin-token-widening invariant, and the per-claim falsifiable-assertion discipline (A1-A14). Start from the design-v3 HOLDER.md (a required context doc) and the v3 collaboration ledger (the BC1/BC5 analysis, the exact unrebutted grounds, and the prescribed fixes); do NOT re-litigate the ratified OQ1 trust-model shape (Option 4 mandatory floor + ratification-gated Option 2 narrow CapabilityReseal + minimal Option 3 per-session endpoint+epoch republish) or the F2 non-bearer decision — those are pinned in SEED.md `## Ratified design shape (do NOT relitigate)`. BC1 (security cluster) must resolve THREE unrebutted grounds in one place: (1) pin same-uid AUTHENTICATION on the non-PTY control channel — a peer-credential check against the launched wrapper's pid+start-time via SO_PASSCRED/SCM_CREDENTIALS (verify the connecting peer IS the expected wrapper, not merely same-uid), PR_SET_DUMPABLE(0) on the wrapper BEFORE the control fd/nonce are live (so /proc/<wrapper-pid>/fd and /environ are unreadable by same-uid siblings), and keep the nonce OUT of the same-uid-readable env, with negative tests TestSiblingSameUIDCannotOpenControlFDOrReplayNonceViaProc / TestControlFrameRequiresExpectedWrapperPeerCredentials run against a NON-child, NON-wrapper, same-uid process; (2) COMMIT that the wrapper never propagates provider child statuses 97/98 into the reserved agentloop exit codes (remap to a non-control agent_exited), with TestProviderExitCodeCannotDriveReservedAgentloopResealOrBlocker; (3) pin the trusted POSITIVE-intent source for Slice-B reseal — EITHER automatic/speculative reseal on a precise daemon-observed post-rotation condition (post-rotation child exit with all required expected_artifact paths present+modified in the active worktree since the packet; only daemon-derived artifacts attempted; ALL validation/backend failures mapped to the typed floor) OR a concrete non-PTY/non-bearer/non-sibling-replayable provider->wrapper intent path — make TestCodexResealUsesReceiverNotProviderStdout include a POSITIVE case, and define whether the post-exit reseal-complete path bypasses/replaces the ensureWorkSessionBackend gate (the agent_exited branch stops the supervisor, supervision.go:298-306; ensureWorkSessionBackend runs in lifecycle.go:1135-1183) so it routes the typed session_unrecoverable_across_rotation class, with TestResealExit98BypassesBackendGateOrRoutesTyped. BC5 (lifecycle cluster) must resolve TWO precision items: (1) pin `leases.reseal_grace_extended_at` to a CONCRETE migration site — leases is created in runtime migration 0005 (0005_repo_local_workflow_state.sql:166) and is owner-held (not in the migration-0016+ ownership-transfer cohort, owner/0018_runtime_table_ownership_transfer.sql), so pin the column to the SAME owner bundle 0021 as jobs.recovery_generation, consistent with TestFutureRuntimeMigrationsDoNotCarryOwnerDDL — do not leave it a downstream decision; (2) CORRECT the work.complete lock-order story — its session-binding (enforceSessionBindingForSession) and active-session (enforceActiveActingSession) gates run BEFORE lockRunForJob (lifecycle.go:1135-1155), so name exactly which pre-lock gates the internal reseal path skips or replays, and state how resealInFlightJob serializes against artifact.publish/work.complete/the recovery sweep so expired-beyond-grace ALWAYS routes the typed session_unrecoverable_across_rotation class (never raw lease_error, never a revived requeued lease). Name the exact code sites cited per constraint in SEED.md and state every load-bearing security claim as a falsifiable assertion paired with its named test. This is the published claim the falsifiers re-attack.",
+      "phase_id": "dialogue",
+      "role_id": "holder",
+      "task_prompt": {
+        "path": "prompts/collaboration_holder.md"
+      },
+      "title": "Hold revised proposal",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/dialogue/holder/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "falsifier_1",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/dialogue/falsifier_1/FALSIFIER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "falsifier_1",
+      "lane_id": "reviewer",
+      "objective": "Read the published REVISED (v4) holder proposal, the design-v3 HOLDER.md, and the v3 collaboration ledger. FIRST verify the cycle-3 security-cluster constraint BC1 is GENUINELY resolved (not merely claimed), pressing hardest on the same-uid auth-channel + positive-intent lens — this is the binding constraint the v3 gate held open on THREE unrebutted grounds. (1) Same-uid replay: does the spec pin a real peer-credential check against the launched wrapper's pid+start-time via SO_PASSCRED/SCM_CREDENTIALS (so a same-uid SIBLING that is neither the provider child nor the launched wrapper is REFUSED, not merely a same-uid possessor of fd 3), call PR_SET_DUMPABLE(0) on the wrapper BEFORE the control fd/nonce are live (so /proc/<wrapper-pid>/fd and /proc/<wrapper-pid>/environ are unreadable by siblings), and keep the nonce OUT of the same-uid-readable env? Do TestSiblingSameUIDCannotOpenControlFDOrReplayNonceViaProc and TestControlFrameRequiresExpectedWrapperPeerCredentials actually fire against a NON-child, NON-wrapper, same-uid process — or do they only catch fd-possession/nonce presence (the v3 hole)? The 'no filesystem name' rationale is FALSE on Linux (/proc reachability); confirm the revision replaced it, not restated it. (2) Reserved exit codes: does the spec COMMIT that the wrapper never propagates provider child statuses 97/98 into the reserved agentloop codes (remap to a non-control agent_exited), with TestProviderExitCodeCannotDriveReservedAgentloopResealOrBlocker firing? Recall the helper records the WRAPPER exit code (helper.go:427-439) and supervision.go:298-306 routes it — so an unmasked provider 97/98 is a forge surface until the wrapper owns those codes exclusively. (3) Positive-intent source: does the spec pin a trusted non-PTY/non-bearer/non-sibling-replayable source of publish/complete INTENT — automatic/speculative reseal on a precise daemon-observed post-rotation condition (with ALL validation/backend failures mapped to the typed floor) OR a concrete provider->wrapper intent path — given the wrapper does not know the deliverable is complete (loop.go:220-368)? Does TestCodexResealUsesReceiverNotProviderStdout now include a POSITIVE case, and does the spec define whether the post-exit reseal-complete path bypasses/replaces ensureWorkSessionBackend (supervision.go:298-306 stops the supervisor; lifecycle.go:1135-1183) so it routes the typed class rather than leaking invalid_transition/backend errors (TestResealExit98BypassesBackendGateOrRoutesTyped)? ALSO verify the v3-credited security set is NOT regressed: BC2 (artifact identity from daemon state), BC3 (CapabilityReseal daemon-internal marker, public route-alternate test-only), F2 (no lane-readable reseal bearer), F4 (route-alternate records reseal not write), and the no-admin-token-widening invariant. Then hunt for any NEW material gap in the security/authz core.",
+      "phase_id": "dialogue",
+      "role_id": "falsifier",
+      "task_prompt": {
+        "path": "prompts/collaboration_falsifier.md"
+      },
+      "title": "Falsifier 1 (BC1: same-uid channel auth + positive-intent lens)",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/dialogue/falsifier_1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "falsifier_2",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/dialogue/falsifier_2/FALSIFIER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "falsifier_2",
+      "lane_id": "reviewer",
+      "objective": "Read the published REVISED (v4) holder proposal, the design-v3 HOLDER.md, and the v3 collaboration ledger. FIRST verify the cycle-3 lifecycle-cluster constraint BC5 is GENUINELY resolved (not merely claimed), pressing hardest on the migration-site + lock-order-accuracy + typed-class-routing lens — the two precision items the v3 gate held open. (1) Migration site: does the spec pin `leases.reseal_grace_extended_at` to a CONCRETE owner-bundle/migration location, NOT a downstream 'owner-bundle-0021-if-owner-held-else-runtime' decision? Confirm against current source that striatumd.leases is created in runtime migration 0005 (go/pkg/db/sql/0005_repo_local_workflow_state.sql:166) and is owner-held — it is NOT in the migration-0016+ ownership-transfer cohort (go/pkg/db/sql/owner/0018_runtime_table_ownership_transfer.sql, whose array is job_recovery_state/barrier_*/conversations/interrogations/etc.) — so the column-add is owner DDL and belongs in the SAME owner bundle 0021 as jobs.recovery_generation (consistent with TestFutureRuntimeMigrationsDoNotCarryOwnerDDL, and bundles 12/13/16 already ALTER striatumd.jobs). Does the spec name it concretely? (2) Lock-order accuracy: the v3 claim that the seal paths 'already take lockRunForJob first' is INACCURATE for work.complete — its enforceSessionBindingForSession and enforceActiveActingSession gates run BEFORE lockRunForJob (go/pkg/mutations/lifecycle.go:1135-1155), and activeLeaseFor + ensureWorkSessionBackend run AFTER the lock (:1178-1183). Does the v4 spec CORRECT this — naming exactly which pre-lock gates the internal resealInFlightJob path skips or replays, and how it serializes against artifact.publish/work.complete (artifact.go:75-85) and the recovery sweep (recovery.go:575-587,:619-623,:866-890) so an expired-beyond-grace reseal ALWAYS routes the typed session_unrecoverable_across_rotation class, NEVER a raw lease_error and NEVER a lease revived after the sweep requeued the job? Do TestResealBeyondGraceRoutesTypedNotLeaseError, TestResealGraceCannotReviveRequeuedLease, TestRecoveryRequeueWinsOverExpiredLeaseReseal, GD-1b, and the new TestResealExit98BypassesBackendGateOrRoutesTyped actually fire? ALSO verify the v3-credited lifecycle set is NOT regressed: BC4 (the concrete jobs.recovery_generation column in owner bundle 0021, increment points, stamped value compared under the lock) and the F7 file-mirror half (daemon-owned lane-read-only endpoint/epoch, O_NOFOLLOW, atomic rename, missing-epoch rejected). Then hunt for any NEW material gap in the lifecycle/correctness core.",
+      "phase_id": "dialogue",
+      "role_id": "falsifier",
+      "task_prompt": {
+        "path": "prompts/collaboration_falsifier.md"
+      },
+      "title": "Falsifier 2 (BC5: migration site + work.complete lock-order + typed-class routing lens)",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/dialogue/falsifier_2/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "collaboration_ledger",
+          "logical_name": "collaboration_ledger_${cycle}",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/dialogue/adjudicator/COLLABORATION_LEDGER_${cycle}.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "adjudicate",
+      "lane_id": "author",
+      "objective": "Read only the dialogue trajectory for the RFC 0143 v4 REVISION (the revised HOLDER.md and the two FALSIFIER.md re-attacks), with the design-v3 HOLDER.md and the v3 collaboration ledger as context for what the revision had to fix. Publish the collaboration ledger verdict (one of accept, accept_with_findings, needs_revision, reject — a clearing verdict is accept or accept_with_findings, never `clear`). A clearing verdict REQUIRES that BOTH remaining binding constraints BC1 and BC5 are genuinely resolved AND the v3-credited resolved set (BC2, BC3, BC4, F2, F4, the F7 file-mirror half, AF1, AF4, the no-admin-token-widening invariant, the A1-A14 assertion discipline) is carried forward UNREGRESSED AND no new material challenge stands unrebutted. BC1 is resolved only if all THREE unrebutted v3 grounds are fixed in one place: (1) same-uid AUTHENTICATION on the non-PTY control channel — a peer-credential check against the launched wrapper's pid+start-time (SO_PASSCRED/SCM_CREDENTIALS) that REFUSES a same-uid sibling which is neither the provider child nor the launched wrapper, PR_SET_DUMPABLE(0) before the fd/nonce are live, the nonce out of the same-uid-readable env, with a NEGATIVE test run against a non-child non-wrapper same-uid process (TestSiblingSameUIDCannotOpenControlFDOrReplayNonceViaProc / TestControlFrameRequiresExpectedWrapperPeerCredentials); (2) a COMMITMENT that the wrapper never propagates provider child statuses 97/98 into the reserved agentloop exit codes (TestProviderExitCodeCannotDriveReservedAgentloopResealOrBlocker); (3) a pinned trusted POSITIVE-intent source for Slice-B reseal — automatic/speculative reseal on a precise daemon-observed post-rotation condition with all validation/backend failures mapped to the typed floor, OR a concrete non-PTY/non-bearer/non-sibling-replayable provider->wrapper intent path — with a POSITIVE TestCodexResealUsesReceiverNotProviderStdout case AND a defined post-exit backend-gate route (TestResealExit98BypassesBackendGateOrRoutesTyped). BC5 is resolved only if both precision items are fixed: (1) `leases.reseal_grace_extended_at` pinned to a CONCRETE migration site (owner bundle 0021, since leases is owner-held — created in runtime 0005, not in the 0018 ownership-transfer cohort), not a downstream decision; and (2) the work.complete lock-order story CORRECTED — naming exactly which pre-lockRunForJob gates (enforceSessionBindingForSession/enforceActiveActingSession, lifecycle.go:1135-1155) the internal reseal path skips/replays, and how resealInFlightJob serializes against artifact.publish/work.complete/the recovery sweep so expired-beyond-grace always routes the typed class. needs_revision if BC1 or BC5 remains open, if any credited item is regressed, or any new material challenge lands; reject only if a path widens admin-token exposure or mints a credential carrying any of {admin,apply,recovery,surgical_recovery}. The security invariant must hold STRUCTURALLY (no-replay must hold structurally on the channel — not as a trackable post-clearance finding). Note that Slice B (the daemon-internal CapabilityReseal marker, the test-only auth-prelude route alternate, the inherited-fd supervisor control channel, the reserved agentloop exit codes, the jobs.recovery_generation owner-bundle column, and endpoint/epoch republish plumbing) still requires maintainer ratification before any build slice touches credential code; adjudicator clearance gates the spec's soundness, not the maintainer's product call, and Slice A (the Option-4 typed-exit-code floor) is zero-trust-change but must route over a real non-PTY channel with the same-uid authentication fixed before it lands.",
+      "phase_id": "dialogue",
+      "role_id": "adjudicator",
+      "task_prompt": {
+        "path": "prompts/adjudicate_collaboration.md"
+      },
+      "title": "Adjudicate dialogue substance",
+      "type": "phase_synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/dialogue/adjudicator/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "commit_proposal",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/commit/proposal/PROPOSAL.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "commit_proposal",
+      "lane_id": "author",
+      "objective": "Publish the cleared, falsification-hardened implementation spec for RFC 0143 (resolving the two remaining binding constraints BC1 and BC5 with the ratified trust-model shape — Option 4 mandatory floor + ratification-gated Option 2 narrow CapabilityReseal + minimal Option 3 per-session endpoint+epoch republish — and carrying the v3-credited resolved set BC2/BC3/BC4 + F2/F4/F7-file/AF1/AF4/no-widening/A1-A14 forward), only after the adjudicator ledger records a clearing verdict; this SPEC is the artifact the rfc-0143-build run consumes. It MUST carry the BC1 same-uid channel authentication (peer-credential check against the launched wrapper pid+start-time, PR_SET_DUMPABLE(0), nonce out of env), the reserved-exit-code commitment, and the pinned positive-intent source + backend-gate route; and the BC5 pinned migration site (leases.reseal_grace_extended_at in owner bundle 0021) + corrected work.complete lock-order. It MUST flag that Slice B is a security/authz trust-model change requiring maintainer ratification before any build slice touches credential code, and that Slice A (the zero-trust-change legible-failure floor) may land first under the normal review gate once BC1 routes it over a real non-PTY-output channel with the same-uid authentication fixed.",
+      "phase_id": "commit",
+      "role_id": "committer",
+      "task_prompt": {
+        "path": "prompts/collaboration_commit.md"
+      },
+      "title": "Commit falsification-cleared proposal",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/commit/proposal/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "final_summary",
+          "path": "docs/operator/artifacts/rfc-0143-design-v4/commit/final/FINAL_SUMMARY.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "final_summary",
+      "lane_id": "reviewer",
+      "objective": "Summarize the cleared collaboration gate and downstream publication.",
+      "phase_id": "commit",
+      "role_id": "adjudicator",
+      "task_prompt": {
+        "path": "prompts/collaboration_final_summary.md"
+      },
+      "title": "Finalize collaboration run",
+      "type": "phase_synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0143-design-v4/commit/final/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "author": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--model",
+        "claude-opus-4-8"
+      ],
+      "display_model": "author",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "reviewer": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "codex",
+        "--yolo"
+      ],
+      "display_model": "reviewer",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    }
+  },
+  "name": "rfc-0143-design-v4",
+  "parallelism": {
+    "max_active_jobs": 1,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "phases": [
+    {
+      "description": "Preserved-context challenge and adjudication",
+      "id": "dialogue",
+      "name": "Dialogue",
+      "synthesis_job_id": "adjudicate"
+    },
+    {
+      "description": "Downstream work gated by the collaboration ledger",
+      "id": "commit",
+      "name": "Commit",
+      "synthesis_job_id": "final_summary"
+    }
+  ],
+  "roles": {
+    "adjudicator": {
+      "definition_path": "roles/adjudicator.md"
+    },
+    "committer": {
+      "definition_path": "roles/committer.md"
+    },
+    "falsifier": {
+      "definition_path": "roles/falsifier.md"
+    },
+    "holder": {
+      "definition_path": "roles/holder.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1.1",
+  "workflow_id": "rfc-0143-design-v4",
+  "workflow_version": "2026-06-23"
+}
