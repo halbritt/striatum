@@ -1,36 +1,36 @@
 # FALSIFIER 1 - RFC 0166 v2 C1 novelty-clock re-attack
 
-author: falsifier-reviewer-001
+author: falsifier-reviewer-003
 
 ## Claim Challenged
 
-The v2 holder claims C1 is resolved because `novelSealedProgressAt` replaces raw `jobSealedProgressAt` on every reset surface: the Part-1 floor, the Part-4 telomere reset, and RFC 0131 `progressAdvanced` (holder v2 lines 90-118, 232-297, 343-363). It also chooses the undeclared in-scope publish contract as **allowed-but-ignored-for-deadline** (lines 299-322) and specifies the mandated C1 test: junk rows land before every budget expiry while the tool timeline is stale, then `requeue_count` and `consecutive_silent_sweeps` advance until exactly one escalation (lines 455-475).
+The v2 holder claims C1 is resolved because `novelSealedProgressAt` is the single novelty-aware primitive used by every reset surface: the Part-1 floor, the Part-4 telomere reset, and the RFC 0131 confidence-gate `progressAdvanced` (`docs/operator/artifacts/rfc-0166-design-v2/dialogue/holder/HOLDER.md:88-118`, `:232-297`, `:343-370`). I agree the direct undeclared-junk raw-clock hole is repaired on paper: the floor no longer reads raw `jobSealedProgressAt`, undeclared rows are excluded by declared `logical_name`, the telomere reset reads `novelSealedProgressAt`, and the confidence gate replaces raw `sealedAt` with `novelSealedProgressAt`.
+
+C1 still does not clear, because the proposed timestamp is not actually equivalent to the required strict-increase cursor.
 
 ## Concrete Refutation
 
-The raw clock hole is repaired on paper, but the published C1 test is not a real hostile-lane test. A lane cannot publish those undeclared artifact rows through the actual control plane while remaining tool-stale.
+C1 requires the strict cursor from v1 Claim 3.1/3.3, hardened to declared/milestone artifacts, to drive every reset surface (`docs/operator/workflows/rfc-0166-design-v2/SEED.md:55-63`; `docs/operator/artifacts/rfc-0166-design/dialogue/adjudicator/COLLABORATION_LEDGER_cycle_1.md:77-88`). That cursor has three dimensions: distinct declared content hashes, sealed verdict count, and highest satisfied required-artifact milestone index (`docs/operator/artifacts/rfc-0166-design/dialogue/holder/HOLDER.md:167-174`). The v2 holder repeats that D/V/M position (`HOLDER.md:240-249`) and then claims `novelSealedProgressAt` strictly increases iff that position advances (`HOLDER.md:278-281`).
 
-`mcp.Service.ToolsCall` records `LastToolCallStartedAt` before dispatch and `LastToolCallFinishedAt` after dispatch for any call whose arguments carry `repository_id` and `session_id` (`go/pkg/mcp/tools.go:40-67`). `artifact.publish` requires `session_id`, `job_id`, `lease_id`, `kind`, `logical_name`, and `path`, then enforces the active acting session before publishing (`go/pkg/mutations/artifact.go:48-85`). The #324 predicate ages exactly against the latest of `LastToolCallStartedAt` and `LastToolCallFinishedAt`, and returns false while that base is still within `ToolProgressSeconds` (`go/pkg/sessionliveness/liveness.go:772-805`). The v2 AND is explicitly `sealedSilenceBreached && toolWedged` (holder v2 lines 143-158).
+But the SQL shown for `novelSealedProgressAt` only timestamps two things: `max(first_seen_at)` over declared artifacts grouped by `content_sha256`, and `max(verdicts.created_at)` (`HOLDER.md:251-267`). There is no term for the time a required expected-artifact milestone is first satisfied. Grouping by `content_sha256` collapses later required milestones that intentionally or accidentally reuse bytes already seen in an earlier declared artifact.
 
-So the realistic junk-publisher counterexample is:
+Counterexample:
 
-1. Arm `SealedSilenceSeconds` and use a job with one declared required artifact plus an allowed repo-write directory.
-2. The hostile lane never publishes the required artifact.
-3. It calls `artifact.publish` for undeclared `junk_N` with fresh `logical_name` and distinct bytes at a cadence below `ToolProgressSeconds` and before each sealed-silence expiry.
-4. The C1 primitive correctly ignores those rows, so the floor is stale and `sealedSilenceBreached` is true.
-5. But each `artifact.publish` call refreshes the tool-call timeline, so `toolWedged` is false and the AND never fires.
-6. Because the recovery action is never entered, `requeue_count` does not advance and the RFC 0131 confidence gate never gets to accumulate the promised silent sweeps; the telomere floor is never reached.
+1. A job declares two required expected artifacts in order: `phase_1` at `docs/a.md`, then `phase_2` at `docs/b.md`.
+2. At T1 it publishes `phase_1` with content hash H.
+3. At T2 it publishes `phase_2` with the same content hash H.
+4. This is a valid artifact shape: artifact uniqueness is scoped to `(repository_id, run_id, job_id, logical_name, attempt)` and `(repository_id, run_id, repo_path, content_sha256, attempt)`, so a different `logical_name` and different `repo_path` can reuse the same content hash (`go/pkg/db/sql/0018_artifact_attempt_scope.sql:26-36`; `go/pkg/mutations/artifact.go:217-299`).
+5. The M dimension, highest satisfied required milestone index, advances at T2. Under the required strict cursor, novelty advanced at T2.
+6. The v2 timestamp does not advance: the `GROUP BY content_sha256` bucket for H keeps `min(created_at)=T1`, so `max(first_seen_at)` remains T1 and there is no verdict term to rescue it.
 
-This is not an exotic extra attack. It is the same hostile undeclared-artifact publisher C1 was written to defeat, now moved from the raw sealed clock to the tool-axis recency side of the AND. The holder even names the resulting class as a P1 seam: a lane kept tool-fresh by junk-publishing or polling `await_packet` needs tool-axis novelty later (holder v2 lines 434-438). But the C1 gate did not ask for "floor freezes while the hostile publisher is intentionally spared"; it required junk-before-budget-expiry to leave the cursor/floor frozen **and** let `requeue_count`, silent sweeps, and exactly-one escalation proceed.
+Every reset surface then reads the wrong value. The Part-1 floor can age from T1 and breach even though the job satisfied a later required milestone at T2; the Part-4 telomere counter fails to reset on that genuine milestone; and the RFC 0131 confidence gate fails to set `progressAdvanced` for that milestone, so `consecutive_silent_sweeps` can continue climbing. That is not the old junk-row attack, but it is still a C1 failure: the reset surfaces do not consume the full strict-increase novelty cursor the constraint required.
 
 ## Strongest Rebuttal
 
-The strongest defense is that C1 was only about event-gated sealed reset surfaces, and v2 does use the same declared-scoped novelty primitive for the floor, telomere reset, and `progressAdvanced`. A lane making MCP calls is tool-fresh by definition, and the AND was deliberately ratified to spare tool-fresh lanes.
+The strongest defense is that duplicate bytes are not meaningful novelty, so only distinct declared content hashes plus verdicts should count. That would be a coherent smaller primitive, but it is not the primitive this v2 spec claims or the constraint required. The spec explicitly keeps M as an independent cursor dimension and says M is carried by the declared-artifact term (`HOLDER.md:278-281`). The SQL does not carry it.
 
-That defense proves only that the raw-clock bug is gone. It does not satisfy the mandated C1 falsification test or the publish-contract question. If "allowed-but-ignored-for-deadline" also means "allowed to keep the deadline's tool half fresh forever," then undeclared junk publishing remains a gaming surface. If the build test inserts junk rows directly into the database while holding the session tool timeline stale, it is not testing a hostile lane publishing artifacts through Striatum.
+If the build wants M to count, `novelSealedProgressAt` needs a timestamp for first satisfaction of each required expected-artifact milestone, or the persisted cursor update must stamp `last_novel_sealed_progress_at` when M advances. If the build does not want M to count, the spec must delete M from the primitive and re-justify the false-kill and telomere semantics for duplicate-content required artifacts.
 
 ## Unanswered Gap / Required Test Shape
 
-The build-bearing test must drive real `artifact.publish` calls from the owning session, not out-of-band row insertion. It should assert that repeated undeclared, deadline-ignored publishes cannot keep the sealed-silence rung from reaching the telomere floor. Today the v2 spec has no mechanism that can make that pass.
-
-A clearing design needs either deadline-specific tool-axis novelty in P0 (for example, the sealed-silence AND does not treat undeclared/deadline-ignored `artifact.publish`, polling, or equivalent non-forward-progress calls as progress while still honoring `work.heartbeat(local_work=true)` as the C2 reprieve), or a publish contract that prevents undeclared junk publishes from serving as a keepalive. Leaving that mechanism in P1 means C1's hostile-junk-publisher convergence test is still not genuinely discharged.
+Add a C1 falsification test with two required declared milestones where the second milestone publishes byte-identical content at a later time. Assert that the strict cursor and `last_novel_sealed_progress_at` advance to the second milestone time; the Part-1 floor moves; the Part-4 telomere reset fires; and the confidence gate treats `progressAdvanced` as true, including after a daemon restart. Without that test and a timestamp term for M, C1 is not genuinely discharged.
