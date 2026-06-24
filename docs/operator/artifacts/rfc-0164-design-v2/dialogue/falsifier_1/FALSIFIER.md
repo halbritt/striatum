@@ -1,68 +1,70 @@
-# FALSIFIER - RFC 0164 v2 C1 checkout/smudge gap
+# FALSIFIER - RFC 0164 v2 C1 checkout/smudge carrier gap
 
-author: falsifier-reviewer-001
+author: falsifier-reviewer-003
 
 ## Gate impact
 
-Needs revision. The v2 holder SPEC does not genuinely discharge C1. It widens the taxonomy to the mutation funnel, but it misclassifies checkout-style worktree operations as safe once they use `mutationEnv()`. That is false: `git worktree add` and `git reset --hard` can execute repo-local smudge filters while checking out files, under the daemon identity. The SPEC's P0 closures cover `status` -> fsmonitor, porter `add` -> clean filters, and porter `commit` -> hooksPath, but they leave this checkout/smudge carrier out of the taxonomy, the corpus, and the invariant.
+Needs revision. The v2 holder improves the C1 taxonomy by adding the mutation funnel and by naming the prior `status`/`add`/`commit` rows, but it still does not genuinely discharge severance-completeness. It classifies checkout-style worktree materialization as ordinary worktree administration closed by `mutationEnv()`. That is not enough: checkout paths can execute repo-local `filter.<driver>.smudge` commands through `.gitattributes`, under the daemon identity, even when the process environment is born-closed.
 
-This is a gate-stopping C1 failure because a helper-level env invariant can be green while the daemon still executes attacker-controlled repo config.
+This leaves a daemon-run git funnel where A12 can be green for the wrong reason. A helper-level invariant that proves `runGitWorktreeCommand` uses `mutationEnv()` does not prove that an in-repo-config-sensitive checkout carrier was minted away or refused before exec.
 
 ## Claim challenged
 
 The challenged claims are A0, A2, A12, A20, A27, and the section 11 green-build claim.
 
-The v2 taxonomy says `mutations/worktree.go:118/181/192/200/297/634/732` (`worktree add/remove`, `rev-parse`, `branch`) closes in P0 with `mutationEnv()`, and says `mutations/revision_routing.go:627` (`reset --hard`) closes with `mutationEnv()`. It does not classify either route as an in-repo-config-sensitive checkout carrier, and it does not require minted config, `--no-checkout` plus controlled materialization, filter-free checkout plumbing, or typed refusal before exec.
+The holder's v2 taxonomy lists `mutations/worktree.go:118/181/192/200/297/634/732` as `worktree add/remove`, `rev-parse`, and `branch`, class W/R, closed in P0 by `mutationEnv()`. It also lists `mutations/revision_routing.go:627` `reset --hard` as class W, closed by `mutationEnv()`. Neither route is classified as a filter carrier. Neither is routed through minted config, checkout-free materialization, or a typed pre-exec refusal.
 
-That misses a real git execution surface. `mutationEnv()` removes ambient/global/system config, but it does not stop Git from reading the target repo's local config and `.gitattributes` during checkout. Checkout paths honor `filter.<driver>.smudge` for files with matching attributes. So the current P0 proof can route `runGitWorktreeCommand` through `safegit`, satisfy the proposed env-only invariant, and still run attacker code.
+That violates C1's own rule: every in-repo-config-sensitive route, including filter carriers, must go through a minted config or typed refusal. Checkout is a filter carrier because Git materializes blobs through `.gitattributes` smudge filters.
 
 ## Concrete evidence
 
-Source routes:
+Source routes verified in the current worktree:
 
-- `go/pkg/mutations/worktree.go:118` runs `runGitWorktreeCommand(ctx, repoRoot, "worktree", "add", "--detach", target, inputs.BaseBranch)` to create the per-job worktree.
-- `go/pkg/mutations/revision_routing.go:627` runs `runGitWorktreeCommand(ctx, target, "reset", "--hard", tip)` to advance a reopened worktree.
-- `go/pkg/mutations/worktree.go:1603-1604` is the funnel body: `exec.CommandContext(ctx, "git", args...)`, with `cmd.Dir = repoRoot` and no subcommand-specific carrier policy today.
+- `go/pkg/mutations/worktree.go:118` calls `runGitWorktreeCommand(ctx, repoRoot, "worktree", "add", "--detach", target, inputs.BaseBranch)` to create daemon worktrees.
+- `go/pkg/mutations/revision_routing.go:627` calls `runGitWorktreeCommand(ctx, target, "reset", "--hard", tip)` to advance a reopened worktree.
+- `go/pkg/mutations/worktree.go:1604` is the shared funnel body: `exec.CommandContext(ctx, "git", args...)`, with `cmd.Dir = repoRoot`.
 
-I locally reproduced the carrier outside the repository tree. With a temp repo containing:
+I reproduced the carrier outside the repository tree with temp repos. The plant was repo-local config plus attributes:
 
 ```ini
 [filter "pwn"]
-    smudge = sh -c 'touch <sentinel>; cat'
+    smudge = <script that touches a sentinel and cats stdin>
     clean = cat
 ```
 
-and `.gitattributes` containing `*.pwn filter=pwn`, running `git -C <repo> worktree add --detach <wt> HEAD` created the sentinel. A second temp repo showed `git -C <repo> reset --hard <commit>` also created the sentinel. Both commands are the same checkout class as the daemon routes above. A closed `mutationEnv()` would not change this, because the smudge driver is repository-local config plus attributes, not ambient process env.
+and `.gitattributes` contained `*.pwn filter=pwn`.
 
-The three C1 corpus rows the holder adds do not cover this:
+Results from this run:
+
+- `git -C <repo> worktree add --detach <wt> HEAD` created the sentinel.
+- The same command under a closed environment shaped like the holder's `mutationEnv()` also created the sentinel: `SMUDGE_FIRED_UNDER_CLOSED_ENV`.
+- `git -C <repo> reset --hard <commit>` under the same closed environment created the sentinel: `RESET_SMUDGE_FIRED_UNDER_CLOSED_ENV`.
+
+So the failure is not ambient `GIT_*`, global/system config, or `os.Environ()` leakage. It is repo-local config and attributes read during checkout/materialization. `mutationEnv()` does not close it.
+
+The three C1 rows the holder names do not cover this class:
 
 - `quarantine_status_fsmonitor` covers `status` and `core.fsmonitor`.
-- `porter_add_filter_clean` covers `git add` and `filter.clean` through a proposed `StageBlob` replacement.
+- `porter_add_filter_clean` covers staging through `filter.clean` and a proposed `StageBlob` replacement.
 - `porter_commit_hookspath` covers `commit` and `core.hooksPath`.
 
-None of them exercises checkout/materialization carriers: `filter.smudge` during `worktree add`, `reset --hard`, or equivalent checkout paths. The SPEC's residual list is also too narrow: it names arbitrary render and whole-tree `add -A`, but not daemon worktree checkout.
-
-## Secondary exhaustiveness failure
-
-A fresh grep also refutes the literal claim that the table enumerates every daemon-identity call site. For example, `integrateGit` callers exist at `go/pkg/mutations/barrier_run_entity.go:138`, `go/pkg/mutations/barrier_assembly.go:310`, `go/pkg/mutations/recovery_quarantine_lane.go:256`, and many later `worktree.go` sites such as `775`, `1065`, `1174`, `1190`, `1223`, `1236`, `1275`, `1325`, `1336`, `1351`, and `1793`. Some may be semantically safe under a correctly hardened helper, but the v2 table says it is the complete call-site taxonomy and the test allowlist. It is not.
-
-The checkout/smudge issue is the material blocker. The omitted call-site rows are the proof that A2 is still being asserted more strongly than the source-backed taxonomy supports.
+None exercises `filter.smudge` during `worktree add`, `reset --hard`, or an equivalent checkout/materialization operation.
 
 ## Strongest rebuttal and why it fails
 
-The strongest holder rebuttal is that `worktree add` and `reset --hard` are worktree-admin operations, not read/ref or porter-add operations, and that routing the helper through `mutationEnv()` is enough for P0 while minted config remains Slice 2.
+The strongest rebuttal is that worktree creation and reset are W-class administration, not read/ref or porter staging, and that P0 is only trying to route the helper through a closed env while Slice 2 handles minted config later.
 
-That fails on the holder's own C1 standard. The required taxonomy must route every in-repo-config-sensitive route and every `textconv/filter/hook/fsmonitor` carrier through minted config or a typed pre-exec refusal. Checkout is a filter carrier: it materializes blobs through smudge filters. This is not the arbitrary agent-diff residual, and it is not a whole-tree `add -A` residual. It is the daemon's own worktree creation and reopening path. Treating it as ordinary W-class admin work leaves a daemon-identity RCE open.
+That fails under the holder's own revised C1 standard. The v2 SPEC says every in-repo-config-sensitive route and every textconv/filter/hook/fsmonitor carrier is either neutralized or refused. Checkout/materialization is a filter carrier on the daemon path. It is not the arbitrary agent-diff residual, and it is not the whole-tree `add -A` residual. It is how Striatum creates and reopens daemon worktrees.
 
-A second rebuttal is that the proposed invariant inspects helper call sites. That is necessary but insufficient. If the invariant only proves the helper definition uses `mutationEnv()` and the call-site subcommand is allowlisted, it will go green with this RCE intact. The invariant must also inspect argv-sensitive carrier classes and require minted config, checkout-free materialization, or typed refusal for checkout/smudge operations.
+The second rebuttal is that A12 inspects helper call sites. That is necessary but insufficient. If the invariant only proves the helper definition uses `mutationEnv()` and that `worktree` / `reset` are allowlisted, it will pass while this RCE remains. The invariant must understand argv-sensitive carrier classes and require minted config, checkout-free materialization, or typed refusal for checkout/smudge operations.
 
 ## Unanswered gap
 
-Before C1 can clear, the SPEC needs to add checkout/materialization carriers to the taxonomy and corpus, with red-before / green-after tests such as:
+Before C1 can clear, the SPEC needs to add checkout/materialization carriers to the taxonomy and corpus. The missing red-before / green-after rows are at least:
 
-- `worktree_add_filter_smudge`: repo-local `.gitattributes filter=pwn` plus `filter.pwn.smudge=touch S`; drive `worktree.go:118`; assert sentinel red-before and absent after the fix.
-- `reset_hard_filter_smudge`: same plant; drive `revision_routing.go:627`; assert sentinel red-before and absent after the fix.
+- `worktree_add_filter_smudge`: repo-local `.gitattributes filter=pwn` plus `filter.pwn.smudge=<sentinel>`; drive the `worktree.go:118` path; assert red-before and absent after the fix.
+- `reset_hard_filter_smudge`: same plant; drive the `revision_routing.go:627` path; assert red-before and absent after the fix.
 
-The fix must be one of: route these operations through minted config, avoid checkout by using controlled object extraction/materialization that never invokes filters, or typed-refuse before exec until Slice 2. `mutationEnv()` alone is not a fix.
+A valid fix must route these operations through minted config, avoid checkout by controlled materialization that never invokes filters, or typed-refuse before exec until Slice 2. `mutationEnv()` alone is not a fix.
 
-Until that is specified, the taxonomy is not complete, `recovery_quarantine_lane.go:425` and the three named rows do not prove severance completeness, A12 can be green for the wrong reason, and the C1 gate should not clear.
+Until this is specified, the taxonomy is still incomplete, the three named C1 rows are not a severance-completeness certificate, A12 can be green while a daemon-identity smudge RCE remains, and the C1 gate should not clear.
