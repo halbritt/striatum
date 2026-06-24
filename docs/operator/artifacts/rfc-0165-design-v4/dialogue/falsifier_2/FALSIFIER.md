@@ -1,53 +1,48 @@
-# RFC 0165 v4 Falsifying Challenge: Projection-Off Reopens the Old Refresh-Token File Route
-author: falsifier-reviewer-002
+# RFC 0165 v4 Falsifying Challenge: Projection-Off Leaves A Raw-Token Lane Surface
+
+author: falsifier-reviewer-004
 
 ## Challenge
 
-C3 is not genuinely resolved. The v4 holder closes the same-user route and the nominal distinct-UID projection route, but it still leaves `provider_credential_projection=off` as a distinct-UID Claude launch path that can skip the projection. The SPEC does not require that disabled-projection path to refuse Claude OAuth launch, overwrite/scrub a pre-existing lane credential, force a controlled empty Claude config dir, or run the same all-surfaces no-refresh-token scan before the process starts.
+C3 does not clear as written. The v4 holder closes the same-user source-read route and the normal distinct-UID B1/B2 projection route, but it still leaves a distinct-UID Claude launch path where `provider_credential_projection=off` can skip the projection. In that path, the SPEC does not require launch refusal, does not scrub or overwrite a pre-existing lane credential, and does not run the C3 all-surfaces no-refresh-token scan before the Claude process starts.
 
-That matters because the RFC's starting incident is exactly a lane-home Claude credential file that is a point-in-time copy of the operator credential and can contain a stale `refreshToken` (`docs/rfcs/0165-claude-provider-credential-freshness.md:13-33`). If projection is skipped, the daemon has not delivered the access-token-only B1 file or B2 broker, and the existing Claude resolver path can fall back to a lane-readable credential file. A distinct-UID lane then obtains raw refresh-token custody by the old file route.
+That is a material custody route because the RFC's starting state is a lane-home Claude credential file that can be a copied whole OAuth credential containing a stale `refreshToken` (`docs/rfcs/0165-claude-provider-credential-freshness.md:13-32`). A distinct-UID lane that starts with projection disabled can still read its own `$HOME/.claude/.credentials.json` or a `$CLAUDE_CONFIG_DIR/.credentials.json` named by launch env. The lane may not be able to refresh successfully if the token is stale, but C3 is stricter: the lane must not obtain raw refresh-token custody by any route.
 
 ## Claim Challenged
 
-The holder claims C3 is discharged because no lane can reach the rotating refresh token by any route: same-user is refused; distinct-UID source read has no read path; projection file/env/socket are access-token-only; and the recovery sample is downgrade-only (`HOLDER.md:150-159`, `HOLDER.md:208-224`).
-
-The challenged claim is the unconditional "by any route" part. The SPEC itself keeps one launch route where the access-token-only projection is not present.
+The holder claims C3 is discharged because same-user is refused, distinct-UID source read has no path, projection file/env/socket carry only access tokens, and recovery re-sample is downgrade-only (`HOLDER.md:148-159`). The challenged part is the unconditional "by any route" claim. The same holder also says only `provider_credential_projection=off` can skip projection for distinct-UID delivery (`HOLDER.md:430-438`) and lists that bypass as a carry-forward boundary (`HOLDER.md:181-182`).
 
 ## Evidence
 
-The v4 SEED asks this lane to test C3 against any raw-token route, including a lane-readable file/env/fd/fallback surface, and requires scanning every lane-readable credential surface named by the launch environment (`SEED.md:68-77`, `SEED.md:85-90`).
+The exhaustive C3 test is scoped to a projected distinct-UID lane: it enumerates the resolver-proven destination, `$CLAUDE_CONFIG_DIR/.credentials.json`, `$HOME/.claude/.credentials.json`, credential-bearing env entries, and the B2 socket response, then asserts no `refreshToken` (`HOLDER.md:646-653`). That is the correct scan when projection has run, but the test matrix does not name the corresponding projection-disabled case. The carry-forward tests cover `provider_auth_gate=off`, not `provider_credential_projection=off` (`HOLDER.md:596-604`).
 
-The holder's all-surfaces test is scoped to the normal projected distinct-UID lane: enumerate the resolver-proven destination, `$CLAUDE_CONFIG_DIR/.credentials.json`, `$HOME/.claude/.credentials.json`, credential-bearing env entries, and the B2 socket; assert access token and no refresh token (`HOLDER.md:646-653`). That is the right test for the normal gate, but it is not stated for the projection-disabled route.
-
-The holder then says only `provider_credential_projection=off` can skip the projection for distinct-UID delivery, while same-user refusal still cannot be skipped (`HOLDER.md:430-438`). The required carry-forward tests cover `provider_auth_gate=off`, not `provider_credential_projection=off` (`HOLDER.md:667-676`). So the route that actually skips projection has no named no-refresh-token test.
-
-Current source makes the fallback surface concrete. The Claude resolver uses `$CLAUDE_CONFIG_DIR/.credentials.json` first and `$HOME/.claude/.credentials.json` otherwise (`go/pkg/laneproviderauth/resolver.go:78-90`). Workflow `command_env` is layered into the supervised lane environment (`go/pkg/mutations/supervision_env.go:102-113`), and the parser only forbids `PATH` and `STRIATUM_*` keys (`go/pkg/mutations/supervision_lane_config.go:411-450`). In the projected path, the new projector is supposed to validate that `CLAUDE_CONFIG_DIR` matches the trusted destination. In the disabled-projection path, the SPEC does not say that validation still runs.
+Current source makes the fallback concrete. Workflow `command_env` can provide provider env such as `CLAUDE_CONFIG_DIR`; it is only forbidden from setting `PATH` or `STRIATUM_*` keys (`go/pkg/mutations/supervision_lane_config.go:411-450`), and that launch env is layered into the lane env (`go/pkg/mutations/supervision_env.go:102-117`). The Claude resolver then chooses `$CLAUDE_CONFIG_DIR/.credentials.json` if present, otherwise `$HOME/.claude/.credentials.json` (`go/pkg/laneproviderauth/resolver.go:78-90`). If the projection gate is skipped, the SPEC has not stated that those resolver surfaces are still validated for `refresh_token_absent` before launch.
 
 ## Concrete Counterexample
 
-1. The host has the pre-RFC or manually repaired lane credential at `~striatum-lane/.claude/.credentials.json`, containing `claudeAiOauth.refreshToken`. This is not hypothetical; it is the current problem statement and live repair shape for #583.
-2. A Claude lane launches with a distinct lane OS user, so the same-user precondition passes.
-3. The operator or workflow enables `provider_credential_projection=off`. Per v4, this can skip projection for distinct-UID delivery.
-4. Because projection is skipped, no B1 access-token-only file overwrites the old lane file, no B2 broker becomes the only credential source, and no spec-required scan refuses the old file.
-5. Claude resolves its credential from `$CLAUDE_CONFIG_DIR/.credentials.json` or `$HOME/.claude/.credentials.json`. If that lane-readable file is the old copied credential, the lane reads the raw rotating refresh token and can attempt the normal Claude refresh flow.
+1. The host has the pre-RFC lane credential at `~striatum-lane/.claude/.credentials.json`, copied from the operator profile and containing `claudeAiOauth.refreshToken`. This is the incident shape the RFC describes.
+2. A Claude lane launches with a distinct lane OS user, so the same-user refusal is not triggered.
+3. The launch uses `provider_credential_projection=off`.
+4. Because projection is skipped, the daemon does not write the B1 access-token-only file, does not force B2 as the only credential source, and does not run a required all-surfaces scan for this disabled-projection route.
+5. Claude resolves its credential from `$HOME/.claude/.credentials.json` or from a workflow-provided `$CLAUDE_CONFIG_DIR/.credentials.json`. If that lane-readable file is the old whole credential, the lane has raw refresh-token custody.
 
-That is C3's forbidden route: a distinct-UID lane-readable fallback file yields a refresh token even though same-user is refused and the normal projector is sound.
+This refutes C3 without relying on same-user mode, lane-authored freshness, or Striatum control-plane token leakage.
 
 ## Strongest Rebuttal
 
-The best rebuttal is that `provider_credential_projection=off` is explicitly documented unsafe, marks the dependency `disabled`, and is a break-glass escape outside the C3 proof. That would be defensible only if the SPEC said the no-refresh-token guarantee is suspended under that flag and the gate cannot clear while the flag is used.
+The strongest rebuttal is that `provider_credential_projection=off` is documented unsafe, emits a bypass event, and marks the dependency `disabled`. That can be an operator break-glass story, but it is not a proof of C3. A disabled dependency row does not remove a lane-readable OAuth file, and "documented unsafe" is still a route if it starts a Claude process that can read a refresh token.
 
-The v4 text does not draw that boundary. It presents C3 as cleared, keeps the flag in the launch design, and says the flag can skip projection. A launch path that is "documented unsafe" is still a route if it starts a Claude lane that can read a stale whole-credential file.
+The gate could clear with a narrower claim: C3 holds only when projection is not disabled, and projection-disabled Claude OAuth launch is an accepted risk. The holder does not make that narrowing; it presents C3 as resolved and keeps the disabled-projection launch path in the same implementation contract.
 
 ## Required Revision
 
-To clear C3, the SPEC needs one of these explicit closures:
+To clear C3, make one of these closures explicit:
 
-- Preferred: for Claude OAuth self-driving lanes, `provider_credential_projection=off` fails closed before launch, just like same-user mode. It may be a diagnostic flag for non-OAuth adapters, but not a live Claude launch bypass.
-- If the flag must remain for Claude, it cannot simply skip projection and start the lane. It must first prove `refresh_token_absent` across the same surfaces named by C3: resolver-proven destination, `$CLAUDE_CONFIG_DIR`, `$HOME/.claude`, credential-bearing env entries, B2/helper settings, and any inherited fd/config path the launcher gives the lane. If any lane-readable surface contains `refreshToken` or resolves to an untrusted credential path, launch refuses.
-- Add `TestProjectionOffCannotLaunchWithRefreshTokenCredentialSurface`: seed a distinct-UID lane home with a whole Claude credential containing a known `refreshToken`, set `provider_credential_projection=off`, launch Claude, and assert a typed precondition refusal before scratch/token/supervisor/process.
-- Add `TestProjectionOffStillValidatesClaudeConfigDir`: with projection disabled and workflow `CLAUDE_CONFIG_DIR` pointing at a lane-readable credential directory outside the trusted destination, assert refusal and no process.
+- For Claude OAuth self-driving lanes, `provider_credential_projection=off` fails closed before scratch, session-token mint, supervisor rows, helper/tmux, or process launch. It can remain a diagnostic flag for non-OAuth or non-Claude paths, but not a live Claude OAuth bypass.
+- If the flag must launch Claude, it must still run the C3 surface scan first: resolver-proven destination, `$CLAUDE_CONFIG_DIR`, `$HOME/.claude`, credential-bearing env entries, B2/helper settings, and any launcher-provided credential path or fd. Any `refreshToken`, untrusted credential path, or unprovable surface refuses launch.
+- Add `TestProjectionOffCannotLaunchWithRefreshTokenCredentialSurface`: seed a distinct-UID lane home with a whole Claude credential containing a known `refreshToken`, set `provider_credential_projection=off`, and assert a typed precondition refusal before side effects.
+- Add `TestProjectionOffStillValidatesClaudeConfigDir`: set `provider_credential_projection=off` and `CLAUDE_CONFIG_DIR` to a lane-readable directory containing a whole credential; assert refusal and no Claude process.
 
 ## Carry-Forward Check
 
-I did not find a same-user raw-token path in the intended v4 policy: `RunAsUser == ""` and resolved-uid equality are refused before launch. The nominal distinct-UID B1/B2 access-token-only projection, RFC 0096 control-plane separation, redaction contract, and downgrade-only recovery sample are directionally intact. The standing C3 regression is the explicit projection-disabled fallback path, which can leave the old raw-refresh-token lane file in place and unscanned.
+The same-user policy is directionally sound: `RunAsUser == ""` and resolved daemon-uid equality are refused before launch in the intended design. I also did not find a separate raw-token inherited-fd path in the current launch shape; the material route is the lane-readable credential file left reachable when projection is disabled. The normal B1/B2 projection, RFC 0096 control-plane separation, redaction contract, and downgrade-only recovery sample are intact on their intended path. The standing regression is that the spawn-time projection gate and `refresh_token_absent` proof are bypassable by the SPEC's own `provider_credential_projection=off` mode.
