@@ -1,52 +1,49 @@
-# FALSIFIER - RFC 0168 P0 C1 scrub postcondition challenge
+# FALSIFIER - RFC 0168 P0 C1 scrub-postcondition re-attack
 
-author: falsifier-reviewer-001
+author: falsifier-reviewer-003
 
 ## Result
 
-**C1 still has one gate-blocking proof gap.** I credit the v2 holder for fixing the old v1 failure boundary in the durable state machine: `active/scrubbing/quarantined/returned` is real, the held-unique index excludes dirty uids from allocation, scrub-begin removes the uid from the free set before any side effect, failed proof goes to `quarantined`, quarantine survives restart, the reaper re-drives leaked/stuck rows, and exhaustion excludes `scrubbing` + `quarantined` (`HOLDER.md:138-168`, `HOLDER.md:178-199`, `HOLDER.md:248-262`, `HOLDER.md:293-309`). That closes the original "no non-free dirty state" challenge.
+C1 is still blocked by one narrow proof defect. I credit the v2 holder for fixing the original v1 state-machine hole: `active/scrubbing/quarantined/returned` is durable; `scrubbing` and `quarantined` are excluded from the free set by the held-uid predicate; `scrub-begin` removes the uid from allocation before side effects; failed proof goes to `quarantined`; the reaper handles leaked-active and stuck-scrubbing rows; restart preserves quarantine; and exhaustion counts dirty states as consumed (`HOLDER.md:133-199`, `HOLDER.md:241-309`). That closes the old "returned-but-dirty has no state" challenge.
 
-The remaining material issue is narrower: the new P1 postcondition does not actually prove the per-uid kill domain is empty. It only fails when a `pool_uid` process is in `R`/`S`/`D`, while Linux `/proc/<pid>/status` also has non-zombie stopped/traced states (`T` stopped, `t` tracing stop). A stopped/traced task is not a zombie and has not exited; it cannot be silently treated as clean residue in a proof whose required target is an empty uid process domain.
+The remaining issue is the process-domain proof itself. P1 says a return is blocked only when a `pool_uid` process remains in `R`/`S`/`D`, while tolerating `Z` zombies (`HOLDER.md:222-227`). Linux also reports stopped and traced non-zombie tasks (`T` and `t`). Those tasks have not exited, still belong to the uid, can hold file descriptors and same-uid residue, and can be resumed. A proof that permits them is not the requested proof that the per-uid kill domain is empty.
 
-## Precise Claim Attacked
+## Precise Claim Challenged
 
-The v2 spec says the C1 fix includes a scrub **postcondition proof** rather than scrub-command exit codes (`HOLDER.md:28`, `HOLDER.md:218-239`). P1 is the load-bearing process-domain proof:
+The seed and v1 ledger require a scrub postcondition that proves no dirty uid can be returned and re-leased. The v1 ledger states the required process predicate as zero non-zombie uid-owned processes before `returned`; v2 narrows the executable predicate to "no `R`/`S`/`D`" (`HOLDER.md:222-227`, `HOLDER.md:280-285`, v1 ledger `COLLABORATION_LEDGER_cycle_1.md:44-45`). Because `returned` is reached whenever P1-P5 all hold (`HOLDER.md:237-239`), the exact definition of P1 is load-bearing.
 
-- enumerate `pool_uid`-owned PIDs via `/proc/<pid>/status`;
-- assert no `pool_uid` process in `R`/`S`/`D` remains;
-- record `Z` zombies without blocking because they cannot run code (`HOLDER.md:222-227`);
-- allow `returned` only when P1-P5 all hold (`HOLDER.md:237-239`).
-
-That is close, but it is not the same as the C1 requirement. The v2 seed required proof that the per-uid kill domain is empty, not merely that `kill -KILL -1` returned 0 (`SEED.md:58-68`, `SEED.md:94-99`). The v1 adjudicator prescribed a postcondition of **zero non-zombie uid-owned processes** before `returned` (`COLLABORATION_LEDGER_cycle_1.md:45`). P1 names the zombie exception but does not say every other observed state blocks return.
+Existing source shape makes the ambiguity material rather than wordsmithing: the current `/proc` helper in `tmux_liveness.go` treats process state as a single-character zombie check (`processZombie`, `tmux_liveness.go:576-590`). If the build follows the v2 text literally, a non-zombie state outside `R/S/D` can be treated as clean even though it is still a live uid-owned task.
 
 ## Concrete Failing Case
 
-1. Session S1 leases uid U and leaves a U-owned process in a stopped or ptrace-stopped state (`T`/`t`) with same-uid memory, file descriptors, or HOME/credential reachability.
-2. Teardown enters `scrubbing`; S1's uid is correctly held out of the free set.
-3. The scrub command path runs, but the process survives the command or is observed during the bounded proof window. This is exactly the class C1 says command success cannot prove away.
-4. P1 enumerates the U-owned PID, sees state `T` or `t`, and the spec as written only declares `R`/`S`/`D` blocking. P2-P5 can all pass: no tmux socket, credential path absent, HOME scratch reset, ACLs removed.
-5. `tx_scrub_finalize` can record clean proof and move U to `returned` even though a non-zombie U-owned process still exists. A later S2 lease of U now shares an OS uid domain with S1 residue, reopening the same cross-lease residue class C1 exists to close.
+1. Session S1 leases uid U and leaves a U-owned process stopped or ptrace-stopped (`T`/`t`). It may still hold descriptors into HOME scratch, credential paths, tmux-adjacent files, or other same-uid residue.
+2. Teardown transitions the lease to `scrubbing`, correctly excluding U from the free set while scrub runs.
+3. The scrub command returns, or the bounded proof observes the survivor. This is exactly the class C1 says command exit status cannot prove away.
+4. P1 enumerates the U-owned PID but, as written, only fails on `R`/`S`/`D`. The process is not `Z`, but it is also not in the listed blocking set. P2-P5 can pass: tmux socket gone, credentials absent, HOME scratch reset, and per-lease ACLs removed.
+5. `tx_scrub_finalize` records a clean proof and moves U to `returned`. A later S2 allocation leases U while S1's non-zombie same-uid process still exists. That reopens the same cross-lease residue class C1 was supposed to close, despite the durable quarantine state being otherwise correct.
 
-The damage does not require the old missing-quarantine bug. The state machine can be correct and still return a dirty uid if the proof predicate under-classifies a surviving non-zombie process.
+This is a dirty re-lease through an under-specified proof predicate, not through the old missing-quarantine state.
 
 ## Strongest Rebuttal
 
-The best rebuttal is that `kill -KILL -1` should normally terminate stopped/traced processes, and the holder probably intended `R`/`S`/`D` as shorthand for "processes that can still run code," with `Z` as the only safe exception. But C1 was explicitly about not trusting command success or happy-path expectation. The build spec must define the postcondition an implementation can test. As written, it does not say `T`/`t` or any unknown non-zombie state fails the proof, and A17 only says a "surviving process" makes P1 fail without covering the stopped/traced survivor variant (`HOLDER.md:293-297`).
+The strongest rebuttal is that `kill -KILL -1` should normally terminate stopped/traced tasks and that the holder probably meant `R/S/D` as shorthand for all runnable or resource-bearing non-zombies, with `Z` as the only tolerated exception. The A17 wording also says a "surviving" process should make P1 fail (`HOLDER.md:293-297`).
+
+That intent is not enough for the build spec. C1 exists because command success and happy-path intent are insufficient. The implementable rule in P1 names `R/S/D`, distinguishes only `Z` from that set, and does not say `T`, `t`, or unknown states quarantine the uid. A falsifiable spec needs the blocking predicate to be explicit.
 
 ## Required Revision
 
-Tighten P1 to the predicate the gate asked for: after bounded re-kill/re-probe, there are **zero `pool_uid`-owned tasks except zombies/dead tasks that cannot execute and hold no resources**. Any observed non-zombie state, including `T`/`t` and any unknown state, must block `returned` and finalize as `quarantined` with `lane_uid_scrub_failed`.
+Tighten P1 to the actual gate predicate: after bounded re-kill and re-probe, there are zero `pool_uid`-owned tasks except zombies or dead tasks that cannot execute and hold no resources. Any observed non-zombie state, including `T`, `t`, or an unknown state, must fail P1, finalize as `quarantined`, emit `lane_uid_scrub_failed`, and keep the uid out of allocation across restart.
 
-Add a named negative test, or extend A9'/A17, for the missing edge:
+Extend A9'/A17, or add a named test, for this edge:
 
-- `TestStoppedOrTracedUIDProcessBlocksReturn`: inject a U-owned stopped/traced survivor after scrub; assert P1 fails, the row becomes `quarantined`, the uid is not allocated, restart preserves quarantine, and only the same P1-P5 proof can clear it.
+- `TestStoppedOrTracedUIDProcessBlocksReturn`: inject a stopped/traced U-owned survivor during scrub; assert P1 fails, the lease becomes `quarantined`, the uid is not re-leased, restart preserves quarantine, and only the same P1-P5 proof can clear it.
 
-Also require `scrub_proof` to record the observed PIDs and `/proc` states, so doctor/operator output can distinguish `Z` tolerated residue from a non-zombie quarantine cause.
+Also require `scrub_proof` / `scrub_failure` to record observed PIDs and `/proc` states. Doctor/operator output must be able to distinguish tolerated zombie residue from a non-zombie survivor that caused quarantine.
 
 ## Carry-Forward Check
 
-I found no regression in the v1-proven hard core HC-A1..A5 or the credited OQ1/OQ3/OQ5/OQ6/narrowing set. The structural per-lane uid model remains right; the OQ1 free predicate, OQ3 launch-as-only boundary, OQ5 generation token, and OQ6 credential-hydration shape are carried forward coherently (`HOLDER.md:44-87`, `HOLDER.md:93-115`, `HOLDER.md:311-320`, `HOLDER.md:426-451`, `HOLDER.md:460-491`). The challenge is confined to C1's scrub postcondition proof.
+I found no regression in the carried hard core HC-A1..A5 or in OQ1/OQ3/OQ5/OQ6/narrowing. The four-state lease model, held-uid allocation rule, crash-safe `scrubbing` state, quarantine/reaper surface, dirty-state exhaustion accounting, launch-as-only provisioning boundary, generation token, and per-uid hydration shape all move in the right direction. The challenge is confined to C1's scrub postcondition proof.
 
 ## Bottom Line
 
-v2 fixes the durable quarantine/free-set hole, but C1 does not clear while P1 can interpret a stopped/traced non-zombie uid-owned process as clean. The correction is small and precise: make the process proof "zero non-zombie uid-owned tasks" and test the stopped/traced survivor case.
+The v2 state machine is structurally much better than v1, but C1 does not clear while the proof can return a uid with a stopped/traced non-zombie same-uid task still present. The needed fix is small and load-bearing: make P1 "zero non-zombie uid-owned tasks," test the stopped/traced survivor, and record the observed process states in the proof.
