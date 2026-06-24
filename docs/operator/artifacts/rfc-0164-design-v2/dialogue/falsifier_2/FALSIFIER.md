@@ -1,63 +1,39 @@
-# FALSIFIER - RFC 0164 v2 C2 unknown-key negative gap
+# FALSIFIER - RFC 0164 v2 C2 classifier gap
 
-author: falsifier-reviewer-002
+author: falsifier-reviewer-004
 
-## Gate impact
+## Challenge
 
-Needs revision. The v2 SPEC does fix the original stable `[alias]` / `[pager]` wedge by introducing non-blocking `gate.read_gadget_observed` and by making the positive half of `false_positive_benign_test` assert no blocker, no `recovery.quarantine_lane` ref, and a second read without repo edit or human clear. That part is materially better than v1.
+C2 should not clear on the current v2 SPEC. The revision fixes the original direct wedge for a stable benign `[alias]` / `[pager]`: `gate.read_gadget_observed` is explicitly non-blocking, pins no blocker, creates no `recovery.quarantine_lane` ref, and the positive half of `false_positive_benign_test` now checks a second read with no repo edit or human clear (`HOLDER.md:64-95`, `HOLDER.md:679-747`). That is real progress over v1.
 
-But C2 still is not genuinely discharged because the paired negative control and the unknown-key route are underspecified. A33 says to plant "an unknown/unattested key (a config key not in the §0 recognized taxonomy)" and assert it hard-refuses into `recovery.quarantine_lane`. Section §0 is a daemon git call-site and route taxonomy, not a config-key taxonomy. Taken literally, that rule either hard-refuses ordinary benign Git config that is not in §0, recreating the false-positive wedge through a different route, or it proves nothing about unknown executable gadgets.
+The remaining gap is the negative half of C2. A32/A33 define the hard-refusal case as an unknown/unattested key with "no taxonomy entry, no green-corpus coverage," and A33 says to plant "a config key not in the §0 recognized taxonomy" (`HOLDER.md:703-747`). But §0 is not a config-key taxonomy. It is a daemon git call-site and route table: funnels, subcommands, route classes, current env, and P0 closure (`HOLDER.md:154-220`). It does not define the scanned config-key domain, which keys are inert and ignored, which keys are execution-capable candidates, or what makes a candidate "recognized" versus "unknown."
 
-## Claim challenged
+That makes the negative control either overbroad or fake:
 
-The challenged claims are A24, A32, A33, and the assertion that the observed / blocked / refused model is coherent enough to keep false positives non-blocking while unknowns never silently pass.
+- If implemented literally, any ordinary local config key absent from §0 and absent from the green corpus can hard-refuse. A repo with stable harmless config such as `color.ui=auto`, `branch.main.merge=refs/heads/main`, `remote.origin.url=https://example.invalid/repo.git`, or `core.abbrev=12` has keys that are not in the route taxonomy and are not §5 green-corpus gadget rows. Refusing those keys creates a human-cleared `recovery.quarantine_lane` path for benign retained config, which recreates the false-positive wedge through a different key family.
+- If the intended implementation is "only execution-capable unknown keys refuse," the SPEC does not define the classifier or extractor that separates inert unknown config from unknown execution carriers. Then A33 can be satisfied by hard-refusing an inert key, which proves overblocking, or by letting inert unknowns pass, which proves nothing about a true future executable gadget.
 
-The SPEC says:
+## State-model contradiction
 
-- `gate.read_gadget_observed` is non-blocking for recognized keys whose execution is already neutralized, including benign `[alias] co=checkout` / `[pager] log=less -FRX`.
-- `gate.read_gadget_refused` is a hard refusal into the human-cleared lane for an unknown/unattested key with no taxonomy entry and no green-corpus coverage.
-- A33's negative half plants an unknown/unattested config key not in the §0 recognized taxonomy and expects `recovery.quarantine_lane` plus a failed read.
+The residual rows expose the same classifier hole. The SPEC says arbitrary in-repo render and whole-tree `add -A` residuals are refused in P0 and sent to the human-cleared lane (`HOLDER.md:258-267`, `HOLDER.md:586-592`). But §8.3 defines `observed` as non-blocking for recognized keys, including residuals "slated for the minted-config omission and meanwhile refused," then defines `refused` only for unknown/unattested keys (`HOLDER.md:685-706`).
 
-That is not enough to build or verify the property.
+A recognized but not-yet-neutralized residual such as `filter.<driver>.clean` on whole-tree `add -A` therefore has no coherent state. `observed` cannot be right because it must never block; `refused` violates the "unknown only" rule; `blocked` is reserved for env/unwired defects and would bring back machine-clearable liveness semantics. This is not the original alias/pager wedge, but it shows the observed/blocked/refused model still lacks the config-key classifier needed to keep false positives non-blocking while unknown executable gadgets hard-refuse.
 
-## Concrete failing case
+## Strongest rebuttal
 
-Use a target repo whose local config contains stable, ordinary, non-executable config that the holder does not enumerate in §0, for example:
+The strongest rebuttal is that "unknown/unattested" obviously means an unknown executable Git gadget family, not every harmless config key. I agree that is the right intent. The problem is that the v2 SPEC does not say it. It points A33 at §0, and §0 is a route taxonomy, not a key registry. The build implementer has no falsifiable contract for which keys are scanned, which unrecognized inert keys are ignored, and which executable-but-unattested keys must refuse.
 
-```ini
-[color]
-    ui = auto
-[remote "origin"]
-    url = https://example.invalid/repo.git
-[branch "main"]
-    merge = refs/heads/main
-```
+A second rebuttal is that the positive half of `false_positive_benign_test` covers the important benign case. It only covers `[alias]` and `[pager]`. It will not catch a broad unknown-key refusal that quarantines common benign config, and it does not prove a real unknown executable carrier cannot silently pass.
 
-These keys are not in the v2 §0 taxonomy because §0 enumerates git spawn sites and route classes, not a safe/unsafe config-key language. They also have no green-corpus coverage in §5. If A32/A33 are implemented literally, the first allowlisted read sees keys with no taxonomy entry and no green-corpus coverage, emits `gate.read_gadget_refused`, creates a `recovery.quarantine_lane` ref, and blocks until a human clears or edits harmless config. That is the same liveness failure C2 was meant to eliminate, just moved from `[alias]` / `[pager]` to any unregistered benign config.
+## Required fix before C2 can clear
 
-If the intended implementation is instead "ignore inert unknown config keys and refuse only unknown executable gadget carriers," then the SPEC does not define the classifier. The A33 negative fixture of "a config key not in the §0 recognized taxonomy" can be satisfied by a key Git ignores, so the test would be fake: hard-refusing it proves overblocking, while letting it pass proves nothing about a real future gadget. A genuine negative needs an explicit executable-but-unattested class, or a defined candidate-key extractor that distinguishes inert unknown config from unknown execution carriers.
+Make the negative half of A33 precise enough to implement and falsify:
 
-## Additional state-model contradiction
-
-The residual rows expose the same classifier hole. The SPEC says the `quarantine_addA_filter_clean` residual is expected-fail vs Layer 2 and "refused-not-executed in P0." It also says residual recognized keys are part of `gate.read_gadget_observed`, which pins no blocker, creates no recovery ref, and never blocks. Then §8.3 reserves `gate.read_gadget_refused` for unknown/unattested keys only.
-
-A recognized-but-not-yet-neutralized residual such as `filter.<driver>.clean` on whole-tree `add -A` therefore has no coherent state: observed would be non-blocking, refused would violate the "unknown only" rule, and blocked would reintroduce machine-clearable liveness behavior. That does not directly re-open the benign `[alias]` / `[pager]` case, but it means the state machine still is not a single coherent blocker-vs-observability model.
-
-## Strongest rebuttal and why it fails
-
-The strongest rebuttal is that "unknown/unattested" obviously means an executable Git gadget family, not every harmless config key. That is the right intention, but it is not what the SPEC says. It points to §0 as the recognized taxonomy, and §0 is a route/call-site table. It does not define a config-key registry, a safe inert-key policy, or a detector language for executable-but-unattested keys.
-
-A second rebuttal is that A33's positive half protects the important false-positive case. It protects only `[alias]` / `[pager]`. It will not catch an overbroad unknown-key refusal that wedges on common benign config, and it will not prove a true unknown executable carrier hard-refuses.
-
-## Required fix before the gate can clear
-
-Before C2 can clear, the SPEC needs to make the negative half of A33 real:
-
-- Define the scanned config-key domain precisely, separating inert benign keys from execution-capable candidate keys.
-- Define what makes a key "recognized," "covered by green corpus," and "unknown/unattested" in a config-key registry, not by reference to the call-site taxonomy.
-- Make inert unknown benign keys non-blocking, or explicitly justify and test a narrower scanner that never sees them.
-- Use an executable-but-unattested fixture for the negative case, and assert it hard-refuses into `recovery.quarantine_lane` without making ordinary benign config a human-cleared blocker.
+- Define a config-key classifier separate from the §0 route taxonomy: inert keys, recognized execution-capable keys, recognized residual keys, and unknown execution-capable candidates.
+- State what happens to inert unrecognized benign keys; they must not create a job/run blocker or `recovery.quarantine_lane` ref.
+- Use a negative fixture that represents an execution-capable but unattested key, for example by withholding a known executable family from a test-only registry or by defining a detector fixture that simulates a future executable carrier. The negative must prove hard-refusal for that class, not for arbitrary unknown config text.
+- Align residual recognized keys with exactly one state: non-blocking observed only after neutralization, typed refusal while unneutralized, or blocked as a defect. Do not let one residual be both "observed" and "refused" by definition.
 
 ## Carry-forward regression check
 
-I did not find a separate carry-forward regression in the layered-severance posture, the `GIT_CONFIG_COUNT` omission reasoning (A7/A16), the `ErrGitEnvUnavailable` refuse-not-degrade floor (A8), the P0 no-truncated-graph / Slice-2 parity harness (A21/A21b), the canonicalization / no-attestation-before-exec / decay re-attest mechanics (A22/A23/A25), or the four §0 source corrections. The standing gate issue from this lens is the incomplete C2 classifier and fake/overbroad A33 negative control above.
+I did not find a separate carry-forward regression in the layered-severance posture, `GIT_CONFIG_COUNT` omission reasoning (A7/A16), the `ErrGitEnvUnavailable` refuse-not-degrade floor (A8), P0 no-truncated-graph plus the Slice-2 parity gate (A21/A21b), evidence mechanics (A22/A23/A25), or the four §0 source corrections. From this C2 lens, the standing issue is the incomplete classifier and overbroad/fake A33 negative control above.
