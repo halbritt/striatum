@@ -92,7 +92,7 @@ Before running, refresh live state:
 Stop if `doctor` is red, if the primary checkout is dirty in unrelated files,
 or if any proposed work drifts into implementation before design review.
 
-The generated workflow uses `striatum codex
---dangerously-bypass-approvals-and-sandbox --no-alt-screen` lanes over
-`pty_helper` with `worktree_isolation: "per_job"`. It is intended for a fresh
-Striatum run after the operator confirms the branch and lane cost.
+The generated workflow uses direct `codex
+--dangerously-bypass-approvals-and-sandbox --no-alt-screen` agent-loop lanes
+over `pty_helper` with `worktree_isolation: "per_job"`. It is intended for a
+fresh Striatum run after the operator confirms the branch and lane cost.

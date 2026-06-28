@@ -17,9 +17,9 @@ author: operator-claude-opus-4-8-001
 `MULTI_CAMPAIGN_SUPERVISION` has a Level-1 design seed and scaffold. The
 workflow scaffold lives at
 `docs/operator/workflows/multi-campaign-supervision-level1/workflow.json` and
-uses Striatum's supported `divergent_ideation` shape with `striatum codex`
-`pty_helper` lanes and per-job worktree isolation. The seed explicitly carries
-the Level-0 live-human artifacts, the current operator brief, and
+uses Striatum's supported `divergent_ideation` shape with direct `codex`
+agent-loop `pty_helper` lanes and per-job worktree isolation. The seed
+explicitly carries the Level-0 live-human artifacts, the current operator brief, and
 `docs/how-to/how-to-agent.md` as required context.
 
 An operator-side ADHD scout pass is recorded under

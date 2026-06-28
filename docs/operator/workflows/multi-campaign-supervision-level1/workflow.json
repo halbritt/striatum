@@ -485,7 +485,6 @@
         "synthesis"
       ],
       "command": [
-        "striatum",
         "codex",
         "--dangerously-bypass-approvals-and-sandbox",
         "--no-alt-screen"
@@ -507,7 +506,6 @@
         "synthesis"
       ],
       "command": [
-        "striatum",
         "codex",
         "--dangerously-bypass-approvals-and-sandbox",
         "--no-alt-screen"
@@ -529,7 +527,6 @@
         "synthesis"
       ],
       "command": [
-        "striatum",
         "codex",
         "--dangerously-bypass-approvals-and-sandbox",
         "--no-alt-screen"
