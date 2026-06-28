@@ -208,7 +208,7 @@ them for the standalone repository and the intended target repository.
 
 This repository is represented in the local/private Plane workspace `Proximal`.
 
-- Plane project: `striatum` (`STRIATUM`)
+- Plane project: `Striatum` (`STRIATUM`)
 - Plane URL: `https://proximal.tail0ecc2e.ts.net:10000/`
 - GitHub repo: `https://github.com/halbritt/striatum`
 - Use Plane work items for multi-agent planning, claims, submitted artifacts, reviews, and acceptance decisions.
