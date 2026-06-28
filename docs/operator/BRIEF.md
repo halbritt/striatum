@@ -12,6 +12,37 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-28 delta - RFC 0143 Slice B build run blocked
+
+RFC 0143 Slice B `CapabilityReseal` build run
+`run_448c756fc1ca401172a2cf19c57baa2f` is still running but blocked at the
+`draft` job (`job_run_448c756fc1ca401172a2cf19c57baa2f_draft`) behind
+`blk_7050883e550f7a8bc2bd006228d1983a`
+(`write_scope.contract_missing`). The published draft artifact
+`art_d5767dfd04aee3d33fc08e413741322f` is attested and its on-disk worktree
+body hash matches the artifact row (`8a852866...`), but the body is not durable
+outside the per-job worktree `wt_b1d10e64644ae80a061de836c5cfb87e`.
+
+Recovery was inspected through daemon surfaces rather than manual worktree
+capture. `recovery reseal run_448c756fc1ca401172a2cf19c57baa2f
+job_run_448c756fc1ca401172a2cf19c57baa2f_draft --json` refused with
+"published artifact content is not durable outside the per-job worktree";
+`recovery complete-stalled ... --force --dry-run --json` refused because the job
+state is `blocked`; `recovery resume blk_7050883e550f7a8bc2bd006228d1983a
+--json` refused because this blocker is not a supported process-adapter blocker.
+`recovery resolve-blocker` was intentionally not used: current source shows that
+verb only closes the blocker row and does not mutate job/run state, which would
+hide the live block without sealing the work.
+
+The frozen packet `wp_0e480f22f30e3414acc1959fd3a3171c` omitted
+`contracts/` from `write_scope.allowed_paths`, while the lane's own draft says
+the implementation changed `contracts/daemon_methods.json`. Treat the current
+run as blocked provenance, not a candidate for hand-finishing. Next action is a
+daemon-legible replacement path: cancel or supersede the blocked run through
+Striatum, scaffold a corrected Codex-only Slice B build with `contracts/` in the
+repo-write scope, and rerun review/apply from that corrected workflow. Do not
+copy or cherry-pick the dirty lane worktree into `main`.
+
 ## 2026-06-28 delta - Multi-campaign supervision Level-1 completed
 
 `MULTI_CAMPAIGN_SUPERVISION` Level-1 ideation completed as

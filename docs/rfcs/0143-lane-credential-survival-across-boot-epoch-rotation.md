@@ -4,7 +4,9 @@ Status: accepted (D261, 2026-06-24) — **split**: Slice A **BUILT + LANDED**
 (`a6d5610f`, 2026-06-24) — the legible `session_unrecoverable_across_rotation`
 typed-exit floor as pure daemon-side observability; Slice B (options 2/3, the
 `CapabilityReseal` authority) is **unblocked by [RFC 0168](0168-per-lane-security-principal.md)**
-(per-lane OS uid; P0 build v3 accepted and integrated). See `## Decision (D261)` below.
+(per-lane OS uid; P0 build v3 accepted and integrated), but the first Slice B
+build run is blocked on a workflow write-scope omission and must be rerun from a
+corrected workflow. See `## Decision (D261)` below.
 
 > **Slice A landed (2026-06-24, `a6d5610f`).** A daemon-observed
 > `daemon.stale_epoch_rotation` event (recorded when `validateBootEpoch` rejects a
@@ -250,12 +252,19 @@ a post-launch tmux query — authenticates the replacement. A `0600` reseal file
   proposed W1 connect-out channel is a pure Slice-B feature, not a prerequisite
   for Slice A. Slice A therefore clears on its own merits as observability and
   does not touch the credential trust model.
-- **Slice B — unblocked.** Options 2/3 (the `CapabilityReseal` authority and
-  its channel) were gated on [RFC 0168](0168-per-lane-security-principal.md)
-  landing. RFC 0168 P0 build v3 is now accepted and integrated, so under a
-  per-lane uid the same-uid class dissolves and option 2 reduces to a safe
-  lane-uid-owned `0600` reseal token. The next roadmap item is to build and
-  verify Slice B. Tracked issue: #585.
+- **Slice B — unblocked by RFC 0168, build rerun required.** Options 2/3 (the
+  `CapabilityReseal` authority and its channel) were gated on
+  [RFC 0168](0168-per-lane-security-principal.md) landing. RFC 0168 P0 build v3
+  is now accepted and integrated, so under a per-lane uid the same-uid class
+  dissolves and option 2 reduces to a safe lane-uid-owned `0600` reseal token.
+  The first Slice B build run (`run_448c756fc1ca401172a2cf19c57baa2f`) blocked
+  before review because its frozen packet omitted `contracts/` from
+  `write_scope.allowed_paths`, while the implementation needs
+  `contracts/daemon_methods.json`; daemon recovery also refused because the
+  published draft artifact body was not durable outside the per-job worktree.
+  The next build must cancel or supersede that blocked run through Striatum and
+  rerun from a corrected workflow rather than hand-applying lane output. Tracked
+  issue: #585.
 
 This decision does not widen who can read the admin token and mints no new
 credential; Slice A is pure observability and Slice B should now proceed as the
