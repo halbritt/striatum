@@ -329,6 +329,10 @@ func TestVerdictWriteSurfacesAreClassified(t *testing.T) {
 		// ProvenanceOverrideBasis (TestRecordVerdictProvenanceOverrideBasisStampsOverride;
 		// basis declaration asserted below).
 		"recovery_auto_finalize.go": {recordVerdictCalls: 1},
+		// durable verdict-artifact recovery — recovery surface; MUST declare an
+		// explicit review_provenance override basis before calling applyVerdict
+		// (covered by TestRecoveryCompleteStalledForceRecordsVerdictFromDurableSynthesisArtifact).
+		"recovery_verdict_artifact.go": {applyVerdictCalls: 1},
 	}
 
 	entries, err := os.ReadDir(".")
@@ -365,5 +369,13 @@ func TestVerdictWriteSurfacesAreClassified(t *testing.T) {
 	}
 	if !strings.Contains(string(autoFinalize), "ProvenanceOverrideBasis:") {
 		t.Errorf("recovery_auto_finalize.go no longer declares ProvenanceOverrideBasis on its recordVerdict call (RFC 0118 P0-2 mechanism 3)")
+	}
+	verdictArtifact, err := os.ReadFile("recovery_verdict_artifact.go")
+	if err != nil {
+		t.Fatalf("read recovery_verdict_artifact.go: %v", err)
+	}
+	if !strings.Contains(string(verdictArtifact), "\"review_provenance_override\": true") ||
+		!strings.Contains(string(verdictArtifact), "\"review_provenance_basis\":") {
+		t.Errorf("recovery_verdict_artifact.go must stamp recovery verdicts with review_provenance override basis (RFC 0118 P0-2 mechanism 3)")
 	}
 }

@@ -1784,9 +1784,10 @@ func closeLeakedInterrogationWindow(ctx context.Context, tx db.TxRunner, reposit
 // untouched, so the caller falls through to the requeue path) whenever the
 // deliverable is NOT safely finalizable:
 //
-//   - verdict-capable jobs (review / phase_synthesis) complete via a recorded,
-//     attested verdict; finalizing from an artifact would bypass RFC 0118
-//     verdict attestation, so they are never auto-finalized here.
+//   - verdict-capable jobs (review / phase_synthesis) are never marked completed
+//     directly; when their already-published required artifact carries a
+//     recoverable verdict, the recovery path records that verdict through
+//     applyVerdict with explicit daemon-recovery provenance.
 //   - a job with NO required expected_artifact has no durable deliverable to
 //     finalize from — re-running it is the correct recovery, so this returns false.
 //   - if any required artifact ROW is missing (publish never happened) or its
@@ -1794,18 +1795,21 @@ func closeLeakedInterrogationWindow(ctx context.Context, tx db.TxRunner, reposit
 //     worktree-independent), the work is not actually durable, so this returns
 //     false and the requeue path handles it.
 //
-// Reusing finalizeStalledJob keeps a single completion code path (job → completed,
-// lease released, autonomous-blocker resolution, downstream enqueue, run
-// completion) so the autonomous finalize and the operator verb cannot drift.
+// Reusing finalizeStalledJob / finalizeVerdictCapableJobFromDurableArtifact keeps
+// the autonomous finalize and the operator verb from drifting.
 func tryFinalizeUnsealedFromDurableArtifact(ctx context.Context, tx db.TxRunner, repositoryID, jobID string) (bool, error) {
 	job, err := rowByID(ctx, tx, repositoryID, "jobs", "job_id", jobID, true)
 	if err != nil {
 		return false, err
 	}
-	// Verdict-capable jobs must complete via attested verdict (RFC 0118): never
-	// auto-finalize them from an artifact here.
 	if isVerdictCapableJobType(fmt.Sprint(job["job_type"])) {
-		return false, nil
+		if _, err := finalizeVerdictCapableJobFromDurableArtifact(ctx, tx, repositoryID, job, "autonomous recovery: auto-finalized published-but-unsealed verdict-capable job from durable artifact (#308)"); err != nil {
+			if _, ok := err.(*rpc.Error); ok {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
 	}
 	// Require at least one REQUIRED expected_artifact: a job with no durable
 	// deliverable to finalize from must be re-run, not silently completed.

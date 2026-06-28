@@ -156,6 +156,84 @@ func TestSweep308AutoFinalizesUnsealedPublishedFinalJob(t *testing.T) {
 	}
 }
 
+func TestSweep308AutoFinalizesUnsealedPublishedVerdictSynthesis(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "unsealed_308_verdict", true)
+
+	payload := []byte(`---
+schema_version: "striatum.synthesis.v1"
+artifact_kind: "synthesis"
+author: adjudicator-reviewer-001
+status: accept_with_findings
+---
+
+Final synthesis accepted with findings.
+`)
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/final.md", string(payload))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifactOfKind(t, ctx, runner, ids, "art_unsealed_308_verdict", "final_summary", "synthesis", "docs/final.md", payload)
+	seedUnsealedPublishedFinalJob308(t, ctx, runner, ids)
+
+	expectedArg, err := db.JSONBArg(runner, []any{
+		map[string]any{"logical_name": "final_summary", "kind": "synthesis", "path": "docs/final.md", "required": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs
+		   SET job_type = 'review', role_id = 'adjudicator',
+		       expected_artifacts_json = $1::jsonb
+		 WHERE repository_id = $2 AND job_id = $3`, expectedArg, ids.repoID, ids.jobID); err != nil {
+		t.Fatalf("shape verdict synthesis job: %v", err)
+	}
+
+	restore := probeLaneLiveness
+	probeLaneLiveness = func(context.Context, map[string]any, int, string) gosupervisor.LaneLiveness {
+		return gosupervisor.LaneLiveness{Backed: "tmux", Alive: false, Class: string(gosupervisor.TmuxLivenessPaneDead), ObservedPID: 8888}
+	}
+	t.Cleanup(func() { probeLaneLiveness = restore })
+
+	result, err := SweepRun(ctx, runner, ids.repoID, ids.runID, "")
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got != "completed" {
+		t.Fatalf("job state = %q, want completed (auto-finalized from durable verdict artifact); recovery_actions=%#v", got, result["recovery_actions"])
+	}
+	requeue, _, escalation := jobRecoveryCounts(t, ctx, runner, ids.repoID, ids.jobID)
+	if requeue != 0 {
+		t.Fatalf("requeue_count = %d, want 0 (published verdict artifact must not requeue)", requeue)
+	}
+	if escalation {
+		t.Fatalf("escalation_pending = true, want false (auto-finalize avoids the escalation)")
+	}
+	if got := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.verdicts
+		 WHERE repository_id = $1 AND job_id = $2
+		   AND verdict = 'accept_with_findings'
+		   AND review_provenance_override = true`,
+		ids.repoID, ids.jobID); got != 1 {
+		t.Fatalf("recovery verdict count = %d, want 1", got)
+	}
+	summary := recoveryActionsFromSweep(t, result)
+	acts, _ := summary["actions"].([]map[string]any)
+	foundFinalize := false
+	for _, a := range acts {
+		if a["action"] == "auto_finalize_unsealed" && a["acted"] == true {
+			foundFinalize = true
+		}
+	}
+	if !foundFinalize {
+		t.Fatalf("expected an acted auto_finalize_unsealed action; got %#v", summary["actions"])
+	}
+}
+
 // TestSweep308DoesNotAutoFinalizeWhenArtifactMissing is the #308 SAFETY guard:
 // a confirmed-dead agent_exited_unsealed job whose required artifact is NOT
 // present must still requeue (then escalate per budget), NOT auto-finalize. The

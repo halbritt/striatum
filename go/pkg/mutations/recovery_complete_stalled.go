@@ -42,10 +42,12 @@ const completeStalledSummary = "operator complete-stalled: finalized from durabl
 // now-moot recovery_exhausted blocker + escalation and restore the run from
 // needs_operator to running, then enqueues downstream + re-checks run completion.
 //
-// It deliberately REFUSES verdict-capable jobs (review / phase_synthesis): those
-// complete via a recorded verdict, and finalizing them from an artifact would
-// bypass the RFC 0118 verdict-attestation gate. The operator routes those
-// through review override instead.
+// It refuses verdict-capable jobs (review / phase_synthesis) by default: those
+// complete via a recorded verdict, and directly finalizing them from an artifact
+// would bypass the RFC 0118 verdict-attestation gate. With --force, it can
+// recover a dead/blocked verdict-capable job only by validating the already
+// published required artifact and recording a recovery-provenance verdict from
+// that artifact's front matter.
 func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	repositoryID, err := requireRepositoryID(envelope)
 	if err != nil {
@@ -91,23 +93,25 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 		}
 
 		jobState := fmt.Sprint(job["state"])
+		verdictCapable := isVerdictCapableJobType(fmt.Sprint(job["job_type"]))
 		if terminalJobStates[jobState] {
 			return nil, rpc.NewError("invalid_transition", fmt.Sprintf(
 				"job is already terminal (%s); nothing to finalize", jobState), nil)
 		}
-		if jobState != "running" && jobState != "claimed" && jobState != "stale_lease" {
+		allowBlockedVerdictForce := verdictCapable && force && jobState == "blocked"
+		if jobState != "running" && jobState != "claimed" && jobState != "stale_lease" && !allowBlockedVerdictForce {
 			return nil, rpc.NewError("invalid_transition", fmt.Sprintf(
 				"complete-stalled finalizes a running/claimed/stale_lease job; state=%q", jobState), nil)
 		}
 
-		// RFC 0118: verdict-capable jobs complete via a recorded, attested verdict.
-		// Finalizing one from its artifact would bypass verdict attestation, so it
-		// is refused unconditionally (no --force escape) — the operator uses review
-		// override / recovery reseal for those.
-		if isVerdictCapableJobType(fmt.Sprint(job["job_type"])) {
+		// RFC 0118: verdict-capable jobs complete via a recorded verdict. Default
+		// complete-stalled must not bypass that; --force below routes through
+		// applyVerdict with explicit recovery provenance after validating the
+		// already-published required artifact.
+		if verdictCapable && !force {
 			label := verdictCapableJobLabel(fmt.Sprint(job["job_type"]))
 			return nil, rpc.NewError("invalid_transition", fmt.Sprintf(
-				"%s jobs complete via a recorded verdict; complete-stalled must not bypass verdict attestation (RFC 0118) — use review override instead", label), nil)
+				"%s jobs complete via a recorded verdict; complete-stalled must not bypass verdict attestation (RFC 0118) without --force and a durable verdict artifact", label), nil)
 		}
 
 		// Liveness guard: complete-stalled finalizes a DEAD lane. If the job still
@@ -161,6 +165,51 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 				"complete-stalled requires an open recovery_exhausted blocker on the job (the autonomous-recovery dead-end); pass --force to finalize a job stalled for another reason after inspection", nil)
 		}
 
+		base := map[string]any{
+			"run_id":          runID,
+			"job_id":          jobID,
+			"workflow_job_id": job["workflow_job_id"],
+			"job_state":       jobState,
+			"run_state":       runState,
+		}
+		if blocker != nil {
+			base["blocker_id"] = blocker["blocker_id"]
+			base["blocker_kind"] = blocker["blocker_kind"]
+		}
+
+		if verdictCapable {
+			artifact, recon, err := recoverableVerdictArtifact(ctx, tx, repositoryID, job)
+			if err != nil {
+				return nil, err
+			}
+			if len(recon) > 0 {
+				base["artifacts"] = reconstructionLedgerEntries(recon)
+			}
+			base["verdict"] = artifact.Verdict
+			base["artifact_id"] = artifact.ArtifactID
+			base["artifact_kind"] = artifact.Kind
+			base["source"] = artifact.Source
+			if dryRun {
+				base["status"] = "dry_run"
+				base["would_record_verdict"] = true
+				base["next_actions"] = []string{"recovery complete-stalled --force (omit --dry-run to record the recovery verdict)"}
+				return base, nil
+			}
+			completion, err := finalizeVerdictCapableJobFromDurableArtifact(ctx, tx, repositoryID, job, summary)
+			if err != nil {
+				return nil, err
+			}
+			runAfter, err := rowByID(ctx, tx, repositoryID, "runs", "run_id", runID, false)
+			if err != nil {
+				return nil, err
+			}
+			base["status"] = "completed"
+			base["run_state_after"] = runAfter["state"]
+			base["completion"] = completion
+			base["next_actions"] = []string{"monitor_run_progress", "export_run_evidence"}
+			return base, nil
+		}
+
 		// #530 salvage: a lane can write its deliverable to disk (its per-job
 		// worktree) and then exit unsealed BEFORE artifact.publish — e.g. a transient
 		// Anthropic-API outage during end-of-session wind-down. The deliverable then
@@ -198,17 +247,6 @@ func HandleRecoveryCompleteStalled(ctx context.Context, runner db.Runner, envelo
 				})
 		}
 
-		base := map[string]any{
-			"run_id":          runID,
-			"job_id":          jobID,
-			"workflow_job_id": job["workflow_job_id"],
-			"job_state":       jobState,
-			"run_state":       runState,
-		}
-		if blocker != nil {
-			base["blocker_id"] = blocker["blocker_id"]
-			base["blocker_kind"] = blocker["blocker_kind"]
-		}
 		if len(recon) > 0 {
 			base["artifacts"] = reconstructionLedgerEntries(recon)
 		}

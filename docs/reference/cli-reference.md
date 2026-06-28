@@ -649,7 +649,11 @@ a retry.
   non-checkpoint blocker that no completion path cleared.
 - `recovery complete-stalled <run-id> <job-id>` — finalize a
   recovery-exhausted job from its already-durable published artifacts when the
-  lane is dead and the work is complete.
+  lane is dead and the work is complete. Review / phase-synthesis jobs are
+  refused by default; after inspection, `--force` may recover a dead or blocked
+  verdict-capable job only from an already-published required `finding` or
+  `synthesis` artifact whose front matter carries a recoverable verdict
+  (`verdict_intent` or `status`).
 - `recovery accept-quarantined <run-id> <job-id>` — resolve a quarantined job's
   blocker and mark it canceled-by-operator.
 - `recovery prune-debris <run-id>` — tombstone a terminal-debris run's

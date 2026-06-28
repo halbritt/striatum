@@ -2,6 +2,8 @@ package mutations
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -76,6 +78,29 @@ func seedCompleteStalledDeadEnd(t *testing.T, ctx context.Context, runner db.Run
 		UPDATE striatumd.runs SET state = 'needs_operator'
 		 WHERE repository_id = $1 AND run_id = $2`, ids.repoID, ids.runID); err != nil {
 		t.Fatalf("flip run needs_operator: %v", err)
+	}
+}
+
+func seedPublishedArtifactOfKind(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, artifactID, logicalName, kind, repoPath string, payload []byte) {
+	t.Helper()
+	sum := sha256.Sum256(payload)
+	digest := hex.EncodeToString(sum[:])
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.artifacts (
+		  repository_id, artifact_id, run_id, job_id, session_id, logical_name,
+		  artifact_kind, repo_path, content_sha256, size_bytes, publish_mode,
+		  created_at, author_line, attempt
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'create',$11,NULL,1)`,
+		ids.repoID, artifactID, ids.runID, ids.jobID, ids.sessionID, logicalName,
+		kind, repoPath, digest, len(payload), time.Now().UTC()); err != nil {
+		t.Fatalf("insert %s artifact: %v", kind, err)
+	}
+	if _, err := appendEvent(ctx, runner, ids.repoID, ids.runID, "artifact.published", ids.sessionID, ids.jobID, nil, artifactID, ids.leaseID, map[string]any{
+		"logical_name": logicalName,
+		"path":         repoPath,
+		"sha256":       digest,
+	}); err != nil {
+		t.Fatalf("append artifact.published event: %v", err)
 	}
 }
 
@@ -214,8 +239,8 @@ func TestRecoveryCompleteStalledRefusesUnreconstructableBody(t *testing.T) {
 
 // TestRecoveryCompleteStalledRefusesVerdictCapableJob asserts the RFC 0118
 // guard: a verdict-capable job (job_type 'review', which is also how a
-// phase_synthesis job is recorded) is refused unconditionally, because
-// finalizing it from an artifact would bypass verdict attestation.
+// phase_synthesis job is recorded) is refused by default, because direct
+// completion from an artifact would bypass verdict attestation.
 func TestRecoveryCompleteStalledRefusesVerdictCapableJob(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git not on PATH: %v", err)
@@ -245,6 +270,102 @@ func TestRecoveryCompleteStalledRefusesVerdictCapableJob(t *testing.T) {
 	if got := scalarStr(t, ctx, runner, `
 		SELECT state FROM striatumd.jobs WHERE repository_id = $1 AND job_id = $2`, ids.repoID, ids.jobID); got != "running" {
 		t.Fatalf("job state = %q after verdict-capable refusal, want running", got)
+	}
+}
+
+func TestRecoveryCompleteStalledForceRecordsVerdictFromDurableSynthesisArtifact(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "cs_verdict_synthesis", true)
+
+	body := []byte(`---
+schema_version: "striatum.synthesis.v1"
+artifact_kind: "synthesis"
+author: adjudicator-reviewer-001
+status: accept_with_findings
+---
+
+Final synthesis accepted with constraints.
+`)
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/final.md", string(body))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifactOfKind(t, ctx, runner, ids, "art_cs_verdict_synthesis", "final_summary", "synthesis", "docs/final.md", body)
+
+	expectedArg, err := db.JSONBArg(runner, []any{
+		map[string]any{"logical_name": "final_summary", "kind": "synthesis", "path": "docs/final.md", "required": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs
+		   SET job_type = 'review', role_id = 'adjudicator',
+		       state = 'blocked', current_lease_id = NULL,
+		       expected_artifacts_json = $1::jsonb
+		 WHERE repository_id = $2 AND job_id = $3`, expectedArg, ids.repoID, ids.jobID); err != nil {
+		t.Fatalf("shape blocked review job: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.leases
+		   SET state = 'expired', expires_at = $1
+		 WHERE repository_id = $2 AND lease_id = $3`, now.Add(-time.Hour), ids.repoID, ids.leaseID); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.sessions
+		   SET state = 'closed', closed_at = $1
+		 WHERE repository_id = $2 AND session_id = $3`, now, ids.repoID, ids.sessionID); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.blockers (
+		  repository_id, blocker_id, run_id, job_id, session_id, severity,
+		  blocker_kind, description, state, created_at
+		) VALUES ($1,'blk_cs_verdict_synthesis',$2,$3,$4,'blocked','artifact_author_conflict','retry byline conflicts with already-published synthesis','open',$5)`,
+		ids.repoID, ids.runID, ids.jobID, ids.sessionID, now); err != nil {
+		t.Fatalf("insert artifact_author_conflict blocker: %v", err)
+	}
+
+	result, err := HandleRecoveryCompleteStalled(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"run_id": ids.runID,
+		"job_id": ids.jobID,
+		"force":  true,
+	}))
+	if err != nil {
+		t.Fatalf("complete-stalled --force verdict recovery: %v", err)
+	}
+	if result["status"] != "completed" {
+		t.Fatalf("status = %#v, want completed", result["status"])
+	}
+	if result["verdict"] != "accept_with_findings" {
+		t.Fatalf("verdict = %#v, want accept_with_findings", result["verdict"])
+	}
+	if got := scalarStr(t, ctx, runner, `
+		SELECT state FROM striatumd.jobs WHERE repository_id = $1 AND job_id = $2`, ids.repoID, ids.jobID); got != "completed" {
+		t.Fatalf("job state = %q, want completed", got)
+	}
+	if got := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.verdicts
+		 WHERE repository_id = $1 AND job_id = $2
+		   AND verdict = 'accept_with_findings'
+		   AND review_provenance_override = true`,
+		ids.repoID, ids.jobID); got != 1 {
+		t.Fatalf("recovery verdict count = %d, want 1", got)
+	}
+	if got := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.blockers
+		 WHERE repository_id = $1 AND job_id = $2 AND state = 'open'`,
+		ids.repoID, ids.jobID); got != 0 {
+		t.Fatalf("open blockers = %d, want 0", got)
+	}
+	if got := scalarStr(t, ctx, runner, `
+		SELECT state FROM striatumd.runs WHERE repository_id = $1 AND run_id = $2`, ids.repoID, ids.runID); got != "completed" {
+		t.Fatalf("run state = %q, want completed", got)
 	}
 }
 
