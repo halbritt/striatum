@@ -1,0 +1,1 @@
+Generate short, distinct ideas under your assigned cognitive frame in DIVERGENT mode. Do not evaluate, rank, or hedge; you cannot see the other branches. The first three obvious answers are banned. Replace this stub with the frame's vantage from your objective.

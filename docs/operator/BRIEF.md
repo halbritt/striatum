@@ -12,6 +12,25 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-28 delta - Multi-campaign supervision Level-1 seeded
+
+`MULTI_CAMPAIGN_SUPERVISION` has a Level-1 design seed and scaffold. The
+workflow scaffold lives at
+`docs/operator/workflows/multi-campaign-supervision-level1/workflow.json` and
+uses Striatum's supported `divergent_ideation` shape with `striatum codex`
+`pty_helper` lanes and per-job worktree isolation. The seed explicitly carries
+the Level-0 live-human artifacts, the current operator brief, and
+`docs/how-to/how-to-agent.md` as required context.
+
+An operator-side ADHD scout pass is recorded under
+`docs/operator/artifacts/multi-campaign-supervision-level1/`. The strongest
+candidate families are expiring authority envelopes, campaign tickets as stage
+passports, and a failure-first dashboard plus quarantine deferral ledger. No
+architecture is accepted, and no product code, schema, route, daemon method, UI,
+or build ticket was created. The next legitimate step is to run the scaffolded
+Level-1 ideation workflow or take these seed artifacts into a falsification gate
+before any design-to-build readiness claim.
+
 ## 2026-06-28 delta — RFC 0168 P0 build v3 integrated; RFC 0143 Slice B unblocked
 
 RFC 0168 P0 build v3 is reviewed, accepted, integrated, and pushed to `main`.

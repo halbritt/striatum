@@ -1,0 +1,1 @@
+Publish a concise problem brief: the open-ended question to ideate on, plus constraints, goals, non-goals, and decision criteria. Do not propose solutions — only frame the space the divergence branches will explore.

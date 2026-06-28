@@ -1,0 +1,1 @@
+Assemble the operator-facing result from the deepened picks and the convergence ledger: shortlist with rationale, the non-obvious-but-viable pick marked with a star, the trap list, and one wildcard provocation.

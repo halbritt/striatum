@@ -1,0 +1,1 @@
+Read every divergence branch. Score each idea on novelty/viability/fit, cluster by underlying angle, flag traps with reasons, select the top-K picks, and note any idea independently surfaced across different model families. Publish the scored, clustered convergence ledger.

@@ -1,0 +1,570 @@
+{
+  "branch": {
+    "allow_dirty": false,
+    "mode": "confirm",
+    "suggested_name": "striatum/multi-campaign-supervision-level1"
+  },
+  "context_docs": [
+    {
+      "path": "docs/operator/workflows/multi-campaign-supervision-level1/SEED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_PROCESS_PLAN.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_SCOPE_PRD.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_REPOSITORY_RECON.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_WORKFLOW_SELECTION.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_IDEATION_BRIEF.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/BRIEF.md",
+      "required": true
+    },
+    {
+      "path": "docs/how-to/how-to-agent.md",
+      "required": true
+    }
+  ],
+  "coordinator": {
+    "lane_id": "author",
+    "role_id": "problem_framer"
+  },
+  "cycles": [],
+  "edges": [
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_1_naive_ten_year_old"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_2_logistics"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_3_returning_exile"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_4_regulator"
+    },
+    {
+      "from": "frame_problem",
+      "on": "completed",
+      "to": "branch_5_actuary"
+    },
+    {
+      "from": "branch_1_naive_ten_year_old",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_2_logistics",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_3_returning_exile",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_4_regulator",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "branch_5_actuary",
+      "on": "completed",
+      "to": "converge"
+    },
+    {
+      "from": "converge",
+      "on": "completed",
+      "to": "deepen_1"
+    },
+    {
+      "from": "converge",
+      "on": "completed",
+      "to": "deepen_2"
+    },
+    {
+      "from": "converge",
+      "on": "completed",
+      "to": "deepen_3"
+    },
+    {
+      "from": "deepen_1",
+      "on": "completed",
+      "to": "final_synthesis"
+    },
+    {
+      "from": "deepen_2",
+      "on": "completed",
+      "to": "final_synthesis"
+    },
+    {
+      "from": "deepen_3",
+      "on": "completed",
+      "to": "final_synthesis"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "problem_brief",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/PROBLEM_BRIEF.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "frame_problem",
+      "lane_id": "author",
+      "objective": "Publish a concise problem brief — the open-ended question to ideate on, plus constraints, goals, non-goals, and decision criteria. Do not propose solutions.",
+      "role_id": "problem_framer",
+      "task_prompt": {
+        "path": "prompts/frame_problem.md"
+      },
+      "title": "Frame problem",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_1_naive_ten_year_old",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_1_naive_ten_year_old/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_1_naive_ten_year_old",
+      "lane_id": "author",
+      "objective": "Vantage frame (naive_ten_year_old): You are a curious 10-year-old who has never seen software; describe naive but unencumbered approaches, ignore convention.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: naive_ten_year_old",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_1_naive_ten_year_old/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_2_logistics",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_2_logistics/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_2_logistics",
+      "lane_id": "reviewer_1",
+      "objective": "Vantage frame (logistics): Steal mechanisms from logistics: queues, batching, just-in-time, hub-and-spoke, returns, last-mile.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: logistics",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_2_logistics/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_3_returning_exile",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_3_returning_exile/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_3_returning_exile",
+      "lane_id": "reviewer_2",
+      "objective": "Vantage frame (returning_exile): You left this domain 20 years ago and just came back; name everything the field now takes for granted that was once a live, contested choice.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: returning_exile",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_3_returning_exile/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_4_regulator",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_4_regulator/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_4_regulator",
+      "lane_id": "author",
+      "objective": "Vantage frame (regulator): Audit the system for what must be provable, traceable, or refusable; surface failure modes.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: regulator",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_4_regulator/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "branch_5_actuary",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_5_actuary/IDEAS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "branch_5_actuary",
+      "lane_id": "reviewer_1",
+      "objective": "Vantage frame (actuary): Build the loss distribution: probability band x impact multiplier per failure; price the \u003c0.1%, \u003e10x tail.\n\nYou are in DIVERGENT mode — a generator, not a critic. Produce 6 short, distinct ideas under this frame. Do not evaluate, rank, or hedge. The first three obvious answers everyone would give are banned; push past them into the awkward middle. You cannot see the other branches.",
+      "parallel_group": "diverge",
+      "role_id": "diverger",
+      "task_prompt": {
+        "path": "prompts/diverge.md"
+      },
+      "title": "Diverge under frame: actuary",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/branches/branch_5_actuary/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "findings_ledger",
+          "logical_name": "convergence_ledger",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/CONVERGENCE.md",
+          "placement": "blob_exhaust",
+          "required": true
+        }
+      ],
+      "id": "converge",
+      "lane_id": "reviewer_2",
+      "objective": "You are the CRITIC. Read every branch's ideas (each branch ran a different frame, and branches may have run on different models). Score every idea on novelty, viability, and fit (0-10 each; weighted novelty 0.35 / viability 0.40 / fit 0.25 for ranking). Cluster the ideas by their underlying angle, not surface keywords. Flag traps — ideas that look attractive but are a hidden cost, false economy, or won't scale — each with a one-line reason. Select the top 3 picks by weighted score, excluding traps. CROSS-MODEL SIGNAL: explicitly note any idea independently surfaced by branches running on DIFFERENT model families — convergence across families is a confidence boost; record it. Publish the scored, clustered ledger.",
+      "role_id": "convergence_critic",
+      "task_prompt": {
+        "path": "prompts/converge.md"
+      },
+      "title": "Converge: score, cluster, trap-detect",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "deepen_1",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_1/DEEPENED.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "deepen_1",
+      "lane_id": "author",
+      "objective": "Take the idea ranked #1 in the convergence ledger. Sketch how it would actually work in 4-8 sentences, name the load-bearing risk, name the first concrete step a builder would take, then generate 3-5 child ideas (variations, hybrids, unlocks).",
+      "parallel_group": "deepen",
+      "role_id": "deepener",
+      "task_prompt": {
+        "path": "prompts/deepen.md"
+      },
+      "title": "Deepen pick 1",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "deepen_2",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_2/DEEPENED.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "deepen_2",
+      "lane_id": "reviewer_1",
+      "objective": "Take the idea ranked #2 in the convergence ledger. Sketch how it would actually work in 4-8 sentences, name the load-bearing risk, name the first concrete step a builder would take, then generate 3-5 child ideas (variations, hybrids, unlocks).",
+      "parallel_group": "deepen",
+      "role_id": "deepener",
+      "task_prompt": {
+        "path": "prompts/deepen.md"
+      },
+      "title": "Deepen pick 2",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_2/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "deepen_3",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_3/DEEPENED.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "deepen_3",
+      "lane_id": "reviewer_2",
+      "objective": "Take the idea ranked #3 in the convergence ledger. Sketch how it would actually work in 4-8 sentences, name the load-bearing risk, name the first concrete step a builder would take, then generate 3-5 child ideas (variations, hybrids, unlocks).",
+      "parallel_group": "deepen",
+      "role_id": "deepener",
+      "task_prompt": {
+        "path": "prompts/deepen.md"
+      },
+      "title": "Deepen pick 3",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_3/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "ideation_synthesis",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-level1/IDEATION_SYNTHESIS.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "final_synthesis",
+      "lane_id": "reviewer_2",
+      "objective": "Assemble the operator-facing result from the deepened picks and the convergence ledger: the shortlist (2-4 ideas) with why each is on it, the non-obvious-but-viable pick marked with a star, the trap list (each with its one-line reason), and one wildcard provocation that opens a new direction.",
+      "role_id": "final_synthesizer",
+      "task_prompt": {
+        "path": "prompts/final_synthesis.md"
+      },
+      "title": "Final synthesis",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-level1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "author": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "striatum",
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
+      ],
+      "display_model": "author",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "reviewer_1": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "striatum",
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
+      ],
+      "display_model": "reviewer_1",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "reviewer_2": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "striatum",
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
+      ],
+      "display_model": "reviewer_2",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    }
+  },
+  "name": "multi-campaign-supervision-level1",
+  "parallelism": {
+    "max_active_jobs": 5,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "roles": {
+    "convergence_critic": {
+      "definition_path": "roles/convergence_critic.md"
+    },
+    "deepener": {
+      "definition_path": "roles/deepener.md"
+    },
+    "diverger": {
+      "definition_path": "roles/diverger.md"
+    },
+    "final_synthesizer": {
+      "definition_path": "roles/final_synthesizer.md"
+    },
+    "problem_framer": {
+      "definition_path": "roles/problem_framer.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "multi-campaign-supervision-level1",
+  "workflow_version": "2026-06-28"
+}
