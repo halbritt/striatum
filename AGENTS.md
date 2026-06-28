@@ -202,3 +202,16 @@ The P001-P004 prompts are retained as incubation provenance. They may
 mention Engram, old branch names, or `--repo ..` command shapes. Do not
 execute them as current standalone instructions without first rewriting
 them for the standalone repository and the intended target repository.
+
+<!-- BEGIN PROXIMAL PLANE TRACKING -->
+## Plane Tracking
+
+This repository is represented in the local/private Plane workspace `Proximal`.
+
+- Plane project: `striatum` (`STRIATUM`)
+- Plane URL: `https://proximal.tail0ecc2e.ts.net:10000/`
+- GitHub repo: `https://github.com/halbritt/striatum`
+- Use Plane work items for multi-agent planning, claims, submitted artifacts, reviews, and acceptance decisions.
+- When updating Plane, include the repo, branch/worktree, `run_id`, `base_sha`, artifact links, verification evidence, and authority scope in the work item description or comments.
+- Do not commit Plane API tokens. Local tokens and MCP env files live outside git under `~/.config/plane/`.
+<!-- END PROXIMAL PLANE TRACKING -->
