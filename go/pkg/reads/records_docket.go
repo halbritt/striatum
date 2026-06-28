@@ -2,6 +2,7 @@ package reads
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/halbritt/striatum/go/pkg/artifactcontracts"
@@ -183,6 +184,12 @@ func int64From(m map[string]any, key string) int64 {
 		return value
 	case float64:
 		return int64(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return parsed
+		}
+		return 0
 	default:
 		return 0
 	}

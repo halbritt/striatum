@@ -2,6 +2,7 @@ package reads
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -96,6 +97,46 @@ func TestRecordsMigrationVerifyReportsMissingBlob(t *testing.T) {
 	}
 	if result["reconstructable"] != false || result["deletion_allowed"] != false {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRecordsMigrationVerifyAcceptsJSONNumberManifestSize(t *testing.T) {
+	previous := packageBlobClient
+	sha := strings.Repeat("a", 64)
+	packageBlobClient = recordsMigrationReadBlob{body: []byte("hello"), sha: sha, exists: true}
+	t.Cleanup(func() { packageBlobClient = previous })
+
+	row := map[string]any{
+		"record_id":      "rec_1",
+		"source_path":    "docs/records/audits/report.md",
+		"source_commit":  "commit_1",
+		"record_class":   "audit_record",
+		"content_sha256": sha,
+		"blob_key":       "records/historical/commit/report.md",
+		"blob_sha256":    sha,
+		"content_type":   "text/markdown; charset=utf-8",
+		"size_bytes":     int64(5),
+	}
+	result, err := HandleRecordsMigrationVerify(context.Background(), &recordsMigrationReadRunner{generatedRows: []map[string]any{row}}, rpc.Envelope{
+		Params: map[string]any{
+			"repository_id": "repo_1",
+			"entries": []any{map[string]any{
+				"path":          "docs/records/audits/report.md",
+				"source_commit": "commit_1",
+				"record_class":  "audit_record",
+				"sha256":        sha,
+				"size":          json.Number("5"),
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleRecordsMigrationVerify: %v", err)
+	}
+	if result["reconstructable"] != true {
+		t.Fatalf("result = %#v, want reconstructable", result)
+	}
+	if problems := result["problems"].([]map[string]any); len(problems) != 0 {
+		t.Fatalf("problems = %#v, want none", problems)
 	}
 }
 
