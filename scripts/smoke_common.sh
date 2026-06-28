@@ -54,8 +54,19 @@ smoke_note_postgres_skip() {
     echo "smoke: PostgreSQL integration skipped; psql is not available" >&2
     return 0
   fi
-  if ! psql "$STRIATUM_DAEMON_DB_URL" -c 'select 1' >/dev/null 2>&1; then
-    echo "smoke: PostgreSQL integration skipped; configured database is not reachable" >&2
+  local psql_error
+  if ! psql_error="$(psql "$STRIATUM_DAEMON_DB_URL" -c 'select 1' 2>&1 >/dev/null)"; then
+    case "$psql_error" in
+      *"password authentication failed"*|*"no pg_hba.conf entry"*|*"authentication failed"*)
+        echo "smoke: PostgreSQL integration skipped; direct psql authentication failed" >&2
+        ;;
+      *"Connection refused"*|*"connection refused"*|*"could not connect"*|*"timeout expired"*|*"No route to host"*)
+        echo "smoke: PostgreSQL integration skipped; configured database is not reachable by direct psql probe" >&2
+        ;;
+      *)
+        echo "smoke: PostgreSQL integration skipped; direct psql probe failed" >&2
+        ;;
+    esac
     return 0
   fi
   echo "smoke: PostgreSQL is reachable; full daemon lifecycle smoke belongs to the daemon integration gate" >&2
