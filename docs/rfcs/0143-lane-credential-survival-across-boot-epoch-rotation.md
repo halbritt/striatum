@@ -267,5 +267,6 @@ a post-launch tmux query — authenticates the replacement. A `0600` reseal file
   issue: #585.
 
 This decision does not widen who can read the admin token and mints no new
-credential; Slice A is pure observability and Slice B should now proceed as the
-next build/verify slice on top of the fulfilled RFC 0168 prerequisite.
+credential; Slice A is pure observability and Slice B's RFC 0168 prerequisite
+is fulfilled, but the next build/verify pass must use a corrected workflow
+scope rather than the blocked first build run.
