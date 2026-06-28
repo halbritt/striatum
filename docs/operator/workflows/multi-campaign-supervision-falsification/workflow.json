@@ -1,0 +1,374 @@
+{
+  "allow_same_model_review_pairing": true,
+  "allow_same_model_review_pairing_rationale": "Codex-only lanes are intentional for this 2026-06-28 operator run because Claude lanes must not be launched before 2026-06-30 15:59 UTC unless credentials or credits are explicitly restored. Independence comes from fresh contexts, disjoint write scopes, explicit falsifier lenses, and the adjudicator ledger rather than model-family diversity.",
+  "branch": {
+    "allow_dirty": false,
+    "mode": "confirm",
+    "suggested_name": "striatum/multi-campaign-supervision-falsification"
+  },
+  "context_docs": [
+    {
+      "path": "docs/operator/workflows/multi-campaign-supervision-falsification/SEED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/README.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/IDEATION_SYNTHESIS.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/CONVERGENCE.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/PROBLEM_BRIEF.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_1/DEEPENED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_2/DEEPENED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_3/DEEPENED.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_SCOPE_PRD.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_WORKFLOW_SELECTION.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_IDEATION_BRIEF.md",
+      "required": true
+    },
+    {
+      "path": "docs/operator/BRIEF.md",
+      "required": true
+    },
+    {
+      "path": "docs/how-to/how-to-agent.md",
+      "required": true
+    }
+  ],
+  "coordinator": {
+    "lane_id": "author",
+    "role_id": "holder"
+  },
+  "cycles": [
+    {
+      "allow_same_model": true,
+      "allow_same_lane": true,
+      "from": "adjudicate",
+      "max_iterations": 1,
+      "on_verdict": "needs_revision",
+      "to": "falsifier_1"
+    }
+  ],
+  "edges": [
+    {
+      "from": "holder",
+      "on": "completed",
+      "to": "falsifier_1"
+    },
+    {
+      "from": "falsifier_1",
+      "on": "completed",
+      "to": "falsifier_2"
+    },
+    {
+      "from": "falsifier_2",
+      "on": "completed",
+      "to": "adjudicate"
+    },
+    {
+      "from": "adjudicate",
+      "on": "completed",
+      "to": "commit_proposal"
+    },
+    {
+      "from": "commit_proposal",
+      "on": "completed",
+      "to": "final_summary"
+    }
+  ],
+  "jobs": [
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "holder_handoff",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/holder/HOLDER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "holder",
+      "lane_id": "author",
+      "objective": "Publish the falsifiable Level-1 proposal that the synthesis is ready for a product decision or RFC drafting gate, not build readiness. Start from IDEATION_SYNTHESIS.md and its four shortlisted picks: authority receipt expiration, fresh-context replay test, deferral quarantine or scope-drift refusal, and cross-surface contradiction gate. State each as a falsifiable claim with the evidence handles that support it and the observation that would refute it. Preserve the hard boundary: no architecture accepted, no daemon schema, route, UI, build ticket, or implementation plan.",
+      "phase_id": "dialogue",
+      "role_id": "holder",
+      "task_prompt": {
+        "path": "prompts/collaboration_holder.md"
+      },
+      "title": "Hold leading proposal",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/holder/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "falsifier_1",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/falsifier_1/FALSIFIER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "falsifier_1",
+      "lane_id": "reviewer",
+      "objective": "Read the holder proposal and attack the AUTHORITY and DAEMON-BOUNDARY lens. Try to prove that authority receipts can become ambient permission, quarantine rows can become accepted work, ticket or dashboard surfaces can become a second workflow state machine, or a coordinating agent can bypass human-confirmed product authority. A material challenge stands if the proposal lets any stage advance without a current stage-scoped receipt, daemon-state reconciliation, explicit stop condition, and human or product decision before build planning.",
+      "phase_id": "dialogue",
+      "role_id": "falsifier",
+      "task_prompt": {
+        "path": "prompts/collaboration_falsifier.md"
+      },
+      "title": "Falsifier 1",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/falsifier_1/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "handoff",
+          "logical_name": "falsifier_2",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/falsifier_2/FALSIFIER.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "falsifier_2",
+      "lane_id": "reviewer",
+      "objective": "Read the holder proposal and attack the FRESH-CONTEXT, PROOF, and DEFERRAL lens. Try to prove that replay packets can hide contradictions, done claims cannot reconcile daemon state with artifacts, Git docs, tickets, verifier receipts, deferrals can silently become success, or the design still depends on live chat history. Also check for scope creep into architecture, UI shape, implementation tickets, or design-to-build readiness.",
+      "phase_id": "dialogue",
+      "role_id": "falsifier",
+      "task_prompt": {
+        "path": "prompts/collaboration_falsifier.md"
+      },
+      "title": "Falsifier 2",
+      "type": "build",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/falsifier_2/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "collaboration_ledger",
+          "logical_name": "collaboration_ledger_${cycle}",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/adjudicator/COLLABORATION_LEDGER_${cycle}.md",
+          "placement": "blob_exhaust",
+          "required": true
+        }
+      ],
+      "fresh_session_required": true,
+      "id": "adjudicate",
+      "lane_id": "reviewer",
+      "objective": "Read only the curated dialogue trajectory for the MULTI_CAMPAIGN_SUPERVISION Level-1 falsification gate and publish the collaboration ledger verdict (accept, accept_with_findings, needs_revision, or reject; a clearing verdict is accept or accept_with_findings, never `clear`). A clearing verdict means the shortlist is ready for product decision or RFC drafting only. Needs_revision if either falsifier lands a material challenge against stage-scoped authority, daemon-boundary fidelity, fresh-context replay, deferral accountability, cross-surface contradiction proof, or the no-build boundary. Reject only if the shortlist is the wrong direction rather than under-specified.",
+      "phase_id": "dialogue",
+      "role_id": "adjudicator",
+      "task_prompt": {
+        "path": "prompts/adjudicate_collaboration.md"
+      },
+      "title": "Adjudicate dialogue substance",
+      "type": "phase_synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/dialogue/adjudicator/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "commit_proposal",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/commit/proposal/DESIGN_RECOMMENDATION.md",
+          "placement": "git_publication",
+          "required": true
+        }
+      ],
+      "id": "commit_proposal",
+      "lane_id": "author",
+      "objective": "Publish DESIGN_RECOMMENDATION.md only after the adjudicator ledger records a clearing verdict. The recommendation may say proceed to RFC or product decision drafting, proceed with findings, revise, or no-build. It must preserve any accepted constraints from the ledger and must not include implementation tickets, source-file touch lists, daemon schema, route maps, UI build plans, or design-to-build readiness claims.",
+      "phase_id": "commit",
+      "role_id": "committer",
+      "task_prompt": {
+        "path": "prompts/collaboration_commit.md"
+      },
+      "title": "Commit falsification-cleared proposal",
+      "type": "synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/commit/proposal/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    },
+    {
+      "expected_artifacts": [
+        {
+          "kind": "synthesis",
+          "logical_name": "final_summary",
+          "path": "docs/operator/artifacts/multi-campaign-supervision-falsification/commit/final/FINAL_SUMMARY.md",
+          "placement": "blob_exhaust",
+          "required": true
+        }
+      ],
+      "id": "final_summary",
+      "lane_id": "reviewer",
+      "objective": "Summarize the falsification gate outcome: ledger verdict, which challenges stood or were rebutted, what constraints carry into product decision or RFC drafting, and whether the next operator should draft an RFC, run a narrower design revision, or stop. Do not claim build readiness.",
+      "phase_id": "commit",
+      "role_id": "adjudicator",
+      "task_prompt": {
+        "path": "prompts/collaboration_final_summary.md"
+      },
+      "title": "Finalize collaboration run",
+      "type": "phase_synthesis",
+      "write_scope": {
+        "allowed_paths": [
+          "docs/operator/artifacts/multi-campaign-supervision-falsification/commit/final/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ],
+        "mode": "repo_write",
+        "repo_write": true
+      }
+    }
+  ],
+  "lanes": {
+    "author": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
+      ],
+      "display_model": "author",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    },
+    "reviewer": {
+      "adapter": "process",
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ],
+      "command": [
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
+      ],
+      "display_model": "reviewer",
+      "supervision": {
+        "transport": "pty_helper"
+      },
+      "worktree_isolation": "per_job"
+    }
+  },
+  "name": "multi-campaign-supervision-falsification",
+  "parallelism": {
+    "max_active_jobs": 1,
+    "mode": "declared",
+    "require_disjoint_write_scopes": true
+  },
+  "phases": [
+    {
+      "description": "Preserved-context challenge and adjudication",
+      "id": "dialogue",
+      "name": "Dialogue",
+      "synthesis_job_id": "adjudicate"
+    },
+    {
+      "description": "Downstream work gated by the collaboration ledger",
+      "id": "commit",
+      "name": "Commit",
+      "synthesis_job_id": "final_summary"
+    }
+  ],
+  "roles": {
+    "adjudicator": {
+      "definition_path": "roles/adjudicator.md"
+    },
+    "committer": {
+      "definition_path": "roles/committer.md"
+    },
+    "falsifier": {
+      "definition_path": "roles/falsifier.md"
+    },
+    "holder": {
+      "definition_path": "roles/holder.md"
+    }
+  },
+  "schema_version": "striatum.workflow.v1.1",
+  "workflow_id": "multi-campaign-supervision-falsification",
+  "workflow_version": "2026-06-28"
+}

@@ -25,12 +25,17 @@ explicitly carries the Level-0 live-human artifacts, the current operator brief,
 
 The completed artifacts are recorded under
 `docs/operator/artifacts/multi-campaign-supervision-level1/` with 11/11 jobs
-attested as supervised lanes. The shortlist is authority receipt expiration,
-fresh-context replay tests, deferral quarantine / scope-drift refusal, and a
-cross-surface contradiction gate. No architecture is accepted, and no product
-code, schema, route, daemon method, UI, or build ticket was created. The next
-legitimate step is to take the Level-1 synthesis into a falsification gate before
-any design-to-build readiness claim.
+attested as supervised lanes. Artifact naming is normalized by treating the
+feature-specific directory as the slug prefix; the run-owned directory-local
+basenames remain canonical, with the mapping recorded in
+`docs/operator/artifacts/multi-campaign-supervision-level1/README.md`. The
+shortlist is authority receipt expiration, fresh-context replay tests, deferral
+quarantine / scope-drift refusal, and a cross-surface contradiction gate. No
+architecture is accepted, and no product code, schema, route, daemon method, UI,
+or build ticket was created. The next legitimate step is to run the validated
+falsification scaffold at
+`docs/operator/workflows/multi-campaign-supervision-falsification/workflow.json`
+before any design-to-build readiness claim.
 
 ## 2026-06-28 delta — RFC 0168 P0 build v3 integrated; RFC 0143 Slice B unblocked
 

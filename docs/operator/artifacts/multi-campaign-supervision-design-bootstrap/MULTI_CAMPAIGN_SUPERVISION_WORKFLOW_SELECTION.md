@@ -152,3 +152,9 @@ Level 1 should produce:
 - a recommendation or explicit no-build decision,
 - an RFC-or-no-RFC recommendation,
 - a design-to-build readiness checklist after acceptance only.
+
+Filename convention: once a Striatum run records expected artifact paths, those
+paths are canonical. The feature-specific artifact directory carries the
+`MULTI_CAMPAIGN_SUPERVISION` prefix, so directory-local basenames such as
+`PROBLEM_BRIEF.md` and `IDEATION_SYNTHESIS.md` are normalized names for the
+completed Level-1 run rather than drift to rename.

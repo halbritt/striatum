@@ -81,8 +81,11 @@ Activities:
 
 Outputs:
 
-- `MULTI_CAMPAIGN_SUPERVISION_PROBLEM_BRIEF.md`
-- `MULTI_CAMPAIGN_SUPERVISION_DIVERGENCE_LEDGER.md`
+- feature-scoped Level-1 artifact root
+- `PROBLEM_BRIEF.md`
+- `DIVERGENCE_LEDGER.md`
+- `CONVERGENCE.md`
+- `IDEATION_SYNTHESIS.md`
 
 Gate: at least three materially different candidate families exist, and each
 answers the questions in the ideation brief.
@@ -239,14 +242,22 @@ not need this chat session.
 | `MULTI_CAMPAIGN_SUPERVISION_WORKFLOW_SELECTION.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/` |
 | `MULTI_CAMPAIGN_SUPERVISION_IDEATION_BRIEF.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/` |
 | `MULTI_CAMPAIGN_SUPERVISION_DESIGN_PROCESS_PLAN.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/` |
-| `MULTI_CAMPAIGN_SUPERVISION_PROBLEM_BRIEF.md` | pending | Level-1 design workflow artifact root |
-| `MULTI_CAMPAIGN_SUPERVISION_DIVERGENCE_LEDGER.md` | pending | Level-1 design workflow artifact root |
+| `PROBLEM_BRIEF.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-level1/` |
+| `DIVERGENCE_LEDGER.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-level1/` |
+| `CONVERGENCE.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-level1/` |
+| `IDEATION_SYNTHESIS.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-level1/` |
+| `README.md` | produced | `docs/operator/artifacts/multi-campaign-supervision-level1/` |
 | `MULTI_CAMPAIGN_SUPERVISION_CANDIDATE_SYNTHESIS.md` | pending | Level-1 design workflow artifact root |
 | `MULTI_CAMPAIGN_SUPERVISION_AUTHORITY_MATRIX.md` | pending | Level-1 design workflow artifact root |
 | `MULTI_CAMPAIGN_SUPERVISION_PROOF_AND_CONTEXT_MATRIX.md` | pending | Level-1 design workflow artifact root |
 | `MULTI_CAMPAIGN_SUPERVISION_FALSIFICATION_LEDGER.md` | pending | Level-1 review workflow artifact root |
 | `MULTI_CAMPAIGN_SUPERVISION_DESIGN_RECOMMENDATION.md` | pending | Level-1 design workflow artifact root |
 | `MULTI_CAMPAIGN_SUPERVISION_DESIGN_TO_BUILD_READINESS.md` | pending | after accepted design |
+
+For run-owned artifacts, the feature-specific directory is the slug prefix.
+Directory-local basenames are canonical once the daemon records them as expected
+artifacts. `docs/operator/artifacts/multi-campaign-supervision-level1/README.md`
+maps the earlier prefixed logical names to the actual Level-1 paths.
 
 ## Handoff
 
