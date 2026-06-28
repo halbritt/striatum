@@ -1,113 +1,102 @@
 ---
-type: record
-status: working
-feature_slug: MULTI_CAMPAIGN_SUPERVISION
-source: adhd-level1-scout
-author: operator-codex-gpt-5-003
-created_at: 2026-06-28
-updated_at: 2026-06-28
+schema_version: "striatum.synthesis.v1"
+artifact_kind: "synthesis"
+author: final-synthesizer-reviewer-2-001
+title: "MULTI_CAMPAIGN_SUPERVISION Ideation Synthesis"
+run_id: "run_7899e132bf7996d49c9b81d0df905962"
+inputs:
+  - "docs/operator/artifacts/multi-campaign-supervision-level1/CONVERGENCE.md"
+  - "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_1/DEEPENED.md"
+  - "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_2/DEEPENED.md"
+  - "docs/operator/artifacts/multi-campaign-supervision-level1/deepened/deepen_3/DEEPENED.md"
 ---
 
-# MULTI_CAMPAIGN_SUPERVISION ADHD Ideation Synthesis
+# MULTI_CAMPAIGN_SUPERVISION Ideation Synthesis
+
+author: final-synthesizer-reviewer-2-001
+
+## Basis
+
+This narrows the Level-1 ideation result for operator review. It does not accept
+an architecture, ticketing backend, daemon schema, UI shape, or implementation
+plan. The shortlist is assembled from the convergence ledger and the three
+deepened picks.
 
 ## Shortlist
 
-### Star: Expiring Authority Envelopes
+### ★ Authority Receipt Expiration
 
-A campaign begins when the human accepts an arc plan that emits the first
-expiring authority envelope as durable repo provenance, with scope, allowed RFC
-set, budget, stop conditions, and required evidence named explicitly. The daemon
-remains the live authority: the meta-agent can only request or coordinate
-existing design, build, and verify workflows that fit the active envelope. At
-each stage boundary, the meta-agent produces an admissibility packet saying what
-changed, what evidence exists, what remains uncertain, and whether the next
-envelope should narrow, renew, fork, or stop. Continuation requires durable
-evidence such as accepted designs, review verdicts, issue updates, operator
-reports, or verified artifacts satisfying the previous envelope's exit criteria.
+Why it is on the shortlist: it is the strongest converged pick and the
+non-obvious-but-viable lead. It attacks the hardest failure mode: a
+meta-agent's authority silently expanding as a long arc crosses design, build,
+verify, recovery, and discovered-slice boundaries.
 
-Load-bearing risk: weak or ambiguous evidence could be laundered into renewed
-authority, so the admissibility test must be stricter than plausible prose.
+Shape: the human-accepted arc emits a stage-scoped authority receipt naming
+scope, expiry, allowed actions, forbidden actions, required evidence,
+deferrals, discovered slices, renewal criteria, and stop triggers. Continuation
+is not inherited from chat or from a dashboard row; it is renewed only when the
+receipt's durable handles remain admissible against daemon state, artifacts,
+Git/docs evidence, ticket or issue mirrors, and verifier receipts.
 
-First concrete step: draft the Level-1 envelope template and transition
-checklist with fields for scope, expiry, allowed actions, forbidden actions,
-evidence required to continue, stop conditions, and exact durable artifacts
-passed to the next context.
+### Fresh-Context Replay Test
 
-Child ideas:
+Why it is on the shortlist: it turns the human's fresh-window requirement into a
+testable gate instead of an aspiration. A blank lane must be able to reconstruct
+the accepted arc, current authority, stop conditions, deferrals, evidence, and
+next admissible action from durable inputs alone.
 
-- envelope renewal as a campaign-level analogue of lease renewal
-- stage-specific envelopes such as design-only, verification-only,
-  reconciliation, and stop-report
-- evidence ledger entries classed as admissible, insufficient, or blocking
-- child envelopes for discovered slices with independent stop conditions
-- failed admissibility as an operator-facing decision point
+Shape: before a campaign advances between major stages, the daemon assembles a
+bounded replay packet from durable handles. The fresh lane passes only if it can
+restate the admissible next state and identify missing or contradictory
+evidence without inherited conversation. Failure becomes a visible repair item,
+not a silent handoff loss.
 
-### Campaign Tickets As Stage Passports
+### Deferral Quarantine And Scope-Drift Refusal
 
-An arc starts with a human-accepted campaign passport stating parent arc, scope
-boundary, authorized stages, explicit non-authority, and stop clauses. The
-meta-agent reads passports and receipts from repo provenance, then asks the
-daemon to launch ordinary workflows whose live state remains in PostgreSQL.
-Each stage produces a new stamped passport with evidence receipts, unresolved
-deferrals, handoff payload, and the exact context seed for the next fresh-window
-agent. Discovered slices can be proposed only as child passports under the
-parent arc, so scope growth is recorded before any workflow is allowed to run.
+Why it is on the shortlist: it directly answers the named pain that arbitrary
+deferrals become accepted by neglect. It also gives discovered slices a custody
+model before they can grow the arc.
 
-Load-bearing risk: the passport can become a shadow state machine competing
-with daemon-owned PostgreSQL instead of describing authority and provenance.
+Shape: every out-of-scope discovery is either refused or quarantined with a
+code, reason, owner, evidence handle, wake-up condition, and re-entry gate.
+Quarantine is visible but not permission: promotion into work requires bounded
+authority, a fresh-context payload, and proof that the item belongs in the
+accepted arc.
 
-First concrete step: draft a Campaign Passport V1 artifact contract with
-allowed fields, forbidden powers, and mapping to existing workflow artifacts.
+### Cross-Surface Contradiction Gate
 
-Child ideas:
+Why it is on the shortlist: it is the proof layer the other three picks need.
+The convergence ledger's cross-surface proof, contradiction-first status, and
+catastrophe-exclusion ideas should be carried forward as a gate, even though
+they are not a standalone product shape.
 
-- stage stamps: accepted, launched, verified, deferred, stopped, superseded
-- stop clauses as explicit brakes for the meta-agent
-- child passport proposals for bounded scope expansion
-- proof receipts attached to every passport
-- passport diffs as the human review surface for campaign drift
+Shape: before a stage, slice, or campaign is called done, a contradiction check
+must reconcile daemon run/job/verdict state, artifact publication, Git/docs
+state, ticket or issue state, verifier receipts, and known deferrals. Missing or
+conflicting handles are stop pressure, not advisory warnings.
 
-### Failure-First Dashboard And Quarantine Ledger
+## Trap List
 
-The portfolio dashboard is read-only and ranks campaigns by failure pressure:
-missing proof, stale ambiguity, rejected or deferred claims, authority requests,
-human checkpoints, doctor integrity problems, and evidence handles that cannot
-be resolved. A discovered slice cannot silently become work; it lands in a
-quarantine or deferral ledger with its claim, source evidence, why it is out of
-current scope, what authority would promote it, and what stop condition it may
-trigger. The meta-agent proposes the next workflow only when required proofs and
-scope gates are satisfied; otherwise it emits an escalation or narrowed handoff
-artifact. Stage boundaries are hard resets that pass accepted claims, unresolved
-risks, deferred slices, and exact daemon/artifact handles, not chat history.
+- Generic ticket board as control plane: familiar task labels can launder
+  authority and duplicate daemon live state.
+- Dashboard as decision engine: a read/status projection can become a shadow
+  workflow state machine if agents treat rows as permission.
+- Scheduling-first slice pickup: batching by time can hide urgent proof
+  conflicts, stale context, and scope drift.
+- Experience-rated autonomy: sparse success history can become an opaque policy
+  engine that loosens authority after lucky runs.
+- Quarantine ledger as permission: deferral rows must not become accepted work
+  merely because they are visible.
+- Negative proof checklist alone: useful hygiene, but weak without actual diff,
+  artifact-scope, daemon-state, and publication checks.
+- Over-curated replay packets: a polished summary can hide contradictions or
+  exceed the fresh lane's context budget.
 
-Load-bearing risk: the dashboard could become a hidden control plane if agents
-treat projected rows or deferral entries as permission to expand scope or start
-build work.
+## Wildcard Provocation
 
-First concrete step: write a Level-1 artifact-contract mock using one real
-multi-RFC arc: dashboard row taxonomy, deferral-ledger fields, stop-pressure
-signals, promotion rules, and stage handoff payload shape.
-
-Child ideas:
-
-- stop-pressure score instead of progress percentage
-- claim quarantine ledger for every discovered slice
-- stage restart packet with accepted claims, rejected claims, pending proofs,
-  authority boundaries, stop conditions, and retrieval handles
-- evidence-first dashboard rows where unresolved handles are compliance
-  failures
-- arc-level escalation protocol for ambiguity above a stop threshold
-
-## Candidate Matrix
-
-| Candidate | Ticketing substrate | UI surface | Authority model | Context handoff | Deferral policy | Proof model | Stop conditions |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Expiring envelopes | Envelope artifact plus later ticket/passport mapping | Envelope state and admissibility pressure | Stage-scoped, expiring, evidence-renewed | Envelope plus admissibility packet | Out-of-envelope work cannot continue | Evidence ledger satisfies exit criteria | Expiry, missing evidence, authority escalation, red doctor, stale arc |
-| Stage passports | Local passport/provenance envelope | Passport diffs and stamp status | Passport grants no live authority; daemon still launches workflows | Next-stage passport seed | Child passport proposals before scope growth | Stamp receipts and artifact hashes | Stop clauses and unstamped transitions |
-| Failure dashboard | Quarantine/deferral ledger plus evidence rows | Read-only failure/compliance console | Read surface only; no control-plane writes | Stage restart packet | Claims quarantined until promoted by accepted authority | Resolvable daemon/artifact/ticket handles | Stop-pressure threshold, unresolved handle, human checkpoint |
-
-## Non-Decision
-
-This synthesis does not accept an architecture. It nominates candidate families
-for the next Striatum-native divergent ideation and falsification pass.
-
+What if v1 is a shadow supervisor with no workflow-launch authority at all? It
+would follow one accepted RFC arc and emit only authority receipts, replay-test
+failures, quarantine rows, and contradiction reports while humans still launch
+ordinary Striatum workflows. If this proof-only supervisor cannot keep a dozen
+arcs legible, adding launch authority is premature; if it can, its outputs
+become the artifact contract for a later product decision.
