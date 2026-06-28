@@ -181,6 +181,8 @@ func int64From(m map[string]any, key string) int64 {
 		return int64(value)
 	case int64:
 		return value
+	case float64:
+		return int64(value)
 	default:
 		return 0
 	}

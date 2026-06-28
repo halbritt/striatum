@@ -13,6 +13,15 @@
   docket`, blob-required publish refusal, generated-workflow placement
   defaults, historical record inventory dry-run, and opt-in check-docs URI /
   generated-body hygiene checks.
+- **RFC 0171 historical import proof.** Added daemon RPCs for
+  `records.migration.import`, `records.migration.materialize`, and
+  `records.migration.verify`, plus CLI wrappers under `striatum records
+  migration`. Safe historical inventory entries can now be imported into
+  blob-backed `generated_records`, reconstructed under ignored
+  `.striatum/scratch`, and verified byte-for-byte against the original manifest.
+  `doctor --verbose --json` now includes `generated_record_integrity` checks for
+  missing, corrupt, swapped, or metadata-incomplete blobs. Historical deletion
+  remains explicitly blocked.
 - **RFC 0168 P0 build v3.** Added runtime schema 47 (`lane_uid_leases`) and
   owner bundle 0023 for pooled per-lane OS uid leases, generation-bound
   supervisor attestation/control, private supervisor scratch bearer files,

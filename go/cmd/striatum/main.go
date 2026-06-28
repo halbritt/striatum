@@ -87,7 +87,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		if globals.JSONOutput && !containsFlag(recordsArgs, "--json") {
 			recordsArgs = append(recordsArgs, "--json")
 		}
-		return runRecords(recordsArgs, stdout, stderr, globals.RepoPath)
+		return runRecords(recordsArgs, stdout, stderr, globals)
 	}
 	// `run start` runs the start verbatim through the daemon route, then auto-drives
 	// the started run in a detached driver so the run reconciles to terminal with no

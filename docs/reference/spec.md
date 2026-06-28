@@ -1025,6 +1025,18 @@ other artifact kinds default to `git_publication`. New generated workflows emit
 explicit placement. `artifact.publish`, artifact reads/listings/exports, and
 doctor checks use the same resolved placement instead of treating artifact kind
 as the final storage authority.
+
+Generated operator records that are not current product source may be imported
+into the daemon-owned `generated_records` index. The body bytes live in the
+repository's blob bucket; the row records source path, source commit, record
+class, content hash, blob key/hash, retention class, and import batch. The
+`records migration import` path is daemon-backed and idempotent for safe
+historical inventory entries, `records migration verify` proves reconstructed
+blob bytes against the original manifest, and `records migration materialize`
+writes verified copies only under ignored `.striatum/scratch`. Import and
+reconstruction proof do not authorize deleting tracked historical files; deletion
+requires a separate operator decision or pilot.
+
 If a lane tries to publish or complete after its Striatum session is already
 terminal, the daemon returns `session_inactive` before lease validation and
 points at the daemon-backed same-attempt recovery path: requeue the job, claim

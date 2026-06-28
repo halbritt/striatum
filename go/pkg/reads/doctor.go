@@ -258,6 +258,10 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	warnings = append(warnings, verifierPinWarnings...)
 
 	blobBlock := blobDoctorBlock(ctx, runner, repositoryID)
+	generatedRecordBlock, generatedRecordProblems, generatedRecordRecords := doctorGeneratedRecordIntegrity(ctx, runner, repositoryID, blobBlock)
+	problems = append(problems, generatedRecordProblems...)
+	problemRecords = append(problemRecords, generatedRecordRecords...)
+
 	artifactAnchorBlock, artifactAnchorProblems, artifactAnchorRecords, artifactAnchorWarnings, artifactAnchorWarningRecords := doctorArtifactAnchorIntegrity(ctx, runner, repositoryID, blobBlock)
 	problems = append(problems, artifactAnchorProblems...)
 	problemRecords = append(problemRecords, artifactAnchorRecords...)
@@ -353,6 +357,7 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		"event_chain_head_lock_convoy": eventLockWaitBlock,
 		"audit_chain_head_lock_convoy": auditLockWaitBlock,
 		"worktree_ref_safety":          worktreeRefSafetyBlock,
+		"generated_record_integrity":   generatedRecordBlock,
 		"artifact_anchor_integrity":    artifactAnchorBlock,
 		"barrier_integrity":            barrierBlock,
 		"quorum_integrity":             quorumBlock,

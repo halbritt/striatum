@@ -192,6 +192,16 @@ var ErrorCatalog = []ErrorCatalogEntry{
 		Suggestion: "Re-issue the call with a fresh request_id.",
 	},
 	{
+		Code:       "duplicate_original_manifest_path",
+		Meaning:    "A records migration verification manifest contains the same source path more than once.",
+		Suggestion: "Regenerate the inventory manifest and retry verification; do not delete source files until the manifest is unique and byte-identical reconstruction passes.",
+	},
+	{
+		Code:       "duplicate_reconstructed_manifest_path",
+		Meaning:    "Records migration reconstruction produced the same source path more than once.",
+		Suggestion: "Inspect the generated_records rows for duplicate source path/import metadata, fix the index through daemon-backed migration tooling, then rerun verification.",
+	},
+	{
 		Code:       "event_payload_rejected",
 		Meaning:    "A durable event payload was refused by the database write boundary: it carried a transcript key (stdout/stderr/transcript/raw_output/provider_output) or exceeded the durable-event size cap (RFC 0110 §12, C-EVENT-NO-TRANSCRIPTS).",
 		Suggestion: "Record curated coordination state in the event, not captured agent output; transcripts belong in operator-local diagnostics, not the durable event chain.",
@@ -312,6 +322,11 @@ var ErrorCatalog = []ErrorCatalogEntry{
 		Suggestion: "Rebase or resolve the run branch against the target on a branch a maintainer merges, then re-run run.integrate; the conflicting paths are in the error details.",
 	},
 	{
+		Code:       "missing_reconstructed_record",
+		Meaning:    "Records migration verification could not reconstruct a manifest entry from generated_records and blob storage.",
+		Suggestion: "Run `striatum records migration import --manifest <manifest>` for the safe entries, then rerun verification; do not delete the tracked source file.",
+	},
+	{
 		Code:       "worktree_head_unreachable",
 		Meaning:    "worktree.release refused because the worktree HEAD is not reachable from the run branch or a refs/striatum pin.",
 		Suggestion: "Complete the job so work.complete anchors the commits, or rerun worktree release with --force only if discarding that HEAD is intentional.",
@@ -377,6 +392,16 @@ var ErrorCatalog = []ErrorCatalogEntry{
 		Suggestion: "Run `striatum repo add <path> --init` for the target repository, then retry.",
 	},
 	{
+		Code:       "reconstructed_sha256_mismatch",
+		Meaning:    "Records migration reconstruction produced bytes whose sha256 differs from the original manifest.",
+		Suggestion: "Inspect the generated_records row and blob object; re-import through daemon RPC before considering deletion.",
+	},
+	{
+		Code:       "reconstructed_size_mismatch",
+		Meaning:    "Records migration reconstruction produced bytes whose size differs from the original manifest.",
+		Suggestion: "Inspect the generated_records row and blob object; re-import through daemon RPC before considering deletion.",
+	},
+	{
 		Code:       "review_provenance_override_required",
 		Meaning:    "An unattested/operator-authored accepting review verdict requires an explicit run-level review provenance decision.",
 		Suggestion: "Record an accepting decision with `--escape-surface review_provenance --escape-action <action> --rationale <reason>`, then retry with `--review-provenance-decision-id <decision_id>`.",
@@ -440,6 +465,11 @@ var ErrorCatalog = []ErrorCatalogEntry{
 		Code:       "spawn_run_as_unresolved",
 		Meaning:    "An auto_spawn run's run-as identity (the configured lane OS user) cannot be resolved on this host, so the scheduler would spawn into a non-existent identity (RFC 0122 §4).",
 		Suggestion: "Provision the lane OS user (with a home directory) or unset STRIATUM_LANE_OS_USER to run lanes as the daemon user, then restart the run.",
+	},
+	{
+		Code:       "unexpected_reconstructed_record",
+		Meaning:    "Records migration reconstruction produced a path that was not present in the original manifest.",
+		Suggestion: "Inspect the import batch selector and generated_records rows; verify only the intended manifest before materializing or deleting anything.",
 	},
 	{
 		Code:       "stale_daemon_identity",

@@ -1,6 +1,6 @@
 # RFC 0171: Operator records blob dockets and virtual records
 
-Status: accepted (D273; partially implemented: first build slice shipped 2026-06-28)
+Status: accepted (D273; partially implemented: import/materialize/verify shipped 2026-06-28)
 Date: 2026-06-28
 Context: [RFC 0072](0072-blob-backed-artifact-storage.md),
 [RFC 0123](0123-blob-routed-lane-exhaust-and-git-publication-specs.md),
@@ -195,9 +195,13 @@ and other source-like records.
 11. Repo hygiene guard for newly tracked generated record bodies.
 12. Concise runbook/spec/brief updates.
 
-Implementation state as of 2026-06-28: slices 1, 2, 3, 5, 6, 7, 10, 11, and
-the brief/changelog/reference-doc updates in slice 12 are implemented. Slices 4,
-8, and 9 remain pending, so no broad historical deletion is authorized.
+Implementation state as of 2026-06-28: slices 1, 2, 3, 5, 6, 7, 8, 9, 10, 11,
+and the brief/changelog/reference-doc updates in slice 12 are implemented. Slice
+4 is implemented for imported generated records through
+`records.migration.materialize` into ignored `.striatum/scratch`; broader
+`striatum://record` documentation-link resolver coverage remains follow-up.
+Historical source deletion is still not authorized: this build proves import and
+reconstruction, but it deliberately keeps tracked files in git.
 
 ## Acceptance Criteria
 
@@ -205,14 +209,15 @@ the brief/changelog/reference-doc updates in slice 12 are implemented. Slices 4,
   commit only a docket or pointer manifest for review.
 - `striatum records docket <id>` produces deterministic output
   with artifact ids, hashes, placement, retention class, and Merkle root.
-- The pending hydrate/materialize command reconstructs a run into ignored
-  scratch and verifies hashes.
+- `records migration materialize` reconstructs imported generated records into
+  ignored scratch and verifies hashes before writing.
 - Historical inventory can scan the target directories and produce a
   deterministic JSON manifest without writing.
-- The import/delete gate refuses deletion unless original and reconstructed
-  manifests match exactly.
-- Doctor catches missing, corrupt, swapped, and metadata-missing blob/index
-  records with stable problem codes.
+- The import/delete gate refuses deletion; `records migration verify` compares
+  original and reconstructed manifests exactly and reports stable problem codes.
+- Doctor catches missing, corrupt, swapped, duplicate-source, and
+  metadata-missing generated-record blob/index records with stable problem
+  codes.
 - `check-docs` validates `striatum://artifact/...` and `striatum://run/...`
   links through daemon or an explicit cached index.
 - New generated operator provenance bodies are rejected by hygiene checks when

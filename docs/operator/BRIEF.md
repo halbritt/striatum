@@ -4,7 +4,7 @@ artifact_kind: "operator_brief"
 brief_id: "brief_2026-06-27_v2.39.0-release"
 supersedes: "brief_2026-06-25_v2.38.0-release"
 scope_links: ["docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
-context_budget_lines: 360
+context_budget_lines: 390
 retrieval_priority: "high"
 status: "current"
 ---
@@ -54,6 +54,24 @@ updates. `striatum://` materialize/hydrate, historical import reconstruction
 proof, and doctor record/docket integrity checks remain pending. Broad
 historical deletion remains blocked until byte-identical reconstruction proof
 exists.
+
+## 2026-06-28 delta — RFC 0171 historical import proof implemented
+
+RFC 0171 now has the proof-first historical import path for the
+`safe_to_blob_index` inventory subset. `striatum records migration import`
+routes each selected manifest entry through daemon RPC
+`records.migration.import`, uploads the body through the daemon blob client, and
+upserts `striatumd.generated_records` without deleting tracked files.
+`striatum records migration verify` compares the original inventory manifest to
+daemon-fetched blob bytes, and `striatum records migration materialize` writes
+verified bodies only under ignored `.striatum/scratch`.
+
+`doctor --verbose --json` now includes `generated_record_integrity` with stable
+problem codes for missing blobs, corrupt/unreadable bodies, swapped blob
+key/hash metadata, duplicate source rows, and missing blob metadata. This moves
+RFC 0171 from "inventory only" to "imported and reconstructable"; broad
+historical deletion remains blocked until a separately authorized pilot uses
+that proof to retire source files.
 
 ## 2026-06-27 delta — v2.39.0 release
 

@@ -59,6 +59,9 @@
 | `artifact.get_content` | `read` | `single_repo` | 1 | 1 | no |
 | `artifact.list_for_run` | `read` | `single_repo` | 1 | 1 | no |
 | `records.docket` | `read` | `single_repo` | 1 | 1 | no |
+| `records.migration.materialize` | `read` | `single_repo` | 1 | 1 | no |
+| `records.migration.verify` | `read` | `single_repo` | 1 | 1 | no |
+| `records.migration.import` | `write` | `single_repo` | 1 | 1 | no |
 | `corpus.migrate_historical_dogfood_file` | `write` | `single_repo` | 1 | 1 | no |
 | `artifact.backfill_blob` | `write` | `single_repo` | 1 | 1 | no |
 | `corpus.list_historical_dogfoods` | `read` | `single_repo` | 1 | 1 | no |

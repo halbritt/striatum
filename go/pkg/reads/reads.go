@@ -97,10 +97,21 @@ type Options struct {
 	StriatumVersion string
 }
 
+type readBlobClient interface {
+	BucketExists(context.Context, string) (bool, error)
+	GetBytes(context.Context, string, string, string) ([]byte, error)
+	HeadObject(context.Context, string, string) (int64, string, error)
+	ListByPrefix(context.Context, string, string) ([]blob.ListObjectEntry, error)
+	ListCommonPrefixes(context.Context, string, string, string) ([]string, error)
+	PutBytes(context.Context, string, string, []byte, string) (string, error)
+	Reachable(context.Context) error
+	RemoteSha256(context.Context, string, string) (string, bool, error)
+}
+
 // packageBlobClient mirrors mutations.packageBlobClient: a single
 // daemon-startup-time blob client read by the artifact.get_content
 // handler. nil means blob storage is disabled.
-var packageBlobClient *blob.Client
+var packageBlobClient readBlobClient
 var packageStriatumVersion = "dev"
 
 // Register wires every read handler in this package onto the rpc.Server.
@@ -113,7 +124,11 @@ func Register(server *rpc.Server, runner db.Runner, opts ...Options) {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	packageBlobClient = o.BlobClient
+	if o.BlobClient != nil {
+		packageBlobClient = o.BlobClient
+	} else {
+		packageBlobClient = nil
+	}
 	if o.StriatumVersion != "" {
 		packageStriatumVersion = o.StriatumVersion
 	}
@@ -142,6 +157,8 @@ func Register(server *rpc.Server, runner db.Runner, opts ...Options) {
 	server.Register("artifact.get_content", makeHandler(runner, HandleArtifactGetContent))
 	server.Register("artifact.list_for_run", makeHandler(runner, HandleArtifactListForRun))
 	server.Register("records.docket", makeHandler(runner, HandleRecordsDocket))
+	server.Register("records.migration.materialize", makeHandler(runner, HandleRecordsMigrationMaterialize))
+	server.Register("records.migration.verify", makeHandler(runner, HandleRecordsMigrationVerify))
 	server.Register("git.snapshot", makeHandler(runner, HandleGitSnapshot))
 	server.Register("corpus.list_historical_dogfoods", makeHandler(runner, HandleCorpusListHistoricalDogfoods))
 	server.Register("corpus.list_historical_dogfood_files", makeHandler(runner, HandleCorpusListHistoricalDogfoodFiles))

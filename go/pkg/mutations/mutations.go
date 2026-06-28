@@ -49,13 +49,19 @@ type Options struct {
 	RecallDigest RecallDigestOptions
 }
 
+type mutationBlobClient interface {
+	GetBytes(context.Context, string, string, string) ([]byte, error)
+	PutBytes(context.Context, string, string, []byte, string) (string, error)
+	RemoteSha256(context.Context, string, string) (string, bool, error)
+}
+
 // packageBlobClient is the daemon's blob client, set by Register and
 // read by publishArtifact. Package-level so that publishArtifact's
 // transitive callers (review.submit, recovery.auto_finalize) do not
 // need their own threading. nil = blob storage disabled / not
 // configured; publishArtifact then skips the S3 upload step and the
 // artifact body stays in the working tree.
-var packageBlobClient *blob.Client
+var packageBlobClient mutationBlobClient
 var packageDaemonSocketPath string
 
 // packageMCPBootEpoch is THIS daemon process run's MCP boot epoch (#316), set
@@ -90,7 +96,11 @@ func Register(server *rpc.Server, runner db.Runner, opts ...Options) {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	packageBlobClient = o.BlobClient
+	if o.BlobClient != nil {
+		packageBlobClient = o.BlobClient
+	} else {
+		packageBlobClient = nil
+	}
 	packageDaemonSocketPath = strings.TrimSpace(o.DaemonSocketPath)
 	packageMCPBootEpoch = strings.TrimSpace(o.MCPBootEpoch)
 	packageRecallDigestOptions = normalizeRecallDigestOptions(o.RecallDigest)
@@ -179,6 +189,7 @@ func Register(server *rpc.Server, runner db.Runner, opts ...Options) {
 	server.Register("conversation.show", makeHandler(runner, HandleConversationShow))
 	server.Register("corpus.migrate_historical_dogfood_file", makeHandler(runner, HandleCorpusMigrateHistoricalDogfoodFile))
 	server.Register("artifact.backfill_blob", makeHandler(runner, HandleArtifactBackfillBlob))
+	server.Register("records.migration.import", makeHandler(runner, HandleRecordsMigrationImport))
 }
 
 func makeHandler(runner db.Runner, fn handlerFn) rpc.Handler {

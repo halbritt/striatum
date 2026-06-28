@@ -322,6 +322,25 @@ and `dashboard --once` additionally carries a top-level `state` mirroring
 `run_state` is `null` and `jobs` is empty. See
 [spec.md → Operator read-surface state projection](spec.md#operator-read-surface-state-projection).
 
+## Records
+
+```text
+striatum records docket <run-id> [--format markdown|json]
+striatum records migration inventory [--root path]... [path ...]
+striatum records migration import --manifest inventory.json [--import-batch-id id] [--dry-run] [--json]
+striatum records migration verify --manifest inventory.json [--json]
+striatum records migration materialize (--record-id id | --import-batch-id id | --source-path path) [--out .striatum/scratch/path] [--json]
+```
+
+`records docket` is daemon-backed and renders a compact RFC 0171 docket from
+artifact and generated-record indexes. `records migration inventory` remains a
+local read-only filesystem scan. The import, verify, and materialize migration
+commands are CLI wrappers over daemon RPC: import uploads safe manifest entries
+through the daemon blob client and upserts `generated_records`; verify compares
+the original manifest to daemon-fetched blob bytes; materialize writes verified
+bodies only under ignored `.striatum/scratch`. None of these commands delete
+tracked historical files.
+
 ## Daemon and multi-repo registry (RFC 0028 V1)
 
 ```text
@@ -414,7 +433,9 @@ distributions are deferred.
 
 `striatum doctor` is the daemon-backed health check. `doctor --verbose`
 includes structured `problem_records` alongside the stable string `problems`
-list. `doctor --lane-provider-auth codex [--run-id <id>] [--lane-id <id>]
+list, including RFC 0171 `generated_record_integrity` records for missing,
+corrupt, swapped, duplicate-source, or metadata-incomplete generated-record
+blobs. `doctor --lane-provider-auth codex [--run-id <id>] [--lane-id <id>]
 [--timeout 45s] --json` is an explicit provider-auth smoke for the lane
 identity; ordinary `doctor` and `doctor --verbose` never run provider CLIs.
 `striatum daemon status` is the local bootstrap summary for unit state and

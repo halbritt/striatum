@@ -196,6 +196,28 @@ func TestRecordsDocketHelpUsesDaemonRoute(t *testing.T) {
 	}
 }
 
+func TestWriteMaterializedRecordsAllowsEmptyBody(t *testing.T) {
+	outRoot := t.TempDir()
+	written, err := writeMaterializedRecords(outRoot, []any{map[string]any{
+		"source_path": "docs/records/audits/empty.md",
+		"body_base64": "",
+	}})
+	if err != nil {
+		t.Fatalf("writeMaterializedRecords: %v", err)
+	}
+	target := filepath.Join(outRoot, "docs", "records", "audits", "empty.md")
+	if len(written) != 1 || written[0] != target {
+		t.Fatalf("written = %#v, want %s", written, target)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read materialized file: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("materialized body length = %d, want 0", len(body))
+	}
+}
+
 func TestOperatorBootstrapHelpAndDocsStayInSync(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"operator", "bootstrap", "--help"}, &stdout, &stderr)
