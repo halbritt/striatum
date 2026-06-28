@@ -20,8 +20,8 @@
   blob-backed `generated_records`, reconstructed under ignored
   `.striatum/scratch`, and verified byte-for-byte against the original manifest.
   `doctor --verbose --json` now includes `generated_record_integrity` checks for
-  missing, corrupt, swapped, or metadata-incomplete blobs. Historical deletion
-  remains explicitly blocked.
+  missing, corrupt, swapped, or metadata-incomplete blobs. Broad historical
+  deletion remains explicitly blocked outside separately authorized pilots.
 - **RFC 0168 P0 build v3.** Added runtime schema 47 (`lane_uid_leases`) and
   owner bundle 0023 for pooled per-lane OS uid leases, generation-bound
   supervisor attestation/control, private supervisor scratch bearer files,
@@ -32,6 +32,18 @@
   `supervise.report` lease-generation freshness before heartbeat/state writes,
   and resolving relative provider credential selectors against the lane launch
   root.
+
+### Removed
+
+- **RFC 0171 deletion pilot.** Removed five historical dogfood
+  `OPERATOR_REPORT.md` bodies from git after import batch
+  `inventory-d0c894978b26b00f` verified and materialized byte-identical
+  blob-backed reconstructions:
+  `dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`,
+  `dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`,
+  `dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`,
+  `dogfoods/rfc-0103-review/OPERATOR_REPORT.md`, and
+  `dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`.
 
 ## v2.39.0 — 2026-06-27
 

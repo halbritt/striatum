@@ -105,6 +105,27 @@ RFC 0171 from "inventory only" to "imported and reconstructable"; broad
 historical deletion remains blocked until a separately authorized pilot uses
 that proof to retire source files.
 
+## 2026-06-28 delta — RFC 0171 deletion pilot shipped
+
+A narrow RFC 0171 pilot removed five historical dogfood `OPERATOR_REPORT.md`
+bodies from git after the live import proof was refreshed. The proof used import
+batch `inventory-d0c894978b26b00f`; `records migration verify` checked 318
+records with `reconstructable=true` and `problem_count=0`, materialization
+rewrote the batch under ignored `.striatum/scratch`, and a full SHA comparison
+found 0 manifest/source/materialized mismatches. The pilot manifest is
+`/tmp/striatum-rfc0171-deletion-pilot-manifest-2026-06-28T2231Z.json`.
+
+The removed tracked paths are:
+
+- `dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`
+- `dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`
+- `dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`
+- `dogfoods/rfc-0103-review/OPERATOR_REPORT.md`
+- `dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`
+
+Broad historical deletion remains blocked; future deletion must repeat the
+proof gate and name an explicit operator-authorized scope.
+
 ## 2026-06-27 delta — v2.39.0 release
 
 **v2.39.0 (2026-06-27)** cuts the post-v2.38.0 reliability and RFC 0170 P0
