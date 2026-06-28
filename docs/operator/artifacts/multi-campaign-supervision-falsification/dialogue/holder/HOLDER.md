@@ -31,6 +31,56 @@ repo files are durable provenance; tickets, dashboards, docs, and issue mirrors
 must not become a second workflow state machine; and live chat history must not
 carry the arc.
 
+## Cycle 2 Revision Floor
+
+This holder claim is revised in response to the cycle-2 adjudicator findings:
+`AUTHORITY-PROVENANCE-NOT-PERMISSION` and `REPLAY-COMPLETENESS-WITNESS`. The
+four-item shortlist is preserved, but the next product-decision/RFC gate must
+carry two mandatory floors before it can clear.
+
+**Floor 1: provenance is not permission.** Authority receipts, replay results,
+quarantine rows, ticket sections, dashboard rows, and contradiction reports are
+provenance and stop-pressure surfaces only. They may request renewal, repair,
+quarantine, rejection, or human review. They do not authorize a coordinating
+agent to start, sequence, scaffold, promote, update acceptance state, or mark
+work done unless the exact stage action is authorized at the moment of action by
+one of these current authorities:
+
+- a daemon-scoped authority object or daemon-state check that matches the exact
+  stage, action, scope, expiry, required evidence, deferral state, and stop
+  conditions; or
+- an explicit human/product decision for that exact transition, with daemon-state
+  reconciliation preserved.
+
+The first acceptable RFC is therefore proof-only or recommendation-only unless it
+specifies daemon-state enforcement, current receipt reconciliation, expiry
+refusal, and human-confirmed authority expansion before any coordinator acts.
+
+**Floor 2: replay and done proofs need an evidence inventory.** Each replay
+packet, replay pass, advancement proof, and done proof must include a
+source-checkable evidence inventory. The inventory must list required surfaces
+searched, query/source handles, freshness timestamps or refs, unreachable or
+unknown surfaces, and omitted-handle rationale. Required surfaces include daemon
+run/job/verdict state, artifact publication state, Git/docs refs, ticket or issue
+mirrors, verifier receipts, operator reports, doctor/status posture, and
+deferral-custody entries. Omission of an in-scope daemon row, artifact, Git/docs
+revision, ticket/issue mirror, verifier receipt, operator report, doctor/status
+red flag, or deferral custody entry is stop pressure.
+
+A fresh lane must either verify the inventory against the named source handles or
+receive daemon-scoped proof that the inventory is complete for the boundary under
+review. Replay results expire at a stated boundary and are not reusable done
+proof for later mutable state. Every advancement or done seal must revalidate
+in-scope sources at seal time, or prove no in-scope source changed since replay.
+Any newer in-scope verifier receipt, Git/docs mutation, ticket/issue mirror
+mutation, deferral-custody mutation, red doctor/status signal, or unreachable
+required source after replay is stop pressure, not a warning.
+
+These floors answer the falsifiers directly: the shortlist may proceed only as a
+bounded product/RFC direction. It still does not authorize implementation,
+architecture selection, schema, route maps, UI, ticket backend, build planning,
+or source changes.
+
 ## Claim 1: Authority Receipt Expiration Is The Right Authority Spine
 
 **Falsifiable claim.** A multi-campaign supervisor should not inherit authority
@@ -39,6 +89,9 @@ Level-1 lead is ready for product-decision/RFC drafting only if the next design
 can be framed around stage-scoped, expiring authority receipts that name the
 current scope, expiry point, allowed actions, forbidden actions, evidence
 handles, deferrals, discovered slices, renewal criteria, and stop triggers.
+Those receipts are admissible as proof or recommendation surfaces only until the
+next RFC either keeps them proof-only or defines daemon-scoped or explicit
+human/product-confirmed authority for the exact stage action.
 
 **Evidence handles.** `IDEATION_SYNTHESIS.md` selects authority receipt
 expiration as the strongest converged pick and describes renewal from durable
@@ -56,7 +109,10 @@ conversation, dashboard status, ticket labels, or prose-only claims; if a
 receipt can renew from stale or missing daemon/artifact/Git/doc/ticket/verifier
 handles; if a stage can advance after receipt expiry without renewal or stop
 pressure; or if defining the receipt forces an architecture, schema, route, UI,
-or build plan before the product decision.
+or build plan before the product decision. It also fails if a receipt, replay
+pass, quarantine row, ticket field, dashboard row, or contradiction report can be
+treated as permission without a current daemon-scoped authority object or
+explicit human/product decision for the exact transition.
 
 ## Claim 2: Fresh-Context Replay Is The Advancement Proof
 
@@ -64,7 +120,10 @@ or build plan before the product decision.
 that receives bounded durable context only. The Level-1 synthesis is ready for
 the next gate only if a blank lane can reconstruct the accepted arc, current
 authority, stop conditions, deferrals, evidence handles, and next admissible
-action without inherited chat history.
+action without inherited chat history. The replay packet is not enough by
+itself: it must carry the evidence inventory and freshness floor above, and
+advancement must revalidate mutable sources at seal time or prove they did not
+change since replay.
 
 **Evidence handles.** `IDEATION_SYNTHESIS.md` lists fresh-context replay as a
 shortlisted gate. `CONVERGENCE.md` shows cluster B recurring across B1.3,
@@ -80,7 +139,10 @@ admissible next state from durable inputs; if the replay packet has to hide or
 summarize away contradictory handles to fit; if it cannot identify missing
 evidence, stop pressure, or human-confirmation boundaries; if advancement can
 proceed after replay failure; or if the replay mechanism duplicates daemon live
-state instead of proving over daemon state and durable provenance.
+state instead of proving over daemon state and durable provenance. It also fails
+if a replay pass can age into done proof after newer in-scope daemon, artifact,
+Git/docs, ticket/issue, verifier, operator-report, doctor/status, or deferral
+custody evidence appears.
 
 ## Claim 3: Deferrals And Discovered Slices Need Quarantine, Not Permission
 
@@ -115,7 +177,10 @@ beside the daemon.
 stage, slice, RFC arc, or campaign is called done. The gate must reconcile daemon
 run/job/verdict state, artifact publication, Git/docs state, ticket or issue
 mirror state, verifier receipts, operator reports, and known deferrals. Missing
-or conflicting handles are stop pressure, not advisory warnings.
+or conflicting handles are stop pressure, not advisory warnings. The
+reconciliation must be backed by the evidence-inventory manifest and same-boundary
+freshness check described above, not by a selected packet that defines its own
+search boundary.
 
 **Evidence handles.** `IDEATION_SYNTHESIS.md` names the cross-surface
 contradiction gate as the proof layer for the other picks. `CONVERGENCE.md`
@@ -132,7 +197,9 @@ around.
 while any required surface is missing, stale, or contradictory; if a ticket,
 dashboard, or issue mirror overrides daemon state; if verifier receipts are not
 part of the proof; if known deferrals can be omitted from the done claim; or if
-the contradiction check silently downgrades stop pressure into a warning.
+the contradiction check silently downgrades stop pressure into a warning. It also
+fails if the proof omits the inventory of searched surfaces, source handles,
+freshness refs, unreachable surfaces, or omitted-handle rationale.
 
 ## Combined Gate Claim
 
@@ -146,6 +213,11 @@ The Level-1 synthesis is therefore ready for falsification, and possibly for the
 next product-decision/RFC-drafting gate, only if falsifiers cannot produce a
 concrete observation that breaks one of the four claims above while staying
 inside the hard boundary.
+
+After the cycle-2 revision, the combined gate also includes this rule: no
+provenance artifact is action authority by itself, and no replay/done claim is
+complete unless its evidence inventory and freshness contract are source
+checkable.
 
 ## Explicit Non-Claims
 
