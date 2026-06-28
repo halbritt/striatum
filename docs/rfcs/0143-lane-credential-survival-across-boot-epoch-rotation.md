@@ -3,8 +3,8 @@
 Status: accepted (D261, 2026-06-24) — **split**: Slice A **BUILT + LANDED**
 (`a6d5610f`, 2026-06-24) — the legible `session_unrecoverable_across_rotation`
 typed-exit floor as pure daemon-side observability; Slice B (options 2/3, the
-`CapabilityReseal` authority) **blocked on [RFC 0168](0168-per-lane-security-principal.md)**
-(per-lane OS uid). See `## Decision (D261)` below.
+`CapabilityReseal` authority) is **unblocked by [RFC 0168](0168-per-lane-security-principal.md)**
+(per-lane OS uid; P0 build v3 accepted and integrated). See `## Decision (D261)` below.
 
 > **Slice A landed (2026-06-24, `a6d5610f`).** A daemon-observed
 > `daemon.stale_epoch_rotation` event (recorded when `validateBootEpoch` rejects a
@@ -250,13 +250,13 @@ a post-launch tmux query — authenticates the replacement. A `0600` reseal file
   proposed W1 connect-out channel is a pure Slice-B feature, not a prerequisite
   for Slice A. Slice A therefore clears on its own merits as observability and
   does not touch the credential trust model.
-- **Slice B — blocked.** Options 2/3 (the `CapabilityReseal` authority and its
-  channel) are **gated on [RFC 0168](0168-per-lane-security-principal.md)**
-  (per-lane OS uid) landing. Under a per-lane uid the same-uid class dissolves
-  and option 2 reduces to a safe lane-uid-owned `0600` reseal token. No
-  credential code lands until RFC 0168 is accepted and its provisioning slice
-  ships. Tracked blocker: #585.
+- **Slice B — unblocked.** Options 2/3 (the `CapabilityReseal` authority and
+  its channel) were gated on [RFC 0168](0168-per-lane-security-principal.md)
+  landing. RFC 0168 P0 build v3 is now accepted and integrated, so under a
+  per-lane uid the same-uid class dissolves and option 2 reduces to a safe
+  lane-uid-owned `0600` reseal token. The next roadmap item is to build and
+  verify Slice B. Tracked issue: #585.
 
 This decision does not widen who can read the admin token and mints no new
-credential; Slice A is pure observability and Slice B is deferred behind a
-structural prerequisite.
+credential; Slice A is pure observability and Slice B should now proceed as the
+next build/verify slice on top of the fulfilled RFC 0168 prerequisite.

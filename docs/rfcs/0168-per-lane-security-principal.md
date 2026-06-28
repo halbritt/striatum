@@ -1,6 +1,6 @@
 # RFC 0168: Per-lane OS user as the lane security principal
 
-Status: accepted (D272 accepted_with_follow_up; P0 build v3 implemented pending review)
+Status: accepted (D272 accepted_with_follow_up; P0 build v3 accepted and integrated)
 Date: 2026-06-24
 author: proposer-claude-opus-4-8
 

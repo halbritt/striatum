@@ -12,14 +12,18 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
-## 2026-06-28 delta — RFC 0168 P0 build v3 implemented
+## 2026-06-28 delta — RFC 0168 P0 build v3 integrated; RFC 0143 Slice B unblocked
 
-RFC 0168 P0 build v3 is implemented in source pending review/verification.
-Runtime schema **47** adds `lane_uid_leases`; owner bundle **0023** reasserts
-its runtime authority. `supervise.start` can allocate a concrete OS user from
-`STRIATUM_LANE_UID_POOL`, writes the uid lease id/generation into supervisor
-metadata and lane env, and the active-supervisor control/attestation path fails
-closed if that generation no longer matches the active lease row.
+RFC 0168 P0 build v3 is reviewed, accepted, integrated, and pushed to `main`.
+The accepted Codex-only run was `run_aa4e1c988eddb78b255afa0e63a75e6c`, merged
+through `run.integrate` at `b7f48ab1`; follow-up test isolation landed at
+`42d9579c`, and current `main` includes later cleanup commits through
+`3ad69236`. Runtime schema **47** adds `lane_uid_leases`; owner bundle **0023**
+reasserts its runtime authority. `supervise.start` can allocate a concrete OS
+user from `STRIATUM_LANE_UID_POOL`, writes the uid lease id/generation into
+supervisor metadata and lane env, and the active-supervisor
+control/attestation/report path fails closed if that generation no longer
+matches the active lease row.
 
 This v3 pass closes the final v2 blockers: uid return is gated on S1-S3 cleanup
 plus complete P1-P5 proof (including kill failure fail-closed, provider/home
@@ -34,8 +38,11 @@ The build also moves MCP bearer config files under private
 credential/cache selectors that resolve inside the target repository while
 allowing ordinary non-credential lane env, grants created job
 worktrees/workspaces to the selected lane user, and surfaces stuck/quarantined
-uid leases through recovery and `doctor`. Next step: review + verifier receipts,
-then update RFC 0143 Slice B's blocker state after shipping.
+uid leases through recovery and `doctor`. Post-integration verification in the
+operator session passed `go test ./...`, `make check-docs`, `make lint`, and
+`make typecheck`; `doctor` is green with no active runs, blockers, or
+checkpoints. RFC 0143 Slice B (`CapabilityReseal`) is now unblocked and is the
+next roadmap item.
 
 ## 2026-06-28 delta — RFC 0171 accepted, first build slice shipped
 
@@ -387,12 +394,12 @@ Open GitHub tracker state rechecked on 2026-06-27 before the v2.39.0 release.
   anchored, #617 running-run barrier mismatch variant, #612 cross-user
   falsifier handoff publish wedge, #579 idle-stalled builder lane blocks
   downstream jobs, #576 lease-warmed lane never completes, #512 boot-epoch
-  rotation reseal blocked by shared-lane token ownership, #506 reviewer
+  rotation reseal Slice B now unblocked by RFC 0168, #506 reviewer
   over-rejection/blob-exhaust legibility.
 - **Reliability/security follow-ups:** #592 RFC 0142 P4 activation/verify run,
   #590 gate-compute timing, #589 structural-root precheck, #588 falsification
   recursion tripwire, #587 auto-bank/rescaffold clean revision cycles, #585 RFC
-  0143 Slice B blocked on per-lane security principal.
+  0143 Slice B build now unblocked by per-lane security principal.
 - **Feature/design backlog:** #619/#618 RFC 0170 P1 follow-ups, #611/#610/#609
   RFC 0167 P3/P2/P1, #578 schema-drift refuse-to-serve flip, #577 verified-stale
   rung, #572 RFC 0142 P5 rehearsal receipt, #569 provider-auth
