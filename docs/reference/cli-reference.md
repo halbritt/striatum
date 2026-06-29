@@ -431,13 +431,17 @@ migrations and roles, but it does not install, start, stop, or
 upgrade PostgreSQL. Bundled, embedded, and Dockerized Postgres
 distributions are deferred.
 
-`striatum doctor` is the daemon-backed health check. `doctor --verbose`
-includes structured `problem_records` alongside the stable string `problems`
-list, including RFC 0171 `generated_record_integrity` records for missing,
-corrupt, swapped, duplicate-source, or metadata-incomplete generated-record
-blobs. `doctor --lane-provider-auth codex [--run-id <id>] [--lane-id <id>]
-[--timeout 45s] --json` is an explicit provider-auth smoke for the lane
-identity; ordinary `doctor` and `doctor --verbose` never run provider CLIs.
+`striatum doctor` is the daemon-backed health check. Top-level `warnings`
+name non-red findings that still have operator work behind them; top-level
+`notices` preserve advisory historical/local-environment facts that do not
+name daemon recovery work. `doctor --verbose` includes structured
+`problem_records`, `warning_records`, and `notice_records` alongside the stable
+string lists, including RFC 0171 `generated_record_integrity` records for
+missing, corrupt, swapped, duplicate-source, or metadata-incomplete
+generated-record blobs. `doctor --lane-provider-auth codex [--run-id <id>]
+[--lane-id <id>] [--timeout 45s] --json` is an explicit provider-auth smoke
+for the lane identity; ordinary `doctor` and `doctor --verbose` never run
+provider CLIs.
 `striatum daemon status` is the local bootstrap summary for unit state and
 runtime paths; it folds in read-only doctor information when the daemon is
 reachable.

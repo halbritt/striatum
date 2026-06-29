@@ -361,6 +361,8 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	problems = append(problems, laneUIDProblems...)
 	problemRecords = append(problemRecords, laneUIDRecords...)
 
+	warnings, warningRecords, notices, noticeRecords := doctorSplitAdvisoryNotices(warnings, warningRecords)
+
 	result := map[string]any{
 		"ok":                           len(problems) == 0,
 		"schema_version":               schemaVersion,
@@ -371,6 +373,7 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		"supervisors":                  supervisorLiveness,
 		"problems":                     problems,
 		"warnings":                     warnings,
+		"notices":                      notices,
 		"codex":                        codexBlock,
 		"lane_sandbox":                 laneSandboxBlock,
 		"principals":                   principalsBlock,
@@ -400,8 +403,54 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	if verbose {
 		result["problem_records"] = problemRecords
 		result["warning_records"] = warningRecords
+		result["notice_records"] = noticeRecords
 	}
 	return result, nil
+}
+
+var doctorAdvisoryNoticeCodes = map[string]bool{
+	artifactLegacyUnverifiable:        true,
+	artifactSupersededOnDefaultBranch: true,
+	artifactAcknowledgedLoss:          true,
+	"barrier_debris_terminal_run":     true,
+	"codex_token_env_absent":          true,
+}
+
+func doctorSplitAdvisoryNotices(warnings []string, warningRecords []map[string]any) ([]string, []map[string]any, []string, []map[string]any) {
+	actionableWarnings := make([]string, 0, len(warnings))
+	notices := []string{}
+	for _, warning := range warnings {
+		if doctorAdvisoryNoticeCodes[doctorWarningCode(warning)] {
+			notices = append(notices, warning)
+			continue
+		}
+		actionableWarnings = append(actionableWarnings, warning)
+	}
+
+	actionableRecords := make([]map[string]any, 0, len(warningRecords))
+	noticeRecords := []map[string]any{}
+	for _, record := range warningRecords {
+		if doctorAdvisoryNoticeCodes[strings.TrimSpace(stringFrom(record, "check"))] {
+			noticeRecords = append(noticeRecords, record)
+			continue
+		}
+		actionableRecords = append(actionableRecords, record)
+	}
+	return actionableWarnings, actionableRecords, notices, noticeRecords
+}
+
+func doctorWarningCode(warning string) string {
+	code := strings.TrimSpace(warning)
+	if code == "" {
+		return ""
+	}
+	if prefix, _, ok := strings.Cut(code, ":"); ok {
+		code = prefix
+	}
+	if prefix, _, ok := strings.Cut(code, "."); ok {
+		code = prefix
+	}
+	return strings.TrimSpace(code)
 }
 
 func doctorIncompleteWarning(blockName string, block map[string]any) (string, map[string]any) {

@@ -1830,16 +1830,21 @@ human-checkpoint context when relevant, and next actions.
 
 ### Doctor And Verbose Records
 
-`doctor [--verbose]` returns a stable string `problems` list by default. With
-`--verbose` the payload also carries a `problem_records` list of structured
-records with stable `check` names (e.g. `active_job_without_active_lease`,
+`doctor [--verbose]` returns stable string `problems`, `warnings`, and
+`notices` lists by default. `problems` are ok-reddening integrity or liveness
+breaches. `warnings` are non-red findings that still name actionable operator
+work. `notices` are non-red advisory facts such as acknowledged historical
+provenance or local launch-environment hygiene that do not name daemon recovery
+work. With `--verbose` the payload also carries `problem_records`,
+`warning_records`, and `notice_records` lists of structured records with stable
+`check` names (e.g. `active_job_without_active_lease`,
 `stale_queue_message_claim`, `worktree_path_missing_on_disk`,
 `worktree_head_unreachable`, `job_completed_without_anchor`,
 `supervisor_pid_missing`, `supervisor_stdin_pipe_missing`), the affected `id`,
 and a small `context` map. The Go CLI passes `--verbose` through to daemon
-doctor; without it, the string list remains the stable compatibility surface.
-The string list is preserved verbatim so callers that already grep `problems`
-keep working.
+doctor; without it, the string lists remain the stable compatibility surface.
+The `problems` string list is preserved verbatim so callers that already grep
+`problems` keep working.
 
 ### Dashboard
 

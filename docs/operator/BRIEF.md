@@ -12,6 +12,24 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-29 delta - doctor warning channel bounded
+
+Live warning cleanup ran through daemon recovery rather than manual worktree or
+database edits: 58 terminal-run artifact debris rows were pruned, 62 terminal
+worktree rows were cleaned/quarantined, and the remaining completed unanchored
+worktrees were anchored through `worktree anchor`. The recoverable warning
+classes (`artifact_debris_terminal_run`, `worktree_debris_terminal_run`, and
+`worktree_unanchored_on_default_branch`) are cleared.
+
+The residual 52 findings are not daemon-recovery work: 20 legacy pre-blob
+artifact rows, 19 curated acknowledged losses, 10 superseded-on-default-branch
+artifact rows, two archived terminal fan-in barrier debris rows, and one local
+Codex env notice where the runtime token file exists but the current shell did
+not export `STRIATUM_MCP_TOKEN`. D276 now keeps those visible as top-level
+`notices`/`notice_records` and reserves top-level `warnings` for actionable
+operator work. The subsystem blocks still expose their local advisory counts for
+forensics.
+
 ## 2026-06-29 delta - doctor artifact problems cleared
 
 Live `doctor` was red after the docs information-architecture consolidation
