@@ -24,18 +24,20 @@ They are now added to the sha-bound
 `docs/operator/doctor-acknowledged-loss.json` baseline, so a future different
 hash at the same artifact id still reds.
 
-`doctor --verbose --json` at `2026-06-29T19:09:08Z` returned `ok=true`,
-`problems_count=0`; `artifact_anchor_integrity` checked all 608 artifact rows
-with `problem_count=0`. The remaining high-volume artifact/worktree findings
-are warnings from the D204/D205 legibility classes: terminal-run debris,
-legacy unverifiable records, superseded default-branch records, and curated
-acknowledged losses.
+`doctor --verbose --json` after installing and restarting system
+`striatumd.service` from `61b81220` returned `ok=true`, `problems_count=0`,
+and `warnings_count=192`. `generated_record_integrity` checked all 2,096
+indexed rows with `problem_count=0`, and `artifact_anchor_integrity` checked all
+608 artifact rows with `problem_count=0`. The remaining high-volume
+artifact/worktree findings are warnings from the D204/D205 legibility classes:
+terminal-run debris, legacy unverifiable records, superseded default-branch
+records, and curated acknowledged losses.
 
 The generated-record integrity check still performs full blob body verification;
 source now runs those per-record blob checks through a bounded worker pool so
-the 2,096 indexed generated-record rows can complete without weakening corrupt
-or missing blob detection. Install/restart the daemon from the commit carrying
-this change before treating the running daemon image as updated.
+the indexed generated-record table can complete without weakening corrupt or
+missing blob detection. The artifact-anchor subcheck remains bounded and now has
+enough headroom to finish the current 608-row baseline.
 
 RFC 0143 Slice B remains a blocked live run
 (`run_448c756fc1ca401172a2cf19c57baa2f`,
