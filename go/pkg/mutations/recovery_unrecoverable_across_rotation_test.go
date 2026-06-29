@@ -307,11 +307,13 @@ func TestRotationCapabilityResealRejectsForeignRunWorkLease(t *testing.T) {
 	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_work_lease_foreign_run", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
 		refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
 		seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
+		foreignRunID := ids.runID + "_foreign"
+		seedForeignRunForWorkLeaseRetarget(t, ctx, runner, ids, foreignRunID)
 		if err := runner.Exec(ctx, `
 			UPDATE striatumd.leases
 			   SET run_id = $3
 			 WHERE repository_id = $1 AND lease_id = $2`,
-			ids.repoID, ids.leaseID, ids.runID+"_foreign"); err != nil {
+			ids.repoID, ids.leaseID, foreignRunID); err != nil {
 			t.Fatalf("retarget work lease run: %v", err)
 		}
 	})
@@ -434,6 +436,22 @@ func seedLaneUIDResealAuthority(t *testing.T, ctx context.Context, runner db.Run
 		t.Fatalf("update supervisor metadata: %v", err)
 	}
 	return uidLeaseID
+}
+
+func seedForeignRunForWorkLeaseRetarget(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, foreignRunID string) {
+	t.Helper()
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.runs (
+		  repository_id, run_id, workflow_snapshot_id, repo_root, state,
+		  branch_name, branch_base, branch_confirmed_at, branch_confirmed_by, created_at
+		)
+		SELECT repository_id, $2, workflow_snapshot_id, repo_root, state,
+		       branch_name || '-foreign', branch_base, branch_confirmed_at, branch_confirmed_by, created_at
+		  FROM striatumd.runs
+		 WHERE repository_id = $1 AND run_id = $3`,
+		ids.repoID, foreignRunID, ids.runID); err != nil {
+		t.Fatalf("insert foreign run for work lease retarget: %v", err)
+	}
 }
 
 func refreshWorkLeaseForRotationReseal(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, ttl time.Duration) {
