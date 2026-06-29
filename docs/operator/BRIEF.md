@@ -4,13 +4,24 @@ artifact_kind: "operator_brief"
 brief_id: "brief_2026-06-27_v2.39.0-release"
 supersedes: "brief_2026-06-25_v2.38.0-release"
 scope_links: ["docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
-context_budget_lines: 420
+context_budget_lines: 470
 retrieval_priority: "high"
 status: "current"
 ---
 
 # Operator Brief
 author: operator-claude-opus-4-8-001
+
+## 2026-06-29 delta - RFC 0172 multi-campaign supervision drafted
+
+The `MULTI_CAMPAIGN_SUPERVISION` falsification gate completed and cleared only
+the RFC/product-decision next step. RFC 0172 is now proposed at
+`docs/rfcs/0172-proof-only-multi-campaign-supervision.md`; it preserves the two
+binding floors from the gate: provenance/status surfaces are stop pressure, not
+permission, and replay/done proof must be same-boundary fresh. No architecture
+is accepted and no daemon schema, RPC, UI, tracker backend, implementation
+ticket, workflow-launch authority, or build plan is authorized until the RFC is
+accepted and sequenced.
 
 ## 2026-06-28 delta - RFC 0143 Slice B build run blocked
 

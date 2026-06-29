@@ -1,6 +1,6 @@
 # RFC Roadmap — sequenced, themed, "do the next one"
 
-Living doc. Last triaged: 2026-06-28. Owner: operator. This orders every RFC
+Living doc. Last triaged: 2026-06-29. Owner: operator. This orders every RFC
 that is **proposed, accepted-but-unbuilt, or partially implemented** into a
 single execution sequence. Items not listed are `accepted / implemented`
 (shipped) or superseded/closed-out.
@@ -151,6 +151,7 @@ closeout.
 | 19 | **0115** | ✨ | Precise token-usage telemetry for supervised lanes | done | dashboard-ingest landing | #404 |
 | 20 | **0067** | ✨ | Optional git + PR integration | — | **product decision first** | — |
 | 21 | **0167** | ✨ | Operator identity & run attribution — leased handles over `principal_id` (RFC 0107): `striatum whose`, `status --mine` manifest, write-once run stamp, operator-named handoff files | **P0 built + verified + integrated** (D260/D263; owner bundle **0022**; 4-cycle design + code_change build; 10/10 live two-role pgtests) → **deploy pending quiescent window** (atomic: install new binary + `owner-ddl apply` + restart together — bundle 0022's `runs` REVOKE is coupled to the star-reader conversions). **P1–P3 sequenced** (custody log / honest bylines+handoff naming+chips+OSC title / lineage) | — | deploy + P1–P3 |
+| 22 | **0172** | ✨ | Proof-only multi-campaign supervision — campaign arcs, authority receipts, fresh-context replay, deferral quarantine, contradiction reports, and read-only portfolio status for supervising many RFC arcs without treating status as permission | proposed; no build authority until accepted and sequenced | reliability spine / RFC acceptance | — |
 
 ---
 
