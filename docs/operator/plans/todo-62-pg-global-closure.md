@@ -30,9 +30,9 @@ posture and records that no safe implementation gap is present.
 - [`docs/ROADMAP.md`](../../reference/roadmap.md)
 - [`RFC 0069`](../../rfcs/0069-pg-only-daemon-global-surfaces.md)
 - [`RFC 0069 plan`](rfc-0069-pg-only-daemon-global-surfaces.md)
-- [`TODO 61-62 final summary`](../artifacts/todo-61-62-cleanup/final/SUMMARY.md)
-- [`TODO 61-62 revision review`](../artifacts/todo-61-62-cleanup-revision/review/REVIEW.md)
-- [`docs/operator/workflows/todo-62-pg-global-closure/workflow.json`](../workflows/todo-62-pg-global-closure/workflow.json)
+- Historical generated-record source path: `docs/operator/artifacts/todo-61-62-cleanup/final/SUMMARY.md`
+- Historical generated-record source path: `docs/operator/artifacts/todo-61-62-cleanup-revision/review/REVIEW.md`
+- [`docs/operator/workflows/todo-62-pg-global-closure.json`](../workflows/todo-62-pg-global-closure.json)
 
 ## Closure Checks
 
@@ -48,7 +48,7 @@ posture and records that no safe implementation gap is present.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/todo-62-pg-global-closure/workflow.json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/todo-62-pg-global-closure.json
 ```
 
 The workflow is intentionally narrow: it verifies current code and tests,

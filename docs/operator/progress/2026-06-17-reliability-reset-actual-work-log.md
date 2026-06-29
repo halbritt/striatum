@@ -20,7 +20,7 @@ and verified. It is not a plan, synthesis, or next-agent handoff.
 
    Changed:
    - `docs/operator/workflows/striatum-reliability-reset-2026-06-16/RUN_ON_PROXIMAL.md`
-   - `docs/operator/workflows/striatum-reliability-reset-2026-06-16/workflow.json`
+   - `docs/operator/workflows/striatum-reliability-reset-2026-06-16.json`
 
    Actual effect:
    - Replaced the invalid `striatum codex ...` lane command with direct `codex`

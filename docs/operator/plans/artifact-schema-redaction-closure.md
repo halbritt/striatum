@@ -27,12 +27,12 @@ per-RFC work.
 
 - [`docs/TODO.md`](../../reference/todo.md), items 6 and 7.
 - [`docs/SPEC.md`](../../reference/spec.md), Artifacts and Artifact Front Matter Schemas.
-- [`src/striatum/artifact_contracts.py`](../../../src/striatum/artifact_contracts.py).
-- [`src/striatum/evidence_presentation.py`](../../../src/striatum/evidence_presentation.py).
-- [`src/striatum/corpus/redaction.py`](../../../src/striatum/corpus/redaction.py).
-- [`tests/test_artifact_schemas.py`](../../../tests/test_artifact_schemas.py).
-- [`tests/test_corpus_redaction.py`](../../../tests/test_corpus_redaction.py).
-- [`docs/operator/workflows/artifact-schema-redaction-closure/workflow.json`](../workflows/artifact-schema-redaction-closure/workflow.json).
+- Retired Python source path: `src/striatum/artifact_contracts.py`.
+- Retired Python source path: `src/striatum/evidence_presentation.py`.
+- Retired Python source path: `src/striatum/corpus/redaction.py`.
+- Retired Python test path: `tests/test_artifact_schemas.py`.
+- Retired Python test path: `tests/test_corpus_redaction.py`.
+- [`docs/operator/workflows/artifact-schema-redaction-closure.json`](../workflows/artifact-schema-redaction-closure.json).
 
 ## Workstreams
 
@@ -48,7 +48,7 @@ per-RFC work.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/artifact-schema-redaction-closure/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/artifact-schema-redaction-closure.json
 ```
 
 Focused verification:

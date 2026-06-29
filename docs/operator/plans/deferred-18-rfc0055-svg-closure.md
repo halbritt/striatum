@@ -43,7 +43,7 @@ optional.
 ## Validation
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-18-rfc0055-svg-closure/workflow.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-18-rfc0055-svg-closure.json --json
 PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_doc_links.py
 PYTHONPATH=src .venv/bin/python - <<'PY'
 from pathlib import Path

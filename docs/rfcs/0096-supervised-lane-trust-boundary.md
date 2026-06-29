@@ -26,7 +26,7 @@ Context:
   **D009/D010** (agents never touch the store directly; they act only through
   CLI/MCP that enforce leases, transitions, and artifact validation),
   **D028/D151** (no transcript capture; PTY output is ephemeral scratch).
-- [RFC 0033](0033-daemon-owned-postgres.md) / [RFC 0043](0043-native-postgres-repository-adoption.md)
+- [RFC 0033](0033-storage-substrate-rewrite-for-daemon-v2.md) / [RFC 0043](0043-postgres-as-sole-substrate-and-daemon-required-runtime.md)
   — the daemon-owned PG model + the runtime/owner role split
   (`project_daemon_migration_ownership`: tables owned by `halbritt`, daemon
   connects as `striatumd_rw`).

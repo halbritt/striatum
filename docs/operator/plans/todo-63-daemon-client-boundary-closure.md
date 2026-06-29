@@ -42,13 +42,13 @@ PostgreSQL-native operator-composite surface.
 The bounded workflow scaffold is:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/todo-63-daemon-client-boundary-closure/workflow.json
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/todo-63-daemon-client-boundary-closure.json
 ```
 
 If a later operator wants to rerun the closure through live Striatum state:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/todo-63-daemon-client-boundary-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/todo-63-daemon-client-boundary-closure.json --json
 PYTHONPATH=src python3 -m striatum.cli run start --run-id <run_id> --json
 ```
 

@@ -1,7 +1,7 @@
 # RFC 0050 — HTTP/SSE MCP fixture
 
 Striatum dogfood fixture for implementing
-[RFC 0050](../../docs/rfcs/0050-go-daemon-http-sse-mcp.md): native
+[RFC 0130](../../docs/rfcs/0130-go-daemon-http-sse-mcp.md): native
 HTTP/SSE MCP server in the Go `striatumd` daemon.
 
 Current source note: RFC 0050 Phase A-C and the follow-on agentloop/Python-MCP

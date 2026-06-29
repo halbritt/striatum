@@ -28,7 +28,7 @@ Implement the accepted final cutover design:
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/rfc-0050-0075-final-cutover-implementation/workflow.json`.
+`docs/operator/workflows/rfc-0050-0075-final-cutover-implementation.json`.
 
 ## Outcome
 

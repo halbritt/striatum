@@ -31,7 +31,7 @@ retired, or preserved solely as historical provenance.
 
 - `docs/operator/BRIEF.md`
 - `docs/operator/plans/rfc-0078-go-only-runtime-and-python-removal.md`
-- `docs/operator/workflows/rfc-0078-go-only-runtime-and-python-removal/workflow.json`
+- `docs/operator/workflows/rfc-0078-go-only-runtime-and-python-removal.json`
 - `docs/rfcs/0078-go-only-runtime-and-python-removal.md`
 - `docs/rfcs/0068-go-production-daemon-port.md`
 - `docs/rfcs/0070-daemon-client-service-boundary.md`
@@ -46,7 +46,7 @@ retired, or preserved solely as historical provenance.
 Run or validate the workflow here:
 
 ```bash
-striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/workflow.json
+striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion.json
 ```
 
 The workflow declares high parallelism (`max_active_jobs: 12`) but keeps the

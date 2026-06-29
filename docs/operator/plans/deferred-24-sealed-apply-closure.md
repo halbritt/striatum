@@ -55,9 +55,9 @@ Final artifact:
 ## Validation
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-24-sealed-apply-closure/workflow.json --json
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow plan docs/operator/workflows/deferred-24-sealed-apply-closure/workflow.json --json
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow lint docs/operator/workflows/deferred-24-sealed-apply-closure/workflow.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-24-sealed-apply-closure.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow plan docs/operator/workflows/deferred-24-sealed-apply-closure.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow lint docs/operator/workflows/deferred-24-sealed-apply-closure.json --json
 PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_mcp_mutation_capabilities.py::test_daemon_mcp_tools_list_filters_by_capability tests/test_mcp_mutation_capabilities.py::test_daemon_mcp_retired_apply_reviewed_patch_is_default_denied_and_audited tests/test_mcp_capability_scope_e2e.py::test_retired_apply_reviewed_patch_denied_as_unknown_and_audited tests/architecture/test_authority_guardrails.py::test_authority_matrix_covers_active_registry_methods tests/architecture/test_authority_guardrails.py::test_registry_methods_have_explicit_authority_path
 go test ./pkg/rpc -run 'TestRegistryMatchesDaemonMethodsContract|TestMethodsETagMatchesDaemonMethodsContract|TestHelloUsesDynamicSealedApplyStatus'
 go test ./pkg/mcp -run 'TestHTTPHandlerToolsCallUnknownDaemonMethodReturnsMCPError|TestHTTPHandlerToolsListUsesBearerTokenAndHidesUnauthorized'

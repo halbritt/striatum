@@ -39,8 +39,8 @@ The workflow is artifact-only. It maps the current Phase A surface, classifies
 Phase B readiness, and records focused validation evidence.
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-23-rfc0074-phase-b-closure/workflow.json --json
-PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-23-rfc0074-phase-b-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-23-rfc0074-phase-b-closure.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-23-rfc0074-phase-b-closure.json --json
 ```
 
 ## Result

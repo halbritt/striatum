@@ -3,10 +3,14 @@
 Status: proposed
 Date: 2026-06-29
 Context:
-[MULTI_CAMPAIGN_SUPERVISION Level-0 scope](../operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_SCOPE_PRD.md),
-[Level-1 synthesis](../operator/artifacts/multi-campaign-supervision-level1/IDEATION_SYNTHESIS.md),
-[falsification seed](../operator/workflows/multi-campaign-supervision-falsification/SEED.md),
-[falsification-cleared recommendation](../operator/artifacts/multi-campaign-supervision-falsification/commit/proposal/DESIGN_RECOMMENDATION.md),
+`docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_SCOPE_PRD.md`
+(Level-0 scope),
+`docs/operator/artifacts/multi-campaign-supervision-level1/IDEATION_SYNTHESIS.md`
+(Level-1 synthesis),
+[`docs/operator/workflows/multi-campaign-supervision-falsification.json`](../operator/workflows/multi-campaign-supervision-falsification.json)
+(falsification workflow, whose context names `SEED.md`),
+`docs/operator/artifacts/multi-campaign-supervision-falsification/commit/proposal/DESIGN_RECOMMENDATION.md`
+(falsification-cleared recommendation),
 `artifact:art_663da6c7b01a3150e5a17fcaf6758c7d`
 (falsification final summary), and
 `artifact:art_31c6e86dd1f8736942f2db3c5bd30617`

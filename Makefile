@@ -6,7 +6,7 @@ VERSION := $(shell tr -d '[:space:]' < "$(MAKEFILE_DIR)/VERSION")
 PREFIX ?= $(HOME)/.local
 DIST_DIR ?= $(MAKEFILE_DIR)/dist
 
-.PHONY: install uninstall build lint typecheck test smoke check installed-cli-check lane-isolation-check lane-isolation-check-ci release-check check-docs \
+.PHONY: install uninstall build lint typecheck test smoke check installed-cli-check lane-isolation-check lane-isolation-check-ci release-check check-docs check-docs-audit \
 	go-build go-test go-vet go-release release-archives check-release-archives package-smoke
 
 install: go-build
@@ -47,6 +47,11 @@ check: lint test
 # backlog must be burned down before this can join `check`.
 check-docs:
 	python3 scripts/check_docs.py
+
+# Audit ignored historical/frozen Markdown sources without making their backlog
+# part of the normal docs gate yet.
+check-docs-audit:
+	python3 scripts/check_docs.py --include-ignored
 
 installed-cli-check:
 	STRIATUM_P3_INSTALLED_CLI=1 $(MAKE) -C "$(GO_DIR)" installed-cli-check

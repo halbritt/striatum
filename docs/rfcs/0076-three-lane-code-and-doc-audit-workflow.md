@@ -18,9 +18,10 @@ Context:
 ## Current Status
 
 The first runnable RFC 0076 operator workflow has completed:
-[`docs/operator/workflows/rfc-0076-code-doc-audit/workflow.json`](../operator/workflows/rfc-0076-code-doc-audit/workflow.json).
-It produced the three lane findings, synthesis, and remediation plan under
-[`docs/operator/artifacts/rfc-0076-code-doc-audit/`](../operator/artifacts/rfc-0076-code-doc-audit/).
+[`docs/operator/workflows/rfc-0076-code-doc-audit.json`](../operator/workflows/rfc-0076-code-doc-audit.json).
+It produced the three lane findings, synthesis, and remediation plan under the
+historical generated-record source path
+`docs/operator/artifacts/rfc-0076-code-doc-audit/`.
 
 One Claude lane required operator recovery during that run. Treat that as
 run evidence, not as a change to the workflow shape's authority model: the

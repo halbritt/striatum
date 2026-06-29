@@ -39,6 +39,18 @@ class CheckDocsTest(unittest.TestCase):
 
         self.assertEqual(errors, ["docs/source.md:2: broken link -> missing.md"])
 
+    def test_include_ignored_audits_skipped_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write(root, ".check-docs-ignore", "docs/frozen/\n")
+            self.write(root, "docs/frozen/source.md", "[missing](missing.md)\n")
+
+            default_errors = check_docs.check_links(root)
+            audit_errors = check_docs.check_links(root, include_ignored=True)
+
+        self.assertEqual(default_errors, [])
+        self.assertEqual(audit_errors, ["docs/frozen/source.md:1: broken link -> missing.md"])
+
     def test_striatum_uri_links_resolve_through_explicit_cached_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

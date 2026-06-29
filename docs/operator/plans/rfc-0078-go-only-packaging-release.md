@@ -27,10 +27,10 @@ and PyPI retirement.
 ## Inputs
 
 - [`RFC 0078`](../../rfcs/0078-go-only-runtime-and-python-removal.md)
-- [`RFC 0078 prior packaging handoff`](../artifacts/rfc-0078-go-only-runtime-and-python-removal/packaging/HANDOFF.md)
-- [`RFC 0078 cutover summary`](../artifacts/rfc-0078-go-only-runtime-and-python-removal/final/SUMMARY.md)
-- [`RFC 0078 cutover ledger`](../artifacts/rfc-0078-go-only-runtime-and-python-removal/inventory/CUTOVER_LEDGER.md)
-- [`docs/operator/workflows/rfc-0078-go-only-packaging-release/workflow.json`](../workflows/rfc-0078-go-only-packaging-release/workflow.json)
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0078-go-only-runtime-and-python-removal/packaging/HANDOFF.md`
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0078-go-only-runtime-and-python-removal/final/SUMMARY.md`
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0078-go-only-runtime-and-python-removal/inventory/CUTOVER_LEDGER.md`
+- [`docs/operator/workflows/rfc-0078-go-only-packaging-release.json`](../workflows/rfc-0078-go-only-packaging-release.json)
 
 ## Workstreams
 
@@ -73,7 +73,7 @@ The workflow is intentionally high parallelism:
 Run validation before preparing the workflow:
 
 ```bash
-striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-go-only-packaging-release/workflow.json
+striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-go-only-packaging-release.json
 ```
 
 The first implementation pass should prefer additive Go packaging scaffolds

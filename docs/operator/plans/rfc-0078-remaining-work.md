@@ -202,6 +202,6 @@ The six earlier per-surface scaffolds remain as reference for the gates above:
 - `docs/operator/workflows/rfc-0078-go-only-packaging-release/`
 - `docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/`
 
-The umbrella `docs/operator/workflows/rfc-0078-remaining-work/workflow.json`
+The umbrella `docs/operator/workflows/rfc-0078-remaining-work.json`
 drove their scaffolding. The Gate A/B/C decided-gap work is new and should be
 scaffolded as executable workflows (or driven directly) before Gate D begins.

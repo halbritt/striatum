@@ -8,7 +8,7 @@ Context: RFC 0033 (PostgreSQL as sole substrate; §3 append-only audit invariant
 ## Implementation spec (cycle-2 + revision deltas, accepted)
 
 > **The authoritative implementation spec is**
-> [`docs/operator/artifacts/rfc-0110-pg-auth/spec_publication/synthesis/SPEC_PUBLICATION.md`](../operator/artifacts/rfc-0110-pg-auth/spec_publication/synthesis/SPEC_PUBLICATION.md),
+> `docs/operator/artifacts/rfc-0110-pg-auth/spec_publication/synthesis/SPEC_PUBLICATION.md`,
 > produced by the 3-model adjudicated-constraint-extraction design panel
 > (`run_8e14cb48`, accepted via operator decision `dec_b95396ff`). It carries
 > the normative constraint→gate→lands matrix (§14) and the gate-first release

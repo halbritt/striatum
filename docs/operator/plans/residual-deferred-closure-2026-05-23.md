@@ -56,5 +56,5 @@ future work that needs a new accepted RFC.
 ## Validation
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/residual-deferred-closure-2026-05-23/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/residual-deferred-closure-2026-05-23.json
 ```

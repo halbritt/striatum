@@ -39,7 +39,7 @@ belongs entirely in the external Engram repository.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/deferred-27-engram-side-closure/workflow.json`.
+`docs/operator/workflows/deferred-27-engram-side-closure.json`.
 
 The workflow has one bounded synthesis job that classifies the remaining
 Engram-side RFC 0044 Phase 1 implementation surface and records validation

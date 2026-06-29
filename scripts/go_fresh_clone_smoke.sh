@@ -34,7 +34,7 @@ release_root="$(smoke_extract_archive "$archive" "$TMP/release")"
   "$release_root/bin/striatum" workflow validate \
     --allow-same-model-pairing \
     --json \
-    docs/operator/workflows/rfc-0078-go-only-packaging-release/workflow.json >/dev/null
+    docs/operator/workflows/rfc-0078-go-only-packaging-release.json >/dev/null
 )
 "$release_root/bin/striatumd" --describe | grep -F "core=go" >/dev/null
 smoke_note_postgres_skip

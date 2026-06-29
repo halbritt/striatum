@@ -37,11 +37,11 @@ retire CLI workflow-control verbs before MCP/UI parity is covered.
 - [`docs/ROADMAP.md`](../../reference/roadmap.md)
 - [`docs/TODO.md`](../../reference/todo.md)
 - [`D124-D129`](../../decisions/decision-log.md)
-- [`RFC 0050 MCP`](../../rfcs/0050-go-daemon-http-sse-mcp.md)
+- [`RFC 0130 MCP`](../../rfcs/0130-go-daemon-http-sse-mcp.md)
 - [`RFC 0074`](../../rfcs/0074-workflow-shape-and-adversary-pack-catalog.md)
 - [`RFC 0075`](../../rfcs/0075-tmux-observable-mcp-agent-sessions.md)
 - [`RFC 0077`](../../rfcs/0077-mcp-activity-liveness-deadlines.md)
-- [`docs/operator/workflows/active-runway-1-5/workflow.json`](../workflows/active-runway-1-5/workflow.json)
+- [`docs/operator/workflows/active-runway-1-5.json`](../workflows/active-runway-1-5.json)
 
 ## Ordered Phases
 
@@ -58,13 +58,13 @@ retire CLI workflow-control verbs before MCP/UI parity is covered.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/active-runway-1-5/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/active-runway-1-5.json
 ```
 
 Prepare and start it through the daemon-backed runner:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/active-runway-1-5/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/active-runway-1-5.json --json
 PYTHONPATH=src python3 -m striatum.cli run start --run-id <run_id> --json
 ```
 

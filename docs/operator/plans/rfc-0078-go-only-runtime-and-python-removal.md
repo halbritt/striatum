@@ -13,7 +13,7 @@ Python is no longer an active Striatum product surface.
 ## Execution Shape
 
 The scaffolded workflow is
-`docs/operator/workflows/rfc-0078-go-only-runtime-and-python-removal/workflow.json`.
+`docs/operator/workflows/rfc-0078-go-only-runtime-and-python-removal.json`.
 It sets `parallelism.max_active_jobs` to `20`, matching the highest existing
 operator workflow concurrency in this repository. Current Codex sub-agent
 capacity accepted six live agents; those are assigned to the first six

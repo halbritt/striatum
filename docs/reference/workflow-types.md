@@ -108,7 +108,7 @@ it. Prefer explicit `lane_id` values for repeatable runs.
 | Author and reviewer should be separate model sessions | Separate author/reviewer lanes or fresh reviewer jobs | Adapt `examples/docs-review-flow/` |
 | You want productive disagreement | Multiple reviewer lanes, often different model families | `examples/rfc-ledger-cleanup/` |
 | You need a long-lived agent process | `process` lane plus `striatum supervise` and a compatible wrapper | `examples/harness-profiles/` |
-| You need isolated repo writes | Lane with `worktree_isolation: "per_job"` | See `docs/WRITING_WORKFLOWS.md` |
+| You need isolated repo writes | Lane with `worktree_isolation: "per_job"` | See `docs/how-to/writing-workflows.md` |
 | You need offline/local-only constraints | Lane `constraints` plus `required_enforcement` where needed | `examples/adapter-unavailable-flow/` |
 | You want tool-family guidance surfaced in packets | Lane with `harness_profile_id` | `examples/harness-profiles/` |
 
@@ -624,12 +624,12 @@ Good fits:
 - finding gaps between daemon behavior, docs, examples, and TODOs
 
 Start from
-`docs/operator/workflows/rfc-0076-code-doc-audit/workflow.json` or
+`docs/operator/workflows/rfc-0076-code-doc-audit.json` or
 adapt the accepted shape described in RFC 0076 until a generator/catalog
 entry lands. The first runnable operator workflow completed on
 2026-05-22 with one operator-recovered Claude lane and produced
 follow-up work in
-`docs/operator/artifacts/rfc-0076-code-doc-audit/REMEDIATION_PLAN.md`.
+`docs/operator/plans/rfc-0076-audit-remediation.md`.
 
 The audit should produce evidence-backed findings and a remediation
 plan, not silently fix every issue it discovers. Tmux panes or terminal
@@ -692,7 +692,7 @@ layout or prompt wording is usually a template variant, not a new type.
 A new workflow type should update:
 
 - this guide, with a graph and starter recommendation
-- `docs/WRITING_WORKFLOWS.md`, if the authoring advice changes
-- `docs/UBIQUITOUS_LANGUAGE.md`, if it introduces a new term
-- `docs/TODO.md` or an RFC, if it implies new product surface
+- `docs/how-to/writing-workflows.md`, if the authoring advice changes
+- `docs/reference/ubiquitous-language.md`, if it introduces a new term
+- `docs/reference/todo.md` or an RFC, if it implies new product surface
 - `examples/`, if there is a runnable generic fixture

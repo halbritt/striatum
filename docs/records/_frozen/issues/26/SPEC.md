@@ -21,7 +21,7 @@ This is the bug RFC 0073 fixes. The fix lands the blob block in the same `daemon
 
 ## Acceptance / Definition of done
 
-Pinned in [RFC 0073 § Acceptance](../../rfcs/0073-daemon-doctor-blob-parity.md#acceptance):
+Pinned in [RFC 0073 § Acceptance](../../../../rfcs/0073-daemon-doctor-blob-parity.md#acceptance):
 
 1. `striatum daemon doctor --json` on a daemon with `STRIATUM_BLOB_ENDPOINT` set returns `data.blob = {"configured": true, "reachable": true, ...}` (or the unreachable variant).
 2. The same command on a daemon without `STRIATUM_BLOB_ENDPOINT` set returns `data.blob = {"configured": false}`.

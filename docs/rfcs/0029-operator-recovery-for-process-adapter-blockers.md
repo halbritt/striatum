@@ -147,7 +147,7 @@ Behavior:
    `process_lost_with_outputs_missing`).
 
 2. Re-run `validate_outputs(conn, job=job)`
-   ([`process_completion.py:73`](../../src/striatum/process_completion.py)).
+   (retired Python path `src/striatum/process_completion.py:73`).
 
 3. **For evidence-grounded blockers** (`process_outputs_missing`,
    `process_review_verdict_missing`, `process_lost_with_outputs_missing`):
@@ -200,7 +200,7 @@ Behavior:
 ### 2. Update the diagnostic envelope's `recovery_commands`
 
 `build_recovery_commands` in
-[`process_completion.py:145`](../../src/striatum/process_completion.py)
+retired Python path `src/striatum/process_completion.py:145`
 currently emits a `recovery requeue-stale` line that does not work for
 repo-write jobs. Replace the trailing two lines for the
 process-adapter blocker family with:
@@ -217,7 +217,7 @@ blocker is in the lost family or when the underlying
 ### 3. Audit the publish/complete asymmetry
 
 `publish_artifact` accepts a blocked job's active lease
-([`artifacts.py:387`](../../src/striatum/artifacts.py)). `complete_job`
+(retired Python path `src/striatum/artifacts.py:387`). `complete_job`
 does not (`db.py:1444-1445` (retired)). That asymmetry
 is what made the Gemini race possible: the agent's late artifact landed
 cleanly, but the agent could not call `complete` to close the job out

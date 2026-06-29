@@ -10,8 +10,8 @@ Context:
 [`RFC 0074`](0074-workflow-shape-and-adversary-pack-catalog.md) (`implementation_panel` shape),
 [`RFC 0081`](0081-conversation-trajectories.md) (`dialogue` trajectory),
 [`RFC 0082`](0082-interrogation-sessions.md) (interrogation sessions, `interrogable`, `awaiting_interrogation`),
-[`docs/operator/workflows/interrogating-panel-2026-05-25/PATTERN_SPEC.md`](../operator/workflows/interrogating-panel-2026-05-25/PATTERN_SPEC.md) (ground-truth pattern spec),
-[`docs/WORKFLOW_TYPES.md` § "Review By Interrogation"](../reference/workflow-types.md),
+historical generated-record source path `docs/operator/workflows/interrogating-panel-2026-05-25/PATTERN_SPEC.md` (ground-truth pattern spec),
+[`docs/reference/workflow-types.md` § "Review By Interrogation"](../reference/workflow-types.md),
 [`go/pkg/workflowtemplates/catalog.json`](../../go/pkg/workflowtemplates/catalog.json) (`iterated_interrogating_panel` catalog entry),
 [`examples/three-lane-design-build-review/workflow.json`](../../examples/three-lane-design-build-review/workflow.json),
 [`examples/implementation-panel-flow/workflow.json`](../../examples/implementation-panel-flow/workflow.json).
@@ -223,7 +223,7 @@ or validator rule is required.
 
 The two `docs/DECISION_LOG.md` entries this RFC proposes (one accepting the
 pattern, one accepting the conditional `--print` deprecation) are staged in
-[`DECISION_LOG_SNIPPET.md`](../operator/workflows/interrogating-panel-2026-05-25/DECISION_LOG_SNIPPET.md)
+`docs/operator/workflows/interrogating-panel-2026-05-25/DECISION_LOG_SNIPPET.md`
 for the operator to merge, avoiding a concurrent-write conflict on the log.
 
 ## Open Questions

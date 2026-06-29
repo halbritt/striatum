@@ -31,7 +31,7 @@ commands as explicit local exceptions.
 ## Execution Shape
 
 The workflow lives at
-`docs/operator/workflows/rfc-0078-go-cli-rpc-router/workflow.json`.
+`docs/operator/workflows/rfc-0078-go-cli-rpc-router.json`.
 It declares `parallelism.max_active_jobs` as `20` to match the high-parallel
 RFC 0078 operator pattern. The actual first wave is split into disjoint
 implementation lanes after a contract inventory:

@@ -208,9 +208,10 @@ def check_links(
     root: Path,
     striatum_index: frozenset[str] | None = None,
     striatum_source: str | None = None,
+    include_ignored: bool = False,
 ) -> list[str]:
     errors: list[str] = []
-    skip = ignore_prefixes(root)
+    skip = () if include_ignored else ignore_prefixes(root)
     source = striatum_source or "no Striatum URI index (--striatum-uri-index not provided)"
     for md in tracked_markdown(root, skip):
         try:
@@ -297,6 +298,11 @@ def main(argv: list[str] | None = None) -> int:
         "--hygiene-base-ref",
         help="Optional base ref for rejecting newly tracked generated operator bodies.",
     )
+    parser.add_argument(
+        "--include-ignored",
+        action="store_true",
+        help=f"Audit links in sources normally skipped by {IGNORE_FILE}.",
+    )
     args = parser.parse_args(argv)
     root = args.root.resolve()
 
@@ -312,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             errors.append(str(exc))
 
-    errors.extend(check_links(root, striatum_index, striatum_source))
+    errors.extend(check_links(root, striatum_index, striatum_source, args.include_ignored))
     errors.extend(check_version(root))
     if args.hygiene_base_ref:
         errors.extend(check_generated_operator_body_hygiene(root, args.hygiene_base_ref))

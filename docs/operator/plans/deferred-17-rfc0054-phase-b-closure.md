@@ -36,7 +36,7 @@ follow-up explicitly.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/deferred-17-rfc0054-phase-b-closure/workflow.json`.
+`docs/operator/workflows/deferred-17-rfc0054-phase-b-closure.json`.
 
 The workflow has one bounded synthesis job. It may write only the closure
 artifact and, if the classification finds a truly generic target-repository

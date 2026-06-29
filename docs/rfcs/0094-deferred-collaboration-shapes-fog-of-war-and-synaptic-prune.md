@@ -71,7 +71,7 @@ Context:
   multi-phase gating, and pack-catalog surfaces. `fog_of_war_review` needs the
   generator to emit a **work-packet *type* sequencing** gate it cannot express
   today.
-- [RFC 0064](0064-review-diversity-and-override.md) — reviewer-diversity rules;
+- [RFC 0064](0064-review-diversity-enforcement.md) — reviewer-diversity rules;
   the second-adjudicator mechanism extends them.
 - [RFC 0087](0087-divergent-ideation-workflow-shape.md) — the fresh-session
   divergence sibling. `fog_of_war_review` is its mirror: deliberately *partial*

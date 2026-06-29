@@ -5,7 +5,7 @@
 **Current-context note:** This is an external Engram follow-up handoff.
 Striatum corpus export was introduced in v1.35.0; see the current
 CHANGELOG and RFC 0057 before treating the bundle contract as final.
-**Striatum reference:** [`docs/rfcs/0044-engram-phase-1-implementation-spec.md`](docs/rfcs/0044-engram-phase-1-implementation-spec.md) (in this repo) — read this whole file first
+**Striatum reference:** [`docs/rfcs/0044-engram-phase-1-implementation-spec.md`](../rfcs/0044-engram-phase-1-implementation-spec.md) (in this repo) — read this whole file first
 **Constraints:** Engram's `AGENTS.md` / `CLAUDE.md` is authoritative for changes in Engram's repo. Augmentation-not-dependency: Engram must keep working without Striatum, and Striatum must keep working without Engram.
 
 ## Context

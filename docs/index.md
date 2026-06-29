@@ -1,10 +1,8 @@
 # Documentation Index
 
-Every Markdown document under `docs/`, with a one-line summary.
-Large multi-file directories — per-run dogfood artifacts under
-`docs/dogfood/<id>/`, per-campaign scaffolds under
-`docs/campaigns/<name>/`, and the `docs/research/` corpus — are
-listed collectively via an aggregate directory row, not file by file.
+Reader-facing Markdown documents under `docs/`, plus aggregate rows for large
+historical, generated, or scaffold directories. Per-run/generated directories
+are listed by directory instead of file by file.
 
 ## Onboarding and how-tos
 
@@ -24,6 +22,9 @@ listed collectively via an aggregate directory row, not file by file.
 | [postgres-transition.md](how-to/postgres-transition.md) | Operator | The D094 / RFC 0043 PostgreSQL runbook: prerequisites, role setup, `daemon migrate-db`, `daemon owner-ddl apply`, daemon startup, `striatum repo add`, PostgreSQL verification, and exit codes 11 / 12. |
 | [blob-transition.md](explanation/blob-transition.md) | Operator | The RFC 0072 blob-storage runbook: configuring `striatumd` against an S3-compatible service, adopting repos with `--apply-blob-creation`, bulk-migrating `docs/dogfood/` into blob storage, and verifying the round trip. |
 | [daemon-runbook.md](how-to/daemon-runbook.md) | Operator | The RFC 0079 daemon operability runbook: `striatum daemon install/uninstall/status`, the portable systemd user unit, runtime layout (`daemon-go.sock`, `client-token`, `mcp-http-endpoint`, pidfile), `daemon.toml` DSN, `journalctl --user -u striatumd`, and troubleshooting. |
+| [daemonize-run-drive.md](how-to/daemonize-run-drive.md) | Operator | Run-drive daemonization notes for long-lived operator execution and restart behavior. |
+| [frontend-development.md](how-to/frontend-development.md) | Contributor | Local web UI development workflow, build/test commands, and generated asset expectations. |
+| [lane-sandbox.md](how-to/lane-sandbox.md) | Operator / maintainer | Lane sandbox setup and constraints for supervised lanes. |
 | [operator/INDEX.md](operator/INDEX.md) | Operator | RFC 0058 current-state surface: read `operator/BRIEF.md` first; it owns the live frontier and points to bounded plan links. Treat older roadmap/todo issue lists as secondary until they are refreshed. |
 
 ## Specifications and decisions
@@ -42,6 +43,7 @@ listed collectively via an aggregate directory row, not file by file.
 | [releasing.md](how-to/releasing.md) | Maintainer | Versioning policy and release cadence: when to bump major/minor/patch, the pre-release checklist, and changelog discipline. |
 | [command-authority-matrix.md](reference/command-authority-matrix.md) | Maintainer | Inventory of CLI/RPC authority paths across Go daemon RPC route translations, capability scopes, and local PostgreSQL authority guardrails. |
 | [daemon-method-tables.md](reference/daemon-method-tables.md) | Maintainer | Generated daemon method registry and CLI route translation reference, sourced from `contracts/daemon_methods.json` and guarded by Go daemon handler coverage and contract registry tests. |
+| [doc-convention.md](reference/doc-convention.md) | Maintainer | Documentation placement convention for curated docs, write-once records, generated bodies, and ignored scratch. |
 | [architecture/REMEDIATION_SYNTHESIS_2026-05-17.md](architecture/REMEDIATION_SYNTHESIS_2026-05-17.md) | Maintainer | Synthesis of the Codex remediation plans: D107, RFC 0068-0071, Go daemon port sequencing, PostgreSQL-only cleanup, Gemini/Antigravity decommissioning, and dogfood-065 execution plan. |
 
 ## Background and reference
@@ -102,9 +104,10 @@ listed collectively via an aggregate directory row, not file by file.
 
 | Path | Summary |
 |---|---|
-| [dogfood/](dogfood/) | Per-run scaffolds (`<id>/workflow.json` plus `prompts/`, `roles/`, `research/`, `review/`, `decisions/`, `BUILD_HANDOFF.md`, `RUN_SUMMARY.md`). |
-| [dogfood/HISTORICAL.md](dogfood/HISTORICAL.md) | Distinguishes the historical incubation runs (001–013) from the current cadence (014+) and lists what each recent run shipped. |
+| [dogfood/](dogfood/) | Aggregate historical dogfood notes and friction register. |
 | [dogfood/FRICTION_LOG.md](dogfood/FRICTION_LOG.md) | Aggregate friction register across runs. |
+| [dogfood/HISTORICAL.md](dogfood/HISTORICAL.md) | Distinguishes the historical incubation runs from the current cadence. |
+| [dogfoods/](dogfoods/) | Preserved named dogfood fixtures with workflow scaffolds, prompts, and roles. |
 
 ## Repository-level files
 

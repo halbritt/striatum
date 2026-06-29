@@ -60,7 +60,7 @@ terminal-AI agents on real repos with state that survives session death.
   [`AGENTS.md`](../../AGENTS.md) is explicit: "Do not introduce hosted services,
   cloud APIs, telemetry, transcript capture, or external persistence
   without an explicit product decision."
-  [`docs/UBIQUITOUS_LANGUAGE.md`](docs/UBIQUITOUS_LANGUAGE.md) defines
+  [`docs/reference/ubiquitous-language.md`](../reference/ubiquitous-language.md) defines
   the unit as a registered target repository under a daemon `repository_id`.
 
 ### 2. State store
@@ -71,7 +71,7 @@ terminal-AI agents on real repos with state that survives session death.
 - **Striatum**: daemon-owned PostgreSQL under a per-repository
   `repository_id`. Repository files are durable provenance, never the
   live message bus; `.striatum/` is operational scratch only
-  ([`docs/UBIQUITOUS_LANGUAGE.md`](docs/UBIQUITOUS_LANGUAGE.md)).
+  ([`docs/reference/ubiquitous-language.md`](../reference/ubiquitous-language.md)).
 
 ### 3. Workflow shape
 

@@ -32,7 +32,7 @@ The terminal cutover rule is:
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/rfc-0050-0075-final-cutover-design/workflow.json`.
+`docs/operator/workflows/rfc-0050-0075-final-cutover-design.json`.
 The design workflow completed as
 `run_4a5eb33b0d6b037e9f62a0335d04b349`.
 

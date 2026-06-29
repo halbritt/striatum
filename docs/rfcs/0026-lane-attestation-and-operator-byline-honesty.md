@@ -3,13 +3,13 @@
 Status: accepted (V1)
 Date: 2026-05-09
 Context:
-[`docs/UBIQUITOUS_LANGUAGE.md`](../reference/ubiquitous-language.md)
+[`docs/reference/ubiquitous-language.md`](../reference/ubiquitous-language.md)
 (operator, operator surrogate, supervised session, artifact author),
 `striatum.cli.mutations` (retired)
 (`register_session`),
-[`src/striatum/identity.py`](../../src/striatum/identity.py)
+retired Python path `src/striatum/identity.py`
 (`artifact_author_identity`),
-[`src/striatum/artifacts.py`](../../src/striatum/artifacts.py)
+retired Python path `src/striatum/artifacts.py`
 (`expected_author_line`, `validate_optional_markdown_author_line`),
 RFC 0009 (long-lived process supervision; `process_supervisors` table),
 GitHub issues

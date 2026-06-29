@@ -51,7 +51,7 @@ parity.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/deferred-25-cross-repo-live-closure/workflow.json`.
+`docs/operator/workflows/deferred-25-cross-repo-live-closure.json`.
 
 Final classification:
 `docs/operator/artifacts/deferred-25-cross-repo-live-closure/RESULT.md`.
@@ -61,9 +61,9 @@ Final classification:
 Run and record:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-25-cross-repo-live-closure/workflow.json --json
-PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-25-cross-repo-live-closure/workflow.json --json
-PYTHONPATH=src python3 -m striatum.cli workflow lint docs/operator/workflows/deferred-25-cross-repo-live-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-25-cross-repo-live-closure.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-25-cross-repo-live-closure.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow lint docs/operator/workflows/deferred-25-cross-repo-live-closure.json --json
 PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_workflow_cross_repo.py tests/test_cross_repo_lifecycle.py tests/test_mcp_mutation_capabilities.py::test_mcp_tools_call_exact_workflow_control_methods_route_to_daemon_rpc
 (cd go && go test ./pkg/crossrepo)
 make test-multi-repo

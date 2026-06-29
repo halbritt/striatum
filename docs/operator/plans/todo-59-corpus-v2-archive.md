@@ -35,7 +35,7 @@ inspection, no comparative replay, and optional daemon audit-chain cross-check.
 - [`RFC 0057`](../../rfcs/0057-corpus-contract-v2.md)
 - [`RFC 0066`](../../rfcs/0066-replay-archive-corpus-v2-foundations.md)
 - [`docs/operator/BRIEF.md`](../BRIEF.md)
-- [`docs/operator/workflows/todo-59-corpus-v2-archive/workflow.json`](../workflows/todo-59-corpus-v2-archive/workflow.json)
+- [`docs/operator/workflows/todo-59-corpus-v2-archive.json`](../workflows/todo-59-corpus-v2-archive.json)
 
 ## Workstreams
 
@@ -51,13 +51,13 @@ inspection, no comparative replay, and optional daemon audit-chain cross-check.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/todo-59-corpus-v2-archive/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/todo-59-corpus-v2-archive.json
 ```
 
 Prepare and start it through the daemon-backed runner:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/todo-59-corpus-v2-archive/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/todo-59-corpus-v2-archive.json --json
 PYTHONPATH=src python3 -m striatum.cli run start --run-id <run_id> --json
 ```
 

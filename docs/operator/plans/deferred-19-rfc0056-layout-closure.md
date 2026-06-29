@@ -43,8 +43,8 @@ The scaffolded workflow maps the current RFC 0056 implementation boundary,
 classifies the optional follow-up, and writes a final closure summary.
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-19-rfc0056-layout-closure/workflow.json --json
-PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-19-rfc0056-layout-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-19-rfc0056-layout-closure.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-19-rfc0056-layout-closure.json --json
 ```
 
 ## Closure

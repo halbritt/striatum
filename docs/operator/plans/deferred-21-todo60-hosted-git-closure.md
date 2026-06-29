@@ -45,7 +45,7 @@ decision accepts that surface.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/deferred-21-todo60-hosted-git-closure/workflow.json`.
+`docs/operator/workflows/deferred-21-todo60-hosted-git-closure.json`.
 
 The workflow has three bounded synthesis jobs:
 

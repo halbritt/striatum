@@ -37,20 +37,20 @@ recovery, and operator UX.
 - [`docs/UBIQUITOUS_LANGUAGE.md`](../../reference/ubiquitous-language.md)
 - [`docs/TODO.md`](../../reference/todo.md)
 - [`docs/operator/BRIEF.md`](../BRIEF.md)
-- [`src/striatum/repo_policy.py`](../../../src/striatum/repo_policy.py)
-- [`src/striatum/workflow.py`](../../../src/striatum/workflow.py)
-- [`src/striatum/daemon_pg/handlers/context.py`](../../../src/striatum/daemon_pg/handlers/context.py)
-- [`tests/test_cli_mvp.py`](../../../tests/test_cli_mvp.py)
+- Retired Python source path: `src/striatum/repo_policy.py`
+- Retired Python source path: `src/striatum/workflow.py`
+- Retired Python source path: `src/striatum/daemon_pg/handlers/context.py`
+- Retired Python test path: `tests/test_cli_mvp.py`
 
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/todo-2-adapter-constraints-closure/workflow.json`.
+`docs/operator/workflows/todo-2-adapter-constraints-closure.json`.
 
 Validation:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/todo-2-adapter-constraints-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/todo-2-adapter-constraints-closure.json --json
 ```
 
 ## Guardrails

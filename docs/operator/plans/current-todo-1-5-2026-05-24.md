@@ -31,7 +31,7 @@ brief to closure or honest blocker evidence:
 Validate the scaffold:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/current-todo-1-5-2026-05-24/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/current-todo-1-5-2026-05-24.json
 ```
 
 Drive implementation in order, committing and pushing after coherent slices.

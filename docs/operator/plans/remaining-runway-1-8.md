@@ -38,8 +38,8 @@ run in parallel with later scaffold jobs.
 - [`docs/operator/BRIEF.md`](../BRIEF.md)
 - [`docs/TODO.md`](../../reference/todo.md)
 - [`docs/DECISION_LOG.md`](../../decisions/decision-log.md)
-- [`docs/operator/artifacts/active-runway-1-5/FINAL.md`](../artifacts/active-runway-1-5/FINAL.md)
-- [`RFC 0050`](../../rfcs/0050-go-daemon-http-sse-mcp.md)
+- Historical generated-record source path: `docs/operator/artifacts/active-runway-1-5/FINAL.md`
+- [`RFC 0130`](../../rfcs/0130-go-daemon-http-sse-mcp.md)
 - [`RFC 0057`](../../rfcs/0057-corpus-contract-v2.md)
 - [`RFC 0064`](../../rfcs/0064-review-diversity-enforcement.md)
 - [`RFC 0066`](../../rfcs/0066-replay-archive-corpus-v2-foundations.md)
@@ -48,7 +48,7 @@ run in parallel with later scaffold jobs.
 - [`RFC 0074`](../../rfcs/0074-workflow-shape-and-adversary-pack-catalog.md)
 - [`RFC 0075`](../../rfcs/0075-tmux-observable-mcp-agent-sessions.md)
 - [`RFC 0077`](../../rfcs/0077-mcp-activity-liveness-deadlines.md)
-- [`docs/operator/workflows/remaining-runway-1-8/workflow.json`](../workflows/remaining-runway-1-8/workflow.json)
+- [`docs/operator/workflows/remaining-runway-1-8.json`](../workflows/remaining-runway-1-8.json)
 
 ## Ordering And Parallelism
 
@@ -72,13 +72,13 @@ operator explicitly changes the workflow.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/remaining-runway-1-8/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/remaining-runway-1-8.json
 ```
 
 Prepare and start it through the daemon-backed runner when ready:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/remaining-runway-1-8/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/remaining-runway-1-8.json --json
 PYTHONPATH=src python3 -m striatum.cli run start --run-id <run_id> --json
 ```
 

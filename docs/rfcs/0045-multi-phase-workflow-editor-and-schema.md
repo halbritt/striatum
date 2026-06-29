@@ -6,8 +6,8 @@ Context:
 [`RFC 0034`](0034-workflow-generator-and-template-catalog.md),
 [`RFC 0037`](0037-web-ui-ergonomic-improvements.md),
 [`RFC 0038`](0038-web-ui-feature-additions-and-frontend-toolchain.md),
-[`docs/dogfood/042/PHASE_1_OPERATOR_NOTES.md`](../dogfood/042/PHASE_1_OPERATOR_NOTES.md),
-[`docs/dogfood/042/workflow.json`](../dogfood/042/workflow.json) (validated multi-phase shape informally).
+historical dogfood source paths `docs/dogfood/042/PHASE_1_OPERATOR_NOTES.md`
+and `docs/dogfood/042/workflow.json` (validated multi-phase shape informally).
 
 ## Problem
 

@@ -35,12 +35,12 @@ not a request to restore the retired SQLite-era dogfood composite tools.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/rfc-0040-packet-evidence-closure/workflow.json`.
+`docs/operator/workflows/rfc-0040-packet-evidence-closure.json`.
 
 Validation:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/rfc-0040-packet-evidence-closure/workflow.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/rfc-0040-packet-evidence-closure.json --json
 ```
 
 ## Closure

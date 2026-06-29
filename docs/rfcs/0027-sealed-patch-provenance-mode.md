@@ -3,16 +3,16 @@
 Status: superseded by RFC 0127 (D195)
 Date: 2026-05-10
 Context:
-[`docs/research/P005_SYNTHESIS.md`](../research/P005_SYNTHESIS.md),
-[`docs/research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md`](../research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md),
+[`docs/records/_frozen/research/P005_SYNTHESIS.md`](../records/_frozen/research/P005_SYNTHESIS.md),
+[`docs/records/_frozen/research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md`](../records/_frozen/research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md),
 [`docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md`](../research/TRUE_PROVENANCE_AND_CONTAINMENT.md),
 [`docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`](../research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md),
-[`docs/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md`](../research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md),
-[`docs/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md`](../research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md),
-[`docs/research/P005_PROVENANCE_BYPASS_STRATEGIES.md`](../research/P005_PROVENANCE_BYPASS_STRATEGIES.md),
+[`docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md`](../records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md),
+[`docs/records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md`](../records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md),
+[`docs/records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md`](../records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md),
 [`RFC 0026`](0026-lane-attestation-and-operator-byline-honesty.md),
-[`docs/SPEC.md`](../reference/spec.md),
-[`docs/DECISION_LOG.md`](../decisions/decision-log.md) (D006, D009,
+[`docs/reference/spec.md`](../reference/spec.md),
+[`docs/decisions/decision-log.md`](../decisions/decision-log.md) (D006, D009,
 D020, D028, D036, D048, D049)
 
 Implementation status: dogfood-030 shipped phase 2 guardrails
@@ -372,8 +372,8 @@ advisory behavior.
 ## Domain Modeling
 
 This RFC adds several terms to the model. Per
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model),
-the accepted implementation should update `docs/UBIQUITOUS_LANGUAGE.md`
+[`docs/explanation/domain-driven-design.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model),
+the accepted implementation should update `docs/reference/ubiquitous-language.md`
 before validator and introspection changes land.
 
 - **Provenance mode** - a workflow/run policy value object describing which

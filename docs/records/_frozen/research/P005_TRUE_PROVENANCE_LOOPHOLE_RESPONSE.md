@@ -3,11 +3,11 @@
 author: researcher-codex-gpt-5-001
 Status: exploratory research
 Date: 2026-05-10
-Source prompt: [`prompts/P005_true_provenance_loophole.md`](../../prompts/P005_true_provenance_loophole.md)
+Source prompt: [`prompts/P005_true_provenance_loophole.md`](../../../../prompts/P005_true_provenance_loophole.md)
 Related context:
-[`docs/rfcs/0026-lane-attestation-and-operator-byline-honesty.md`](../rfcs/0026-lane-attestation-and-operator-byline-honesty.md),
-[`docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md`](TRUE_PROVENANCE_AND_CONTAINMENT.md),
-[`docs/dogfood/FRICTION_LOG.md`](../dogfood/FRICTION_LOG.md)
+[`docs/rfcs/0026-lane-attestation-and-operator-byline-honesty.md`](../../../rfcs/0026-lane-attestation-and-operator-byline-honesty.md),
+[`docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md`](../../../research/TRUE_PROVENANCE_AND_CONTAINMENT.md),
+[`docs/dogfood/FRICTION_LOG.md`](../../../dogfood/FRICTION_LOG.md)
 
 Current-context note (2026-05-17): this exploratory response predates the
 D094/D104 daemon-required runtime. References below to SQLite or CLI-only

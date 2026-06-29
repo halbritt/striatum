@@ -12,7 +12,7 @@ active Striatum head.
 
 This plan is intentionally narrower than the whole Go-only runtime cutover.
 It owns the executable workflow scaffold at
-`docs/operator/workflows/rfc-0078-python-test-migration/workflow.json` and
+`docs/operator/workflows/rfc-0078-python-test-migration.json` and
 focuses on test coverage only: coverage ledger refinement, PostgreSQL harness
 parity, CLI route tests, local web/browser tests, workflow and artifact
 contract tests, corpus/archive tests, packaging smoke, and final deletion

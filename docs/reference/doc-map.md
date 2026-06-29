@@ -11,7 +11,7 @@ When two docs disagree, the home wins.
 
 ## Per-doc rules
 
-### `docs/PRD.md` — product requirements
+### `docs/reference/prd.md` — product requirements
 
 - **What it is:** the original product framing.
 - **What it owns:** the user-visible problem, the V1 scope, the
@@ -22,7 +22,7 @@ When two docs disagree, the home wins.
   artifact; product re-scoping happens via a new RFC plus a
   decision-log row, not a PRD edit.
 
-### `docs/SPEC.md` — implementation contract
+### `docs/reference/spec.md` — implementation contract
 
 - **What it is:** what the runner accepts, refuses, and emits
   *today*. The contract a first-time reader of `src/` should be
@@ -61,7 +61,7 @@ When two docs disagree, the home wins.
   them at SPEC. If they need rationale, point them at the RFC.
   If both, link both.
 
-### `docs/DECISION_LOG.md` — receipts
+### `docs/decisions/decision-log.md` — receipts
 
 - **What it is:** one row per accepted RFC (or non-RFC
   decision). The receipt that says "we made this call, here's
@@ -82,7 +82,7 @@ When two docs disagree, the home wins.
   invoice. If a row is over ~150 words, the detail belongs in
   the RFC.
 
-### `docs/UBIQUITOUS_LANGUAGE.md` — glossary
+### `docs/reference/ubiquitous-language.md` — glossary
 
 - **What it is:** the authoritative term list.
 - **What it owns:** every striatum-specific noun (run, session,
@@ -91,10 +91,10 @@ When two docs disagree, the home wins.
 - **What it doesn't:** anything that isn't a term. No procedure
   text, no schema details — just definitions.
 - **When it changes:** every time a new RFC introduces a
-  concept. Per RFC 0019 / DDD.md, glossary changes come *first*,
+  concept. Per RFC 0019 / `domain-driven-design.md`, glossary changes come *first*,
   then validator + introspection.
 
-### `docs/DDD.md` — framing
+### `docs/explanation/domain-driven-design.md` — framing
 
 - **What it is:** the domain-driven framing the codebase
   already has, written down.
@@ -104,7 +104,7 @@ When two docs disagree, the home wins.
   model" pattern future RFCs cite.
 - **What it doesn't:** any current-behavior detail (that's
   SPEC), any historical decision (that's the log), any glossary
-  definitions (that's UBIQUITOUS_LANGUAGE.md).
+  definitions (that's `ubiquitous-language.md`).
 
 ### `CHANGELOG.md` — release notes
 
@@ -124,7 +124,7 @@ When two docs disagree, the home wins.
   reference. Per RFC 0017, those moved out and a test enforces
   the README line budget so they don't drift back.
 
-### `docs/HOW_TO_HUMAN.md`, `docs/HOW_TO_AGENT.md`, `docs/GETTING_STARTED.md`, `docs/WRITING_WORKFLOWS.md`, `docs/CLI_REFERENCE.md`
+### `docs/how-to/how-to-human.md`, `docs/how-to/how-to-agent.md`, `docs/tutorials/getting-started.md`, `docs/how-to/writing-workflows.md`, `docs/reference/cli-reference.md`
 
 - **What they are:** operator-facing playbooks (RFC 0017).
 - **What they own:** the verb sequences a human or agent runs,
@@ -133,7 +133,7 @@ When two docs disagree, the home wins.
   contracts; they don't *redefine* them. If the verb shape
   changes, edit SPEC and the playbook in the same PR.
 
-### `docs/operator/DAEMON_RUNBOOK.md` — daemon operability runbook
+### `docs/how-to/daemon-runbook.md` — daemon operability runbook
 
 - **What it is:** the RFC 0079 operator reference for the `striatumd`
   lifecycle: `striatum daemon install/uninstall/status`, the portable
@@ -143,11 +143,11 @@ When two docs disagree, the home wins.
   runtime files live (`daemon-go.sock`, `client-token`,
   `mcp-http-endpoint`, pidfile).
 - **What it doesn't:** Postgres role/grant provisioning (that's
-  `POSTGRES_TRANSITION.md`) or the workflow verb sequences (HOW_TO_*).
+  `postgres-transition.md`) or the workflow verb sequences (`how-to-*`).
   `GETTING_STARTED.md` links here for the lifecycle rather than
   duplicating it.
 
-### `docs/WORKFLOW_TYPES.md` — workflow selection guide
+### `docs/reference/workflow-types.md` — workflow selection guide
 
 - **What it is:** the current operator-facing map of workflow
   families and lane-set choices: what each type is for, what graph
@@ -157,7 +157,7 @@ When two docs disagree, the home wins.
   starter-vs-example language, and the roadmap from current examples
   to a future template chooser.
 - **What it doesn't:** validator rules (SPEC), verb sequences
-  (HOW_TO_*), or historical rationale for the browser/editor surface
+  (`how-to/*`), or historical rationale for the browser/editor surface
   (RFC 0024).
 
 ### `docs/dogfood/<id>/BUILD_HANDOFF.md` — implementer notes
@@ -169,7 +169,7 @@ When two docs disagree, the home wins.
 - **When it changes:** never, after the run completes. It's the
   primary source for "what actually shipped in this RFC's V1."
 
-### `docs/INDEX.md` — pointer index
+### `docs/index.md` — pointer index
 
 - **What it is:** a one-line summary of every doc.
 - **When it changes:** when a new doc is added.
@@ -179,23 +179,23 @@ When two docs disagree, the home wins.
 Cross-references go in one direction:
 
 - README → `docs/`
-- `docs/HOW_TO_*` → SPEC
+- `docs/how-to/*` → SPEC
 - SPEC → RFC (for rationale only)
 - RFC → SPEC (for "after acceptance, the contract lives in
   SPEC")
-- DECISION_LOG → RFC + dogfood
-- DDD → UBIQUITOUS_LANGUAGE
+- decision log → RFC + dogfood
+- DDD framing → ubiquitous language
 
 If you find yourself writing a back-edge (SPEC explains an RFC's
 *reasoning*; an RFC describes *current behavior*; the
-DECISION_LOG row tells you *what tests were written*), you're
+decision-log row tells you *what tests were written*), you're
 crossing a boundary. Stop, find the right home, and put a link
 there instead.
 
 ## Enforcement
 
 A small invariant test in `tests/test_doc_links.py` asserts that
-no DECISION_LOG row exceeds 200 words. Other rules in this map
+no decision-log row exceeds 200 words. Other rules in this map
 are not mechanically enforced; the test guards the loudest
 failure mode (D-row wall-of-text) and the rest is review
 discipline.

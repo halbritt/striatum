@@ -21,11 +21,11 @@ Context:
 [`RFC 0032`](0032-cross-repo-workflows-and-mcp-mutation-capabilities.md),
 [`RFC 0034`](0034-workflow-generator-and-template-catalog.md),
 [`RFC 0036`](0036-mcp-harness-for-daemon-v2-mutation-surface.md),
-[`docs/DECISION_LOG.md`](../decisions/decision-log.md) (D087, D088, D090),
-[`docs/dogfood/036/OPERATOR_REPORT.md`](../dogfood/036/OPERATOR_REPORT.md),
-[`docs/dogfood/037/OPERATOR_REPORT.md`](../dogfood/037/OPERATOR_REPORT.md),
-[`docs/dogfood/038/OPERATOR_REPORT.md`](../dogfood/038/OPERATOR_REPORT.md),
-[`docs/dogfood/039/OPERATOR_REPORT.md`](../dogfood/039/OPERATOR_REPORT.md)
+[`docs/decisions/decision-log.md`](../decisions/decision-log.md) (D087, D088, D090),
+historical dogfood source paths `docs/dogfood/036/OPERATOR_REPORT.md`,
+`docs/dogfood/037/OPERATOR_REPORT.md`,
+`docs/dogfood/038/OPERATOR_REPORT.md`, and
+`docs/dogfood/039/OPERATOR_REPORT.md`
 
 ## Problem
 

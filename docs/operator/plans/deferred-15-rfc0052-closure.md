@@ -33,16 +33,16 @@ phase, debate/panel daemon methods, or committee-specific validator behavior.
 - [Operator brief](../BRIEF.md)
 - [RFC 0052](../../rfcs/0052-committee-deliberation-workflow.md)
 - [RFC 0074](../../rfcs/0074-workflow-shape-and-adversary-pack-catalog.md)
-- [RFC 0074 Phase A closure](../artifacts/rfc-0074-phase-a-catalog/CLOSURE.md)
-- [Workflow scaffold](../workflows/deferred-15-rfc0052-closure/workflow.json)
-- [Closure summary](../artifacts/deferred-15-rfc0052-closure/final/SUMMARY.md)
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0074-phase-a-catalog/CLOSURE.md`
+- [Workflow scaffold](../workflows/deferred-15-rfc0052-closure.json)
+- Historical generated-record source path: `docs/operator/artifacts/deferred-15-rfc0052-closure/final/SUMMARY.md`
 
 ## Workflow
 
 Validate the scaffold:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-15-rfc0052-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-15-rfc0052-closure.json --json
 ```
 
 The workflow is artifact-only and docs-scoped. It is designed to answer one

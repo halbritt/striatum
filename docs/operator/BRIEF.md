@@ -86,7 +86,7 @@ copy or cherry-pick the dirty lane worktree into `main`.
 `MULTI_CAMPAIGN_SUPERVISION` Level-1 ideation completed as
 `run_7899e132bf7996d49c9b81d0df905962` and was integrated to `main` through
 `run.integrate` at `8ac96c62`. The workflow scaffold lives at
-`docs/operator/workflows/multi-campaign-supervision-level1/workflow.json` and
+`docs/operator/workflows/multi-campaign-supervision-level1.json` and
 uses Striatum's supported `divergent_ideation` shape with direct `codex`
 agent-loop `pty_helper` lanes and per-job worktree isolation. The seed
 explicitly carries the Level-0 live-human artifacts, the current operator brief, and
@@ -103,7 +103,7 @@ quarantine / scope-drift refusal, and a cross-surface contradiction gate. No
 architecture is accepted, and no product code, schema, route, daemon method, UI,
 or build ticket was created. The next legitimate step is to run the validated
 falsification scaffold at
-`docs/operator/workflows/multi-campaign-supervision-falsification/workflow.json`
+`docs/operator/workflows/multi-campaign-supervision-falsification.json`
 before any design-to-build readiness claim.
 
 ## 2026-06-28 delta — RFC 0168 P0 build v3 integrated; RFC 0143 Slice B unblocked

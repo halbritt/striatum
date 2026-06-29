@@ -45,12 +45,12 @@ ordered phase.
 ## Workflow
 
 The runnable scaffold is
-`docs/operator/workflows/ordered-backlog-2026-05-23/workflow.json`.
+`docs/operator/workflows/ordered-backlog-2026-05-23.json`.
 
 Validation:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/ordered-backlog-2026-05-23/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/ordered-backlog-2026-05-23.json
 ```
 
 ## Outcome

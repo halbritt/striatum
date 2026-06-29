@@ -397,7 +397,7 @@ This is a large rewrite. Six phases land independently with green
 test parity at each step.
 
 > Historical status (dogfood-042): Steps 1+2 landed per the
-> [Track A synthesis](../dogfood/042/track_a/DESIGN_SYNTHESIS.md). The
+> Track A synthesis (`docs/dogfood/042/track_a/DESIGN_SYNTHESIS.md`). The
 > Go daemon now exposes the read-only RPC envelope-v1 method registry
 > (`daemon.hello`, `daemon.welcome`, `daemon.describe`, `daemon.status`,
 > `daemon.version`, `audit.show`, `repo.list`) on top of the RFC 0033

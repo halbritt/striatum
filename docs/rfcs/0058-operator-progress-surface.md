@@ -3,10 +3,10 @@
 Status: implemented
 Date: 2026-05-15
 Context:
-[`docs/DECISION_LOG.md`](../decisions/decision-log.md),
-[`docs/ROADMAP.md`](../reference/roadmap.md),
-[`docs/TODO.md`](../reference/todo.md),
-[`docs/handoffs/`](../handoffs/),
+[`docs/decisions/decision-log.md`](../decisions/decision-log.md),
+[`docs/reference/roadmap.md`](../reference/roadmap.md),
+[`docs/reference/todo.md`](../reference/todo.md),
+[`docs/records/_frozen/handoffs/`](../records/_frozen/handoffs/),
 [`docs/dogfood/FRICTION_LOG.md`](../dogfood/FRICTION_LOG.md),
 [`docs/dogfood/<NNN>/OPERATOR_REPORT.md`](../dogfood/),
 [`RFC 0017`](0017-readme-and-docs-reorganization.md),

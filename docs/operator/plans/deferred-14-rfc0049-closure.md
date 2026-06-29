@@ -48,7 +48,7 @@ pieces are generic prerequisites rather than Claude-specific implementation.
 ## Workflow
 
 The runnable workflow lives at
-`docs/operator/workflows/deferred-14-rfc0049-closure/workflow.json` and has two
+`docs/operator/workflows/deferred-14-rfc0049-closure.json` and has two
 jobs:
 
 1. `classify_rfc0049`: audit decisions, RFCs, source, tests, and current

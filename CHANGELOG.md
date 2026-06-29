@@ -41,6 +41,11 @@
   path/hash match as clean. Authorized deletion pilots therefore do not leave
   stale `artifact_anchor_missing_file` or legacy `artifact_blob_metadata_missing`
   problems after the generated-record integrity block has verified the blob.
+- **Documentation tree consolidation.** Flattened single-file operator workflow
+  fixtures from `docs/operator/workflows/<slug>/workflow.json` to
+  `docs/operator/workflows/<slug>.json`, updated references, and added an
+  explicit `make check-docs-audit` mode for whole-tree link audits that include
+  normally ignored historical/operator regions.
 
 ### Removed
 

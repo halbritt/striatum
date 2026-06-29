@@ -258,7 +258,7 @@ needs it.
 ## Implementation Scaffold
 
 The first implementation workflow is scaffolded at
-[`docs/operator/workflows/rfc-0075-and-mcp-cutover/workflow.json`](../operator/workflows/rfc-0075-and-mcp-cutover/workflow.json).
+[`docs/operator/workflows/rfc-0075-and-mcp-cutover.json`](../operator/workflows/rfc-0075-and-mcp-cutover.json).
 It deliberately starts with a cutover map and liveness-contract design before
 any source implementation. The paired operator plans are:
 

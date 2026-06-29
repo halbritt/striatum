@@ -1,0 +1,381 @@
+{
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "rfc-0078-docs-guardrails-final-deletion",
+  "workflow_version": "2026-05-25",
+  "name": "RFC 0078 docs, guardrails, and final deletion",
+  "context_docs": [
+    "AGENTS.md",
+    "README.md",
+    "docs/INDEX.md",
+    "docs/SPEC.md",
+    "docs/DECISION_LOG.md",
+    "docs/UBIQUITOUS_LANGUAGE.md",
+    "docs/TODO.md",
+    "docs/ROADMAP.md",
+    "docs/operator/BRIEF.md",
+    "docs/operator/plans/rfc-0078-go-only-runtime-and-python-removal.md",
+    "docs/operator/plans/rfc-0078-docs-guardrails-final-deletion.md",
+    "docs/operator/workflows/rfc-0078-go-only-runtime-and-python-removal.json",
+    "docs/rfcs/0078-go-only-runtime-and-python-removal.md",
+    "docs/rfcs/0068-go-production-daemon-port.md",
+    "docs/rfcs/0070-daemon-client-service-boundary.md",
+    "contracts/daemon_methods.json",
+    "go/",
+    "src/",
+    "tests/",
+    "scripts/",
+    "pyproject.toml",
+    "Makefile",
+    ".github/workflows/"
+  ],
+  "coordinator": {
+    "role_id": "coordinator",
+    "lane_id": "codex"
+  },
+  "parallelism": {
+    "mode": "declared",
+    "max_active_jobs": 12,
+    "require_disjoint_write_scopes": true
+  },
+  "branch": {
+    "mode": "confirm",
+    "suggested_name": "striatum/rfc-0078-final-deletion",
+    "allow_dirty": true
+  },
+  "lanes": {
+    "codex": {
+      "adapter": "process",
+      "command": ["bash", "-lc", "cat >/dev/null"],
+      "model": "codex",
+      "display_model": "Codex GPT-5.5",
+      "strategy_version": "2026-05-25",
+      "constraints": {
+        "network": "forbidden",
+        "repo_scope": "local_only",
+        "transcripts": "off"
+      },
+      "required_enforcement": {
+        "network": "advisory_strict",
+        "repo_scope": "advisory_strict",
+        "transcripts": "enforced"
+      }
+    }
+  },
+  "roles": {
+    "coordinator": {
+      "description": "Operator/control-plane coordinator."
+    },
+    "supersession_editor": {
+      "description": "Decision and RFC supersession editor for obsolete Python-era guidance."
+    },
+    "docs_rewriter": {
+      "description": "Current active documentation rewrite owner."
+    },
+    "template_rewriter": {
+      "description": "Skill and plugin template rewrite owner."
+    },
+    "guardrail_implementer": {
+      "description": "Python-trace guardrail implementation owner."
+    },
+    "deletion_finalizer": {
+      "description": "Final deletion gate owner."
+    },
+    "reviewer": {
+      "description": "Independent reviewer for deletion readiness and documentation correctness."
+    },
+    "closer": {
+      "description": "Acceptance closure and final summary owner."
+    }
+  },
+  "jobs": [
+    {
+      "id": "d_rfc_supersession",
+      "type": "build",
+      "title": "Decision and RFC supersession",
+      "role_id": "supersession_editor",
+      "lane_id": "codex",
+      "parallel_group": "docs_guardrails_wave",
+      "fresh_session_required": true,
+      "objective": "Mark obsolete Python-era decision/RFC guidance as superseded or successor-linked without deleting provenance.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/d_rfc_supersession.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/DECISION_LOG.md",
+          "docs/rfcs/",
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/supersession/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "supersession_handoff",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/supersession/HANDOFF.md",
+          "author_line": "author: operator [self-declared: supersession-editor-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "active_doc_rewrite",
+      "type": "build",
+      "title": "Active documentation rewrite",
+      "role_id": "docs_rewriter",
+      "lane_id": "codex",
+      "parallel_group": "docs_guardrails_wave",
+      "fresh_session_required": true,
+      "objective": "Rewrite current operator, adopter, and architecture docs so the live runtime is Go-only and daemon-owned.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/active_doc_rewrite.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "README.md",
+          "AGENTS.md",
+          "docs/INDEX.md",
+          "docs/SPEC.md",
+          "docs/TODO.md",
+          "docs/ROADMAP.md",
+          "docs/USING_STRIATUM.md",
+          "docs/GETTING_STARTED.md",
+          "docs/POSTGRES_TRANSITION.md",
+          "docs/CLI_REFERENCE.md",
+          "docs/WORKFLOW_TYPES.md",
+          "docs/WORKFLOW_CATALOG.md",
+          "docs/WRITING_WORKFLOWS.md",
+          "docs/MCP.md",
+          "docs/HOW_TO_AGENT.md",
+          "docs/operator/BRIEF.md",
+          "docs/architecture/COMMAND_AUTHORITY_MATRIX.md",
+          "docs/architecture/DAEMON_METHOD_TABLES.md",
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/docs/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/",
+          "docs/rfcs/",
+          "docs/DECISION_LOG.md"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "active_docs_handoff",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/docs/HANDOFF.md",
+          "author_line": "author: operator [self-declared: docs-rewriter-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "skill_plugin_template_rewrite",
+      "type": "build",
+      "title": "Skill and plugin template rewrite",
+      "role_id": "template_rewriter",
+      "lane_id": "codex",
+      "parallel_group": "docs_guardrails_wave",
+      "fresh_session_required": true,
+      "objective": "Update generated skill and plugin templates so installed agents learn the Go-only daemon/MCP contract.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/skill_plugin_template_rewrite.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "src/striatum/skills/templates/",
+          "src/striatum/plugins/templates/",
+          "go/pkg/skills/",
+          "go/pkg/plugins/",
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/templates/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "template_rewrite_handoff",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/templates/HANDOFF.md",
+          "author_line": "author: operator [self-declared: template-rewriter-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "guardrail_implementation",
+      "type": "build",
+      "title": "Python-trace guardrail implementation",
+      "role_id": "guardrail_implementer",
+      "lane_id": "codex",
+      "parallel_group": "docs_guardrails_wave",
+      "fresh_session_required": true,
+      "objective": "Implement tracked checks that fail on active Striatum Python runtime traces while preserving target-repo Python workloads and historical provenance.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/guardrail_implementation.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "go/",
+          "scripts/",
+          "tests/guardrails/",
+          "Makefile",
+          ".github/workflows/",
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/guardrails/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/",
+          "src/striatum/skills/templates/",
+          "src/striatum/plugins/templates/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "guardrail_handoff",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/guardrails/HANDOFF.md",
+          "author_line": "author: operator [self-declared: guardrail-implementer-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "deletion_finalizer",
+      "type": "build",
+      "title": "Final deletion gate",
+      "role_id": "deletion_finalizer",
+      "lane_id": "codex",
+      "fresh_session_required": true,
+      "objective": "Delete remaining active Python runtime surfaces only after the guardrail and docs gates prove each trace is replaced, retired, or historical.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/deletion_finalizer.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "src/",
+          "tests/",
+          "scripts/",
+          "pyproject.toml",
+          "Makefile",
+          ".github/workflows/",
+          "go/",
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/deletion/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/",
+          "docs/rfcs/",
+          "docs/DECISION_LOG.md"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "deletion_gate_report",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/deletion/GATE.md",
+          "author_line": "author: operator [self-declared: deletion-finalizer-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_final_deletion",
+      "type": "review",
+      "title": "Review final deletion gate",
+      "role_id": "reviewer",
+      "lane_id": "codex",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "repo_level",
+      "review_posture": "devils_advocate",
+      "objective": "Review the supersession, docs, template, guardrail, and deletion gate outputs for RFC 0078 acceptance readiness.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/review.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/review/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "final_deletion_review",
+          "kind": "finding",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/review/FINDING.md",
+          "author_line": "author: operator [self-declared: reviewer-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "final_summary",
+      "type": "synthesis",
+      "title": "Acceptance closure summary",
+      "role_id": "closer",
+      "lane_id": "codex",
+      "fresh_session_required": true,
+      "objective": "Publish the RFC 0078 final closure summary with accepted/deferred/blocker classification and validation evidence.",
+      "task_prompt": {
+        "path": "docs/operator/workflows/rfc-0078-docs-guardrails-final-deletion/prompts/final_summary.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/final/"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          ".venv/",
+          "__pycache__/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "acceptance_summary",
+          "kind": "synthesis",
+          "path": "docs/operator/artifacts/rfc-0078-docs-guardrails-final-deletion/final/SUMMARY.md",
+          "author_line": "author: operator [self-declared: rfc0078-closer-codex-gpt-5-001]",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "d_rfc_supersession", "to": "deletion_finalizer", "on": "completed"},
+    {"from": "active_doc_rewrite", "to": "deletion_finalizer", "on": "completed"},
+    {"from": "skill_plugin_template_rewrite", "to": "deletion_finalizer", "on": "completed"},
+    {"from": "guardrail_implementation", "to": "deletion_finalizer", "on": "completed"},
+    {"from": "deletion_finalizer", "to": "review_final_deletion", "on": "completed"},
+    {"from": "review_final_deletion", "to": "final_summary", "on": "completed"}
+  ],
+  "cycles": []
+}

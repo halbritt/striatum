@@ -3,7 +3,7 @@
 author: researcher-gemini-1-5-pro-001
 Status: exploratory research
 Date: 2026-05-10
-Source prompt: [`prompts/P005_true_provenance_loophole.md`](../../prompts/P005_true_provenance_loophole.md)
+Source prompt: [`prompts/P005_true_provenance_loophole.md`](../../../../prompts/P005_true_provenance_loophole.md)
 
 ## Executive Summary
 

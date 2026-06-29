@@ -206,7 +206,7 @@ The [day-zero usage guide](docs/tutorials/using-striatum.md) walks new arrivals 
 
 **Audit-quality provenance.** Many workflows lose state when a session crashes, a process exits nonzero, or a serve restarts. Striatum's authoritative live state is the daemon-owned Postgres; every event carries a `previous_hash` / `row_hash` anchor (added in migration 0006); every RPC request lands a row in `striatumd.audit_log` with a chain head locked `FOR UPDATE` so concurrent appenders serialize. `corpus export` produces a verifying manifest with replay-stable SHA-256s.
 
-**Provider portability.** The runner has no model dependency. Add a lane to a workflow JSON, install a skill bundle for that provider's harness, and the same daemon MCP method set works. The product boundary in [`docs/SPEC.md`](docs/reference/spec.md) explicitly forbids the runner from importing any vendor SDK.
+**Provider portability.** The runner has no model dependency. Add a lane to a workflow JSON, install a skill bundle for that provider's harness, and the same daemon MCP method set works. The product boundary in [`docs/reference/spec.md`](docs/reference/spec.md) explicitly forbids the runner from importing any vendor SDK.
 
 ---
 
@@ -335,15 +335,15 @@ make check
 
 | File | When to read |
 |---|---|
-| [`docs/USING_STRIATUM.md`](docs/tutorials/using-striatum.md) | The day-zero usage guide — operator + principal in one pass |
-| [`docs/HOW_TO_HUMAN.md`](docs/how-to/how-to-human.md) | Human-principal escalation playbook; retains manual operator reference for debugging and demos |
-| [`docs/HOW_TO_AGENT.md`](docs/how-to/how-to-agent.md) | Long-form companion to the RFC 0015 agent skill bundle |
-| [`docs/POSTGRES_TRANSITION.md`](docs/how-to/postgres-transition.md) | Operator runbook for the D094 / RFC 0043 PostgreSQL cutover, retired SQLite handling, and repo registration |
-| [`docs/WORKFLOW_TYPES.md`](docs/reference/workflow-types.md) | Workflow shapes and lane sets; starters, examples, defaults |
-| [`docs/WRITING_WORKFLOWS.md`](docs/how-to/writing-workflows.md) | How to author your own `workflow.json` |
-| [`docs/CLI_REFERENCE.md`](docs/reference/cli-reference.md) | Flat list of every CLI verb and stable exit codes |
-| [`docs/SPEC.md`](docs/reference/spec.md) | The implementation contract; source of truth when this page disagrees with the runner |
-| [`docs/CONSUMER_REPO_LAYOUT.md`](docs/reference/consumer-repo-layout.md) | Recommended target-repo layout (RFC 0056) |
-| [`docs/ROADMAP.md`](docs/reference/roadmap.md) | Operator kickoff doc: active runway, queue, blocked items |
-| [`docs/INDEX.md`](docs/index.md) | Every doc in `docs/` with a one-line summary |
+| [`docs/tutorials/using-striatum.md`](docs/tutorials/using-striatum.md) | The day-zero usage guide — operator + principal in one pass |
+| [`docs/how-to/how-to-human.md`](docs/how-to/how-to-human.md) | Human-principal escalation playbook; retains manual operator reference for debugging and demos |
+| [`docs/how-to/how-to-agent.md`](docs/how-to/how-to-agent.md) | Long-form companion to the RFC 0015 agent skill bundle |
+| [`docs/how-to/postgres-transition.md`](docs/how-to/postgres-transition.md) | Operator runbook for the D094 / RFC 0043 PostgreSQL cutover, retired SQLite handling, and repo registration |
+| [`docs/reference/workflow-types.md`](docs/reference/workflow-types.md) | Workflow shapes and lane sets; starters, examples, defaults |
+| [`docs/how-to/writing-workflows.md`](docs/how-to/writing-workflows.md) | How to author your own `workflow.json` |
+| [`docs/reference/cli-reference.md`](docs/reference/cli-reference.md) | Flat list of every CLI verb and stable exit codes |
+| [`docs/reference/spec.md`](docs/reference/spec.md) | The implementation contract; source of truth when this page disagrees with the runner |
+| [`docs/reference/consumer-repo-layout.md`](docs/reference/consumer-repo-layout.md) | Recommended target-repo layout (RFC 0056) |
+| [`docs/reference/roadmap.md`](docs/reference/roadmap.md) | Archived roadmap; current operator state lives in `operator bootstrap`, `docs/operator/BRIEF.md`, and `docs/operator/rfc-roadmap.md` |
+| [`docs/index.md`](docs/index.md) | Maintained map of reader-facing docs and aggregate historical/provenance directories |
 | [`docs/rfcs/README.md`](docs/rfcs/README.md) | Accepted and proposed RFCs (0001 → current) |

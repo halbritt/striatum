@@ -28,9 +28,9 @@ artifacts, and web chooser pack selection remain deferred to Phase B or later.
 - [`RFC 0074`](../../rfcs/0074-workflow-shape-and-adversary-pack-catalog.md)
 - [`RFC 0034`](../../rfcs/0034-workflow-generator-and-template-catalog.md)
 - [`RFC 0076`](../../rfcs/0076-three-lane-code-and-doc-audit-workflow.md)
-- [`Phase 4 synthesis`](../artifacts/active-runway-1-5/phase4/SYNTHESIS.md)
-- [`RFC 0076 catalog follow-up`](../artifacts/rfc-0076-audit-remediation/catalog-followup/PLAN.md)
-- [`docs/operator/workflows/rfc-0074-phase-a-catalog/workflow.json`](../workflows/rfc-0074-phase-a-catalog/workflow.json)
+- Historical generated-record source path: `docs/operator/artifacts/active-runway-1-5/phase4/SYNTHESIS.md`
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0076-audit-remediation/catalog-followup/PLAN.md`
+- [`docs/operator/workflows/rfc-0074-phase-a-catalog.json`](../workflows/rfc-0074-phase-a-catalog.json)
 
 ## Workstreams
 
@@ -47,7 +47,7 @@ artifacts, and web chooser pack selection remain deferred to Phase B or later.
 Validate the workflow:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0074-phase-a-catalog/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0074-phase-a-catalog.json
 ```
 
 Closure evidence is recorded in

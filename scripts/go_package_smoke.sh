@@ -20,7 +20,7 @@ release_root="$(smoke_extract_archive "$archive" "$TMP/release")"
 "$release_root/bin/striatum" workflow validate \
   --allow-same-model-pairing \
   --json \
-  "$ROOT/docs/operator/workflows/rfc-0078-go-only-packaging-release/workflow.json" >/dev/null
+  "$ROOT/docs/operator/workflows/rfc-0078-go-only-packaging-release.json" >/dev/null
 
 "$release_root/bin/striatumd" --describe | grep -F "core=go" >/dev/null
 "$release_root/bin/striatumd" --describe | grep -E "migration_count=[1-9][0-9]*" >/dev/null

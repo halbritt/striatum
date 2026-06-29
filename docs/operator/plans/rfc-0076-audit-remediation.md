@@ -27,9 +27,9 @@ decide whether generator/catalog integration should be scheduled next.
 
 - [`RFC 0076`](../../rfcs/0076-three-lane-code-and-doc-audit-workflow.md)
 - [`D128`](../../decisions/decision-log.md)
-- [`REMEDIATION_PLAN.md`](../artifacts/rfc-0076-code-doc-audit/REMEDIATION_PLAN.md)
-- [`SYNTHESIS.md`](../artifacts/rfc-0076-code-doc-audit/SYNTHESIS.md)
-- [`docs/operator/workflows/rfc-0076-audit-remediation/workflow.json`](../workflows/rfc-0076-audit-remediation/workflow.json)
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0076-code-doc-audit/REMEDIATION_PLAN.md`
+- Historical generated-record source path: `docs/operator/artifacts/rfc-0076-code-doc-audit/SYNTHESIS.md`
+- [`docs/operator/workflows/rfc-0076-audit-remediation.json`](../workflows/rfc-0076-audit-remediation.json)
 
 ## Workstreams
 
@@ -63,7 +63,7 @@ Run the scaffolded workflow when the operator wants a recorded remediation
 closure pass:
 
 ```bash
-striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0076-audit-remediation/workflow.json
+striatum workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0076-audit-remediation.json
 ```
 
 The workflow is intentionally verification-first. Its implementation job is

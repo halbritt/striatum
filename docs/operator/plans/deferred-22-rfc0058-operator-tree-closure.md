@@ -35,7 +35,7 @@ optional future surface.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/deferred-22-rfc0058-operator-tree-closure/workflow.json`.
+`docs/operator/workflows/deferred-22-rfc0058-operator-tree-closure.json`.
 
 The workflow has one bounded synthesis job. It may write only the closure
 artifact unless the classification finds a small non-breaking helper that does

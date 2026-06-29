@@ -41,10 +41,10 @@ backlog workflow:
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/next-todos-2026-05-23/workflow.json`.
+`docs/operator/workflows/next-todos-2026-05-23.json`.
 
 Validation:
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/next-todos-2026-05-23/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/next-todos-2026-05-23.json
 ```

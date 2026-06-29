@@ -8,10 +8,11 @@ Context:
 [`RFC 0058`](0058-operator-progress-surface.md),
 [`RFC 0063`](0063-hardened-pty-supervision.md),
 [`RFC 0075`](0075-tmux-observable-mcp-agent-sessions.md),
-[`docs/MCP.md`](../explanation/mcp.md),
-[`docs/SPEC.md`](../reference/spec.md),
-[`docs/operator/artifacts/rfc-0075-and-mcp-cutover/design/LIVENESS_CONTRACT.md`](../operator/artifacts/rfc-0075-and-mcp-cutover/design/LIVENESS_CONTRACT.md),
-[`docs/operator/artifacts/rfc-0075-and-mcp-cutover/final/SUMMARY.md`](../operator/artifacts/rfc-0075-and-mcp-cutover/final/SUMMARY.md)
+[`docs/explanation/mcp.md`](../explanation/mcp.md),
+[`docs/reference/spec.md`](../reference/spec.md),
+historical generated-record source paths
+`docs/operator/artifacts/rfc-0075-and-mcp-cutover/design/LIVENESS_CONTRACT.md`
+and `docs/operator/artifacts/rfc-0075-and-mcp-cutover/final/SUMMARY.md`
 
 Decision: D129
 

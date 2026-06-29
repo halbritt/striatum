@@ -21,7 +21,7 @@ coverage, or wholesale Python deletion.
 ## Executable Workflow
 
 Workflow:
-`docs/operator/workflows/rfc-0078-go-web-service-cutover/workflow.json`
+`docs/operator/workflows/rfc-0078-go-web-service-cutover.json`
 
 The workflow declares `parallelism.max_active_jobs: 12`. Six independent root
 jobs can run immediately:

@@ -4,11 +4,11 @@ Status: historical
 Date: 2026-05-07
 
 > **Current direction.** For Striatum's live relationship to Engram, see
-> [`docs/SPEC.md` § Corpus Export And Augmentation Boundary](SPEC.md),
-> [RFC 0041](rfcs/0041-engram-memory-layer-for-striatum-operators.md),
-> [RFC 0044](rfcs/0044-engram-phase-1-implementation-spec.md), and the
+> [`docs/reference/spec.md` § Corpus Export And Augmentation Boundary](../../reference/spec.md),
+> [RFC 0041](../../rfcs/0041-engram-memory-layer-for-striatum-operators.md),
+> [RFC 0044](../../rfcs/0044-engram-phase-1-implementation-spec.md), and the
 > proposed contract scaffold in
-> [RFC 0057](rfcs/0057-corpus-contract-v2.md). Engram is positioned as an
+> [RFC 0057](../../rfcs/0057-corpus-contract-v2.md). Engram is positioned as an
 > **optional local augmentation consumer** of `striatum corpus export`
 > bundles, not a runtime dependency. This document is retained for
 > *incubation provenance* only.

@@ -40,8 +40,8 @@ Phase B blockers and unblock steps, then writes a final closure summary. It is
 artifact-only; it does not prepare or mutate a Striatum run.
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-16-rfc0053-phase-b-closure/workflow.json
-PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-16-rfc0053-phase-b-closure/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate docs/operator/workflows/deferred-16-rfc0053-phase-b-closure.json
+PYTHONPATH=src python3 -m striatum.cli workflow plan docs/operator/workflows/deferred-16-rfc0053-phase-b-closure.json --json
 ```
 
 ## Closure

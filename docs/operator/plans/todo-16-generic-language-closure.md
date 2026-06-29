@@ -35,7 +35,7 @@ needed updates in the final artifact instead.
 ## Workflow
 
 Runnable scaffold:
-`docs/operator/workflows/todo-16-generic-language-closure/workflow.json`.
+`docs/operator/workflows/todo-16-generic-language-closure.json`.
 
 The workflow shape is scan -> apply -> review -> final synthesis:
 

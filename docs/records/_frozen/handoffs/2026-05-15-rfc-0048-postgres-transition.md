@@ -134,9 +134,9 @@ striatum recovery requeue-stale --help | grep -- '--force'
 
 ## Memory notes that shaped this session
 
-- [feedback_operator_never_implements](.claude/projects/-home-halbritt-git-striatum/memory/feedback_operator_never_implements.md) — saved during dogfood-060. Override allowed by user for V1.5 fix-up + small bug fixes.
-- [feedback_autonomous_run_decisions](.claude/projects/-home-halbritt-git-striatum/memory/feedback_autonomous_run_decisions.md) — don't block at human-acceptance gates; record the decision and continue.
-- [feedback_finalize_without_asking](.claude/projects/-home-halbritt-git-striatum/memory/feedback_finalize_without_asking.md) — after a meaningful unit of work ships, automatically commit, push, FF main, push main, delete the working branch.
+- `feedback_operator_never_implements` — saved during dogfood-060. Override allowed by user for V1.5 fix-up + small bug fixes.
+- `feedback_autonomous_run_decisions` — don't block at human-acceptance gates; record the decision and continue.
+- `feedback_finalize_without_asking` — after a meaningful unit of work ships, automatically commit, push, FF main, push main, delete the working branch.
 
 ## Reference docs
 

@@ -29,7 +29,7 @@ closed by `run_f7659a42616591da5be84a822f8cf36e` and the final summary at
 6. TODO 61 / 49 / 62 / 63 legacy and direct-state cleanup.
 
 The workflow at
-`docs/operator/workflows/next-steps-1-6/workflow.json` runs the six track
+`docs/operator/workflows/next-steps-1-6.json` runs the six track
 jobs in one parallel group and then publishes a final consolidation artifact.
 Each track writes only to its own artifact directory so the workflow can run
 with `max_active_jobs: 6` without treating repository artifacts as live state.
@@ -51,8 +51,8 @@ with `max_active_jobs: 6` without treating repository artifacts as live state.
 ## Validate And Run
 
 ```bash
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/next-steps-1-6/workflow.json
-PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/next-steps-1-6/workflow.json --json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/next-steps-1-6.json
+PYTHONPATH=src python3 -m striatum.cli run prepare --workflow docs/operator/workflows/next-steps-1-6.json --json
 PYTHONPATH=src python3 -m striatum.cli branch confirm --run-id <run_id> --json
 PYTHONPATH=src python3 -m striatum.cli run start --run-id <run_id> --json
 ```

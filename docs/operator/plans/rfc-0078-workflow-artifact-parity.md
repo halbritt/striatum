@@ -35,7 +35,7 @@ workflow-authoring handoff:
 ## Execution Shape
 
 The workflow is
-`docs/operator/workflows/rfc-0078-workflow-artifact-parity/workflow.json`.
+`docs/operator/workflows/rfc-0078-workflow-artifact-parity.json`.
 It declares `max_active_jobs: 12` so the runner can exploit concurrency where
 write scopes are disjoint. The artifact-contract package is the first gate.
 Validation, lint, generator reuse, and render-md decision work can then proceed
@@ -60,7 +60,7 @@ At minimum, the workflow closer should report:
 
 ```bash
 go test ./...
-PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-workflow-artifact-parity/workflow.json
+PYTHONPATH=src python3 -m striatum.cli workflow validate --allow-same-model-pairing docs/operator/workflows/rfc-0078-workflow-artifact-parity.json
 ```
 
 If the Python validator is unavailable because RFC 0078 has advanced, replace

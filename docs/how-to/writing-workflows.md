@@ -465,7 +465,7 @@ use the interactive Codex agent-loop lane shown above.
 
 For the full harness-profile schema (recognised tool families,
 required fields, accountability rules), see
-[SPEC.md § Harness Profiles (RFC 0010 V1)](../reference/spec.md#harness-profiles-rfc-0010-v1).
+[SPEC.md § Harness Profiles](../reference/spec.md#harness-profiles).
 
 ## Validate before you ship
 

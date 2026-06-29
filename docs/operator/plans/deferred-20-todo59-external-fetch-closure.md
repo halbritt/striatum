@@ -52,7 +52,7 @@ augmentation-not-dependency boundary without a product decision.
 ## Validation
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-20-todo59-external-fetch-closure/workflow.json --json
+PYTHONPATH=src .venv/bin/python -m striatum.cli workflow validate docs/operator/workflows/deferred-20-todo59-external-fetch-closure.json --json
 PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_corpus_verify.py::test_corpus_v2_surface_keeps_augmentation_boundary_local tests/test_workflow_field_errors.py::test_reference_only_augmentation_validates tests/test_workflow_field_errors.py::test_augmentation_source_must_be_local_corpus_bundle
 (cd go && go test ./pkg/mutations -run 'TestAugmentation')
 PYTHONPATH=src .venv/bin/python - <<'PY'

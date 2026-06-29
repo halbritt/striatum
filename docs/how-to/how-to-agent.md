@@ -123,7 +123,7 @@ done, blocked on a human checkpoint, or waiting on a dependency.
 If you are the *operator session* (the AI session that supervises a
 dogfood, not the supervised role itself) and the operator has configured
 daemon MCP/chat tools for the run, use the tools listed in
-[`docs/MCP.md`](../explanation/mcp.md#dogfood-lifecycle-tools) over shelling out to
+[`docs/explanation/mcp.md`](../explanation/mcp.md#agent-loop) over shelling out to
 the bash CLI. The tool surface routes through the same daemon RPC
 authority boundary and keeps session/lease/message ids structured so
 you do not have to copy them between turns. Dogfood-lifecycle tools
