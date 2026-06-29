@@ -303,6 +303,38 @@ func TestRotationCapabilityResealRejectsSiblingLaneUIDLeaseReplay(t *testing.T) 
 	assertRotationNotCompleted(t, runner, ids, "sibling uid lease replay")
 }
 
+func TestRotationCapabilityResealRejectsForeignRunWorkLease(t *testing.T) {
+	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_work_lease_foreign_run", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
+		refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+		seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
+		if err := runner.Exec(ctx, `
+			UPDATE striatumd.leases
+			   SET run_id = $3
+			 WHERE repository_id = $1 AND lease_id = $2`,
+			ids.repoID, ids.leaseID, ids.runID+"_foreign"); err != nil {
+			t.Fatalf("retarget work lease run: %v", err)
+		}
+	})
+	assertRotationResealUnavailable(t, result, "reseal_work_lease_run_mismatch")
+	assertRotationNotCompleted(t, runner, ids, "foreign-run work lease")
+}
+
+func TestRotationCapabilityResealRejectsForeignRunLaneUIDLease(t *testing.T) {
+	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_uid_lease_foreign_run", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
+		refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+		uidLeaseID := seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
+		if err := runner.Exec(ctx, `
+			UPDATE striatumd.lane_uid_leases
+			   SET run_id = $3
+			 WHERE repository_id = $1 AND lease_id = $2`,
+			ids.repoID, uidLeaseID, ids.runID+"_foreign"); err != nil {
+			t.Fatalf("retarget lane uid lease run: %v", err)
+		}
+	})
+	assertRotationResealUnavailable(t, result, "lane_uid_lease_run_mismatch")
+	assertRotationNotCompleted(t, runner, ids, "foreign-run lane uid lease")
+}
+
 func TestRotationCapabilityResealBeyondGraceKeepsTypedFloor(t *testing.T) {
 	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_grace_expired", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
 		expireWorkLeaseForRotationReseal(t, ctx, runner, ids, -2*time.Minute)

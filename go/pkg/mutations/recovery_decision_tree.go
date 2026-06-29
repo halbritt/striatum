@@ -740,7 +740,7 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		       j.role_id, j.lane_selector_json, j.max_attempts,
 		       j.write_scope_json, j.current_message_id, j.current_lease_id,
 		       j.expected_artifacts_json,
-		       l.lease_id, l.state AS lease_state, l.expires_at AS lease_expires_at,
+		       l.lease_id, l.run_id AS lease_run_id, l.state AS lease_state, l.expires_at AS lease_expires_at,
 		       l.owner_session_id,
 		       s.session_id, s.state AS session_state, s.registered_at,
 		       s.last_mcp_request_at, s.last_tools_list_at, s.last_await_packet_at,
@@ -762,7 +762,7 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		       sp.metadata_json AS supervisor_pointer_metadata_json
 		  FROM striatumd.jobs j
 		  LEFT JOIN LATERAL (
-		    SELECT lz.lease_id, lz.state, lz.expires_at, lz.owner_session_id
+		    SELECT lz.lease_id, lz.run_id, lz.state, lz.expires_at, lz.owner_session_id
 		      FROM striatumd.leases lz
 		     WHERE lz.repository_id = j.repository_id
 		       AND lz.resource_id = j.job_id
@@ -972,8 +972,8 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		// #308(A): before choosing a requeue, an agent that engaged the work protocol
 		// and emitted output but never sealed (deadAgentExitedUnsealed) — whose lane
 		// is now confirmed dead OR dead-by-session-state — should be AUTO-FINALIZED
-		// from its already-published, body-reconstructable required artifacts instead
-		// of requeued. The deliverable is durable; re-running a (often max_attempts=1)
+		// from authored or already-published, body-reconstructable required artifacts
+		// instead of requeued. The deliverable is durable; re-running a (often max_attempts=1)
 		// final job both wastes a model invocation and cannot succeed once the
 		// requeue budget is spent, wedging the run at needs_operator. This reuses the
 		// proven D200 finalize-from-durable-artifact path (finalizeStalledJob) and all
@@ -1799,7 +1799,7 @@ func closeLeakedInterrogationWindow(ctx context.Context, tx db.TxRunner, reposit
 // tryFinalizeUnsealedFromDurableArtifact is the #308(A) autonomous finalize: for
 // a dead-lane job that engaged the work protocol but never sealed (the caller has
 // already established deadAgentExitedUnsealed), it auto-finalizes the job from its
-// already-published, body-reconstructable required artifacts — the same D200
+// authored or already-published, body-reconstructable required artifacts — the same D200
 // finalize-from-durable-artifact path the manual `recovery complete-stalled` verb
 // runs — INSTEAD of requeueing it. It returns finalized=false (and leaves the job
 // untouched, so the caller falls through to the requeue path) whenever the
@@ -1953,6 +1953,7 @@ func tryCapabilityResealRotationFromDurableArtifact(ctx context.Context, tx db.T
 
 func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repositoryID string, row map[string]any, now time.Time) (map[string]any, error) {
 	jobID := fmt.Sprint(nullable(row["job_id"]))
+	runID := fmt.Sprint(nullable(row["run_id"]))
 	sessionID := fmt.Sprint(nullable(row["session_id"]))
 	if sessionID == "" || sessionID == "<nil>" {
 		return resealUnavailable("reseal_session_missing", map[string]any{"job_id": jobID}), nil
@@ -1978,6 +1979,15 @@ func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repos
 			"lease_id":                  workLeaseID,
 			"expected_owner_session_id": sessionID,
 			"observed_owner_session_id": ownerSession,
+		}), nil
+	}
+	if leaseRunID := fmt.Sprint(nullable(row["lease_run_id"])); leaseRunID != runID {
+		return resealUnavailable("reseal_work_lease_run_mismatch", map[string]any{
+			"job_id":              jobID,
+			"lease_id":            workLeaseID,
+			"expected_run_id":     runID,
+			"observed_lease_run":  leaseRunID,
+			"observed_session_id": sessionID,
 		}), nil
 	}
 	if unavailable := validateResealWorkLease(row, workLeaseID, now); unavailable != nil {
@@ -2009,9 +2019,18 @@ func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repos
 			"lease_id":      uidLeaseID,
 		}), nil
 	}
+	wantUID, ok := int64ValueOptional(metadata["lane_uid"])
+	if !ok || wantUID <= 0 {
+		return resealUnavailable("lane_uid_missing", map[string]any{
+			"job_id":        jobID,
+			"session_id":    sessionID,
+			"supervisor_id": supervisorID,
+			"lease_id":      uidLeaseID,
+		}), nil
+	}
 
 	uidLease, err := oneRow(ctx, tx, `
-		SELECT state, generation, session_id, supervisor_id, pool_uid, pool_user
+		SELECT state, generation, run_id, session_id, supervisor_id, pool_uid, pool_user
 		  FROM striatumd.lane_uid_leases
 		 WHERE repository_id = $1 AND lease_id = $2
 		 FOR UPDATE`, repositoryID, uidLeaseID)
@@ -2027,12 +2046,11 @@ func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repos
 		return nil, err
 	}
 	gotGeneration, _ := int64ValueOptional(uidLease["generation"])
-	if rowString(uidLease, "state") != laneUIDLeaseStateActive ||
-		gotGeneration != wantGeneration ||
-		rowString(uidLease, "session_id") != sessionID ||
-		rowString(uidLease, "supervisor_id") != supervisorID {
-		return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
+	if rowString(uidLease, "run_id") != runID {
+		return resealUnavailable("lane_uid_lease_run_mismatch", map[string]any{
 			"job_id":                 jobID,
+			"expected_run_id":        runID,
+			"observed_run_id":        uidLease["run_id"],
 			"session_id":             sessionID,
 			"supervisor_id":          supervisorID,
 			"lease_id":               uidLeaseID,
@@ -2043,21 +2061,39 @@ func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repos
 			"observed_supervisor_id": uidLease["supervisor_id"],
 		}), nil
 	}
-	if wantUID, ok := int64ValueOptional(metadata["lane_uid"]); ok && wantUID > 0 {
-		gotUID, _ := int64ValueOptional(uidLease["pool_uid"])
-		if gotUID != wantUID {
-			return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
-				"job_id":              jobID,
-				"session_id":          sessionID,
-				"supervisor_id":       supervisorID,
-				"lease_id":            uidLeaseID,
-				"expected_lane_uid":   wantUID,
-				"observed_pool_uid":   gotUID,
-				"observed_pool_user":  uidLease["pool_user"],
-				"expected_generation": wantGeneration,
-				"observed_generation": gotGeneration,
-			}), nil
-		}
+	if rowString(uidLease, "state") != laneUIDLeaseStateActive ||
+		gotGeneration != wantGeneration ||
+		rowString(uidLease, "session_id") != sessionID ||
+		rowString(uidLease, "supervisor_id") != supervisorID {
+		return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
+			"job_id":                 jobID,
+			"expected_run_id":        runID,
+			"observed_run_id":        uidLease["run_id"],
+			"session_id":             sessionID,
+			"supervisor_id":          supervisorID,
+			"lease_id":               uidLeaseID,
+			"expected_generation":    wantGeneration,
+			"observed_generation":    gotGeneration,
+			"observed_state":         uidLease["state"],
+			"observed_session_id":    uidLease["session_id"],
+			"observed_supervisor_id": uidLease["supervisor_id"],
+		}), nil
+	}
+	gotUID, _ := int64ValueOptional(uidLease["pool_uid"])
+	if gotUID != wantUID {
+		return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
+			"job_id":              jobID,
+			"expected_run_id":     runID,
+			"observed_run_id":     uidLease["run_id"],
+			"session_id":          sessionID,
+			"supervisor_id":       supervisorID,
+			"lease_id":            uidLeaseID,
+			"expected_lane_uid":   wantUID,
+			"observed_pool_uid":   gotUID,
+			"observed_pool_user":  uidLease["pool_user"],
+			"expected_generation": wantGeneration,
+			"observed_generation": gotGeneration,
+		}), nil
 	}
 	return nil, nil
 }

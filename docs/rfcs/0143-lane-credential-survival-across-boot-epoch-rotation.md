@@ -257,12 +257,13 @@ a post-launch tmux query — authenticates the replacement. A `0600` reseal file
   authority and its channel) were gated on
   [RFC 0168](0168-per-lane-security-principal.md) landing. RFC 0168 P0 build v3
   is now accepted and integrated, so the draft implementation binds reseal to
-  daemon-owned session/job state plus the active lane UID lease id/generation.
+  daemon-owned session/job state plus the same-run active lane UID lease id,
+  generation, session id, supervisor id, and uid.
   The `reseal` capability is not a grantable public bearer and no admin token is
   made lane-readable. If the UID lease is missing, stale, mismatched, tied to a
-  sibling supervisor/session, or outside the short work-lease grace window, the
-  daemon records the Slice A typed floor and falls back to the existing
-  requeue/escalate recovery path. Tracked issue: #585.
+  sibling supervisor/session, tied to another run, or outside the short
+  work-lease grace window, the daemon records the Slice A typed floor and falls
+  back to the existing requeue/escalate recovery path. Tracked issue: #585.
 
 This decision does not widen who can read the admin token. Slice A remains pure
 observability; Slice B proceeds only as bounded recovery authority on top of the

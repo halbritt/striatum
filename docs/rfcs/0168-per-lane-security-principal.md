@@ -97,7 +97,8 @@ Rationale:
   `0600`**, session-scoped, invalidated on session close, and bounded by the
   session TTL; the current Slice B draft keeps the `reseal` capability
   daemon-internal and uses the active `lane_uid_leases` row plus supervisor
-  metadata to reject stale generations and sibling-lane replays.
+  metadata to reject stale generations, sibling-lane replays, and foreign-run
+  replays.
 - **RFC 0143 Slice A** (the legible `session_unrecoverable_across_rotation`
   typed-exit floor, option 4) **does NOT depend on this RFC** and ships
   independently — its predicate is computed entirely from daemon-side durable
