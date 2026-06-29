@@ -607,6 +607,48 @@ func TestWorkflowValidateWarnsOnForeignPromptSlug(t *testing.T) {
 	}
 }
 
+func TestWorkflowValidateWarnsOnDaemonContractScopeMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := writeWorkflow(t, dir, daemonContractScopeWorkflow())
+	var stdout, stderr bytes.Buffer
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	exitCode := run([]string{"workflow", "validate", filepath.Base(path)}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "daemon contract surface") || !strings.Contains(stderr.String(), "contracts/daemon_methods.json") {
+		t.Fatalf("expected daemon contract scope warning; stderr = %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run([]string{"workflow", "validate", "--json", filepath.Base(path)}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("json exit = %d, want 0; stderr = %s", exitCode, stderr.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	data := payload["data"].(map[string]any)
+	warnings, ok := data["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("expected one warning; data = %#v", data)
+	}
+	warning := warnings[0].(map[string]any)
+	if warning["rule"] != "daemon_contract_scope_missing" || warning["required_path"] != "contracts/daemon_methods.json" {
+		t.Fatalf("unexpected warning: %#v", warning)
+	}
+}
+
 func TestWorkflowValidateRefusesSameModelPairingUnlessAllowed(t *testing.T) {
 	dir := t.TempDir()
 	path := writeWorkflow(t, dir, sameModelWorkflow())
@@ -1108,6 +1150,10 @@ func foreignPromptSlugWorkflow() string {
   "edges": [],
   "cycles": []
 }`
+}
+
+func daemonContractScopeWorkflow() string {
+	return strings.Replace(basicWorkflow(), `"task_prompt": {"inline": "do work"}`, `"task_prompt": {"inline": "Implement CapabilityReseal and update the daemon method registry."}`, 1)
 }
 
 func sameModelWorkflow() string {

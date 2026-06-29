@@ -21,11 +21,14 @@ import (
 // messages quoted in #477):
 //   - human_checkpoint severity  -> `checkpoint resolve <id> continue`
 //   - escalation-class kinds      -> `escalation resolve <id>`
+//   - write_scope.contract_missing -> cancel/supersede and rerun with corrected scope
 //   - everything else (process)   -> `recovery resolve-blocker <id>`
 //
 // blockerEscalationKinds is kept in lockstep with escalationPredicate() (the
 // single source of truth HandleEscalationResolve uses to find a blocker), so the
 // surface this projection advertises is exactly the verb that will accept the id.
+// Blockers that cannot be cleared safely by a blocker-resolve verb instead name
+// the required operator action.
 
 // openRunBlockerActions returns the actionable open blockers for one run, used by
 // the dashboard projection so `dashboard --once` can show the id + resolve
@@ -114,6 +117,8 @@ func blockerResolveSurface(row map[string]any) string {
 	switch {
 	case stringFrom(row, "severity") == "human_checkpoint":
 		return "checkpoint.resolve"
+	case stringFrom(row, "blocker_kind") == "write_scope.contract_missing":
+		return "workflow.correct_scope_rerun"
 	case blockerKindUsesEscalationResolve(stringFrom(row, "blocker_kind")):
 		return "escalation.resolve"
 	default:
@@ -122,8 +127,8 @@ func blockerResolveSurface(row map[string]any) string {
 }
 
 // blockerResolutionCommand is the literal CLI an operator runs to clear the
-// blocker. It is the load-bearing output of #477: the id was findable, but the
-// VERB was a maze.
+// blocker when a safe resolve verb exists. For workflow authoring blockers that
+// cannot be safely closed in place, it is the required rerun action instead.
 func blockerResolutionCommand(row map[string]any) string {
 	blockerID := stringFrom(row, "blocker_id")
 	switch blockerResolveSurface(row) {
@@ -131,6 +136,8 @@ func blockerResolutionCommand(row map[string]any) string {
 		return "striatum checkpoint resolve " + blockerID + " continue"
 	case "escalation.resolve":
 		return "striatum escalation resolve " + blockerID
+	case "workflow.correct_scope_rerun":
+		return "cancel or supersede the blocked run, add the missing write_scope.allowed_paths entry, and rerun the workflow; do not use recovery resolve-blocker"
 	default:
 		return "striatum recovery resolve-blocker " + blockerID
 	}
@@ -138,6 +145,9 @@ func blockerResolutionCommand(row map[string]any) string {
 
 // blockerResolveCommand is the JSON-emitting form for scripted operators.
 func blockerResolveCommand(row map[string]any) string {
+	if blockerResolveSurface(row) == "workflow.correct_scope_rerun" {
+		return ""
+	}
 	return blockerResolutionCommand(row) + " --json"
 }
 

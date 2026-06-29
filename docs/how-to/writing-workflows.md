@@ -475,6 +475,20 @@ Before preparing a run, check the scaffold:
 striatum --repo "$TARGET_REPO" workflow validate path/to/workflow.json --json
 ```
 
+For repo-write work, do the scope pass before launch:
+
+1. Read every prompt body and the job objective.
+2. List the source and documentation paths the task is likely to touch.
+3. Compare that list with each job's `write_scope.allowed_paths`.
+4. Run `workflow validate --json` and resolve warnings before `run prepare`.
+
+If a job changes daemon RPC routes, capabilities, method registry entries, or
+the generated daemon method tables, include `contracts/` or
+`contracts/daemon_methods.json` in that job's allowed paths. A workflow that
+mentions daemon contract work but omits that scope is a launch-time footgun:
+the lane can produce a valid draft while the daemon cannot durably seal the
+contract file.
+
 Review the validation output for warnings about lane commands, graph
 structure, write scopes, required artifacts, and any principal escalations. Avoid
 absolute home-directory paths in workflow fixtures; use

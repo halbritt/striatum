@@ -139,6 +139,33 @@ func TestValidateRejectsWriteScopeGlobPaths(t *testing.T) {
 	}
 }
 
+func TestDaemonContractScopeWarningsRequireContractsScope(t *testing.T) {
+	workflow := validWorkflow()
+	draft := workflow["jobs"].([]any)[0].(map[string]any)
+	draft["objective"] = "Implement CapabilityReseal and update the daemon method registry."
+
+	warnings := DaemonContractScopeWarnings(workflow)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one daemon contract scope warning", warnings)
+	}
+	warning := warnings[0]
+	if warning["rule"] != "daemon_contract_scope_missing" {
+		t.Fatalf("rule = %#v", warning["rule"])
+	}
+	if warning["job_id"] != "draft" || warning["required_path"] != daemonContractPath {
+		t.Fatalf("warning = %#v", warning)
+	}
+	if !strings.Contains(warning["message"].(string), "contracts/") {
+		t.Fatalf("message should name contracts scope: %s", warning["message"])
+	}
+
+	scope := draft["write_scope"].(map[string]any)
+	scope["allowed_paths"] = []any{"src/", "contracts/"}
+	if warnings := DaemonContractScopeWarnings(workflow); len(warnings) != 0 {
+		t.Fatalf("contracts scope should clear warning, got %#v", warnings)
+	}
+}
+
 // TestValidatePanelQuorum verifies RFC 0135 P4 (#338, D214): panel_role defaults to
 // gating, accepts gating|advisory on a review job, is rejected on a non-review job and
 // for unknown values; max_gating_abstentions must be a non-negative whole number and

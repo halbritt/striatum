@@ -41,6 +41,7 @@ func Lint(workflow map[string]any) (map[string]any, error) {
 	lintOperatorContentNeutrality(workflow, jobMap, &findings)
 	lintReviewFreshness(jobMap, &findings)
 	lintWriteScopeRisk(workflow, jobMap, &findings)
+	findings = append(findings, DaemonContractScopeWarnings(workflow)...)
 	lintParallelSharedResources(jobMap, &findings)
 	lintMissingEscalationPath(workflow, jobMap, &findings)
 	lintAgyOneShotPipeLane(workflow, &findings)

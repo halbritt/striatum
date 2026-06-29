@@ -888,6 +888,7 @@ func runWorkflowValidate(args []string, stdout io.Writer, stderr io.Writer, repo
 	// (org/repo slug or out-of-repo path token) is a non-fatal WARNING — surface
 	// the cross-repo intent before a lane spawns rather than letting it hide.
 	warnings := workflowauthoring.ForeignRepoReachWarnings(workflow, filepath.Base(repoRoot))
+	warnings = append(warnings, workflowauthoring.DaemonContractScopeWarnings(workflow)...)
 	if jsonOutput {
 		data := map[string]any{
 			"valid":       true,

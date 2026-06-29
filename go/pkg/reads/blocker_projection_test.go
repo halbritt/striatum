@@ -94,6 +94,28 @@ func TestShapeBlockerActionRowsProcessBlockerNamesRecoveryResolve(t *testing.T) 
 	}
 }
 
+func TestShapeBlockerActionRowsContractMissingNamesCorrectedScopeRerun(t *testing.T) {
+	rows := []map[string]any{{
+		"blocker_id":   "blk_scope",
+		"severity":     "blocked",
+		"blocker_kind": "write_scope.contract_missing",
+		"state":        "open",
+	}}
+	entry := shapeBlockerActionRows(rows)[0]
+	if entry["resolve_surface"] != "workflow.correct_scope_rerun" {
+		t.Fatalf("resolve_surface = %#v", entry["resolve_surface"])
+	}
+	if entry["resolve_command"] != "" {
+		t.Fatalf("resolve_command = %#v, want empty for non-CLI rerun guidance", entry["resolve_command"])
+	}
+	message, _ := entry["resolution_command"].(string)
+	for _, want := range []string{"supersede", "missing write_scope.allowed_paths", "rerun", "do not use recovery resolve-blocker"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("resolution_command %q missing %q", message, want)
+		}
+	}
+}
+
 // The escalation-class enumeration MUST stay in lockstep with the kinds in
 // escalationPredicate() (detail.go) — the single source of truth the resolve
 // handler uses to find a blocker. If they drift, the projection would advertise a
