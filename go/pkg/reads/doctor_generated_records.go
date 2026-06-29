@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/halbritt/striatum/go/pkg/db"
 )
@@ -19,6 +21,22 @@ const (
 	generatedRecordIntegrityReadFailed   = "generated_record_integrity_read_failed"
 	generatedRecordRepositoryBucketEmpty = "generated_record_repository_blob_bucket_missing"
 )
+
+const doctorGeneratedRecordBlobVerifyWorkers = 16
+
+type generatedRecordVerifyResult struct {
+	checked bool
+	problem string
+	record  map[string]any
+}
+
+type generatedRecordVerifyJob struct {
+	rowIndex   int
+	recordID   string
+	sourcePath string
+	blobKey    string
+	blobSHA    string
+}
 
 func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repositoryID string, blobBlock map[string]any) (map[string]any, []string, []map[string]any) {
 	block := map[string]any{
@@ -90,14 +108,14 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 		records = append(records, generatedRecordProblemRecord(generatedRecordDuplicateRows, "", sourcePath, detail))
 	}
 
-	checked := 0
-	for _, row := range rows {
+	results := make([]generatedRecordVerifyResult, len(rows))
+	verifyJobs := []generatedRecordVerifyJob{}
+	for rowIndex, row := range rows {
 		if err := ctx.Err(); err != nil {
 			block["incomplete"] = true
 			block["incomplete_reason"] = err.Error()
 			break
 		}
-		checked++
 		recordID := stringFrom(row, "record_id")
 		sourcePath := stringFrom(row, "source_path")
 		contentSHA := strings.TrimSpace(stringFrom(row, "content_sha256"))
@@ -105,55 +123,44 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 		blobSHA := strings.TrimSpace(stringFrom(row, "blob_sha256"))
 		if contentSHA == "" || blobKey == "" || blobSHA == "" {
 			detail := "blob_key/blob_sha256/content_sha256 must all be present"
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobMetadataMissing, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobMetadataMissing, recordID, sourcePath, detail))
+			results[rowIndex] = generatedRecordVerifyResult{
+				checked: true,
+				problem: generatedRecordProblemString(generatedRecordBlobMetadataMissing, recordID, detail),
+				record:  generatedRecordProblemRecord(generatedRecordBlobMetadataMissing, recordID, sourcePath, detail),
+			}
 			continue
 		}
 		if contentSHA != blobSHA {
 			detail := fmt.Sprintf("content_sha256=%s blob_sha256=%s", contentSHA, blobSHA)
-			problems = append(problems, generatedRecordProblemString(generatedRecordContentHashMismatch, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordContentHashMismatch, recordID, sourcePath, detail))
-			continue
-		}
-		remoteSHA, exists, err := packageBlobClient.RemoteSha256(ctx, bucket, blobKey)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			block["incomplete"] = true
-			block["incomplete_reason"] = ctxErr.Error()
-			break
-		}
-		if err != nil {
-			detail := err.Error()
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobBodyVerifyFailed, recordID, sourcePath, detail))
-			continue
-		}
-		if !exists {
-			detail := "blob key not found: " + blobKey
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobMissing, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobMissing, recordID, sourcePath, detail))
-			continue
-		}
-		if remoteSHA == "" {
-			detail := "blob lacks X-Striatum-Sha256 metadata"
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobMetadataMissing, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobMetadataMissing, recordID, sourcePath, detail))
-			continue
-		}
-		if remoteSHA != blobSHA {
-			detail := fmt.Sprintf("row blob_sha256=%s remote sha256=%s", blobSHA, remoteSHA)
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobKeyHashMismatch, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobKeyHashMismatch, recordID, sourcePath, detail))
-			continue
-		}
-		if _, err := packageBlobClient.GetBytes(ctx, bucket, blobKey, blobSHA); err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				block["incomplete"] = true
-				block["incomplete_reason"] = ctxErr.Error()
-				break
+			results[rowIndex] = generatedRecordVerifyResult{
+				checked: true,
+				problem: generatedRecordProblemString(generatedRecordContentHashMismatch, recordID, detail),
+				record:  generatedRecordProblemRecord(generatedRecordContentHashMismatch, recordID, sourcePath, detail),
 			}
-			detail := err.Error()
-			problems = append(problems, generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, recordID, detail))
-			records = append(records, generatedRecordProblemRecord(generatedRecordBlobBodyVerifyFailed, recordID, sourcePath, detail))
+			continue
+		}
+		verifyJobs = append(verifyJobs, generatedRecordVerifyJob{
+			rowIndex:   rowIndex,
+			recordID:   recordID,
+			sourcePath: sourcePath,
+			blobKey:    blobKey,
+			blobSHA:    blobSHA,
+		})
+	}
+	verifyGeneratedRecordBlobs(ctx, bucket, verifyJobs, results)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		block["incomplete"] = true
+		block["incomplete_reason"] = ctxErr.Error()
+	}
+	checked := 0
+	for _, result := range results {
+		if !result.checked {
+			continue
+		}
+		checked++
+		if result.problem != "" {
+			problems = append(problems, result.problem)
+			records = append(records, result.record)
 		}
 	}
 	block["record_count"] = len(rows)
@@ -161,6 +168,77 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 	block["duplicate_source_count"] = len(duplicateRows)
 	block["problem_count"] = len(problems)
 	return block, problems, records
+}
+
+func verifyGeneratedRecordBlobs(ctx context.Context, bucket string, jobs []generatedRecordVerifyJob, results []generatedRecordVerifyResult) {
+	if len(jobs) == 0 || packageBlobClient == nil {
+		return
+	}
+	workerCount := doctorGeneratedRecordBlobVerifyWorkers
+	if len(jobs) < workerCount {
+		workerCount = len(jobs)
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				jobIndex := int(next.Add(1) - 1)
+				if jobIndex >= len(jobs) {
+					return
+				}
+				job := jobs[jobIndex]
+				results[job.rowIndex] = verifyGeneratedRecordBlob(ctx, bucket, job)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func verifyGeneratedRecordBlob(ctx context.Context, bucket string, job generatedRecordVerifyJob) generatedRecordVerifyResult {
+	result := generatedRecordVerifyResult{checked: true}
+	remoteSHA, exists, err := packageBlobClient.RemoteSha256(ctx, bucket, job.blobKey)
+	if ctx.Err() != nil {
+		return generatedRecordVerifyResult{}
+	}
+	if err != nil {
+		detail := err.Error()
+		result.problem = generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, job.recordID, detail)
+		result.record = generatedRecordProblemRecord(generatedRecordBlobBodyVerifyFailed, job.recordID, job.sourcePath, detail)
+		return result
+	}
+	if !exists {
+		detail := "blob key not found: " + job.blobKey
+		result.problem = generatedRecordProblemString(generatedRecordBlobMissing, job.recordID, detail)
+		result.record = generatedRecordProblemRecord(generatedRecordBlobMissing, job.recordID, job.sourcePath, detail)
+		return result
+	}
+	if remoteSHA == "" {
+		detail := "blob lacks X-Striatum-Sha256 metadata"
+		result.problem = generatedRecordProblemString(generatedRecordBlobMetadataMissing, job.recordID, detail)
+		result.record = generatedRecordProblemRecord(generatedRecordBlobMetadataMissing, job.recordID, job.sourcePath, detail)
+		return result
+	}
+	if remoteSHA != job.blobSHA {
+		detail := fmt.Sprintf("row blob_sha256=%s remote sha256=%s", job.blobSHA, remoteSHA)
+		result.problem = generatedRecordProblemString(generatedRecordBlobKeyHashMismatch, job.recordID, detail)
+		result.record = generatedRecordProblemRecord(generatedRecordBlobKeyHashMismatch, job.recordID, job.sourcePath, detail)
+		return result
+	}
+	if _, err := packageBlobClient.GetBytes(ctx, bucket, job.blobKey, job.blobSHA); err != nil {
+		if ctx.Err() != nil {
+			return generatedRecordVerifyResult{}
+		}
+		detail := err.Error()
+		result.problem = generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, job.recordID, detail)
+		result.record = generatedRecordProblemRecord(generatedRecordBlobBodyVerifyFailed, job.recordID, job.sourcePath, detail)
+	}
+	return result
 }
 
 func generatedRecordProblemString(code, id, detail string) string {

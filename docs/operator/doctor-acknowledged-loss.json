@@ -160,6 +160,30 @@
       "reason": "Process summary from the RFC 0142 P0 code_change dogfood (run_6e9c3943, completed; the P0 code deliverable landed via PR #553). Its durable git anchor was the run branch striatum/cc_rfc0142_p0, deleted in the 2026-06-25 stale-run-branch cleanup, so the file is absent from the live anchor. Content is preserved at commit 9a3f0d12 on refs/backup/branch-cleanup-2026-06-25/striatum/cc_rfc0142_p0 (recoverable). Immaterial process summary from a completed, merged dogfood.",
       "acknowledged_by": "operator-claude-opus-4-8",
       "acknowledged_at": "2026-06-26"
+    },
+    {
+      "artifact_id": "art_5abd8ea0276b5e141671795249a7ceed",
+      "repo_path": "dogfoods/rfc-0109-agy-seat/artifacts/PANEL_SYNTHESIS.md",
+      "content_sha256": "e1bb0b7ab918d246c383c4ef88354bce690e8a58731e83da00606d14832bfe0f",
+      "reason": "Historical RFC 0109 agy-seat panel synthesis draft from completed run run_139c5981e91cc392fda84ed678772f80. The run branch and refs/striatum job pin are absent, the repo_path was removed from origin/main during the 2026-06-29 docs consolidation, and the exact recorded draft content_sha256 is not present in default-branch history; a later panel_synthesis artifact from the same completed run is what landed at the deleted dogfood path. Immaterial historical dogfood loss from runner-development provenance.",
+      "acknowledged_by": "operator-gpt-5-1",
+      "acknowledged_at": "2026-06-29"
+    },
+    {
+      "artifact_id": "art_d39947995b80f69bae1488e1ebd17e52",
+      "repo_path": "dogfoods/rfc-0103-w3-141-restart/artifacts/RESTART_SURVIVAL_PROOF.md",
+      "content_sha256": "3f7ce8150096dd45a362486b4408b6e8840ba6b66fbcda117af49fc621726421",
+      "reason": "Historical RFC 0103 W3 restart-survival proof artifact from completed run run_f8b098499e8187b8a8e4dffb61f7e927. The run branch and refs/striatum job pin are absent, the repo_path was removed from origin/main during the 2026-06-29 docs consolidation, and the exact recorded content_sha256 is not present in default-branch history. Immaterial historical dogfood proof loss from runner-development provenance.",
+      "acknowledged_by": "operator-gpt-5-1",
+      "acknowledged_at": "2026-06-29"
+    },
+    {
+      "artifact_id": "art_33bcea264dcd0416827889a3e1db9447",
+      "repo_path": "dogfoods/rfc-0103-floor/artifacts/FLOOR_SYNTHESIS.md",
+      "content_sha256": "5afb8ddab4bd53587d10fe87b567211c40ab84069170fc1147d879f576d8940d",
+      "reason": "Historical RFC 0103 floor synthesis draft from completed run run_fb10589f6c6633dd110ac26e593ad7d7. The run branch and refs/striatum job pin are absent, the repo_path was removed from origin/main during the 2026-06-29 docs consolidation, and the exact recorded draft content_sha256 is not present in default-branch history; a later floor_synthesis artifact from the same completed run is what landed at the deleted dogfood path. Immaterial historical dogfood loss from runner-development provenance.",
+      "acknowledged_by": "operator-gpt-5-1",
+      "acknowledged_at": "2026-06-29"
     }
   ]
 }

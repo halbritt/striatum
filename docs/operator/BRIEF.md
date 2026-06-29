@@ -12,6 +12,39 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-29 delta - doctor artifact problems cleared
+
+Live `doctor` was red after the docs information-architecture consolidation
+exposed three uncatalogued historical dogfood artifacts whose recorded content
+is no longer present on a durable ref, run branch, or the current default-branch
+history. Those rows were verified as immaterial historical runner-development
+provenance: two were earlier synthesis drafts superseded by later same-run
+artifacts, and one was an old restart-survival proof from a completed dogfood.
+They are now added to the sha-bound
+`docs/operator/doctor-acknowledged-loss.json` baseline, so a future different
+hash at the same artifact id still reds.
+
+`doctor --verbose --json` at `2026-06-29T19:09:08Z` returned `ok=true`,
+`problems_count=0`; `artifact_anchor_integrity` checked all 608 artifact rows
+with `problem_count=0`. The remaining high-volume artifact/worktree findings
+are warnings from the D204/D205 legibility classes: terminal-run debris,
+legacy unverifiable records, superseded default-branch records, and curated
+acknowledged losses.
+
+The generated-record integrity check still performs full blob body verification;
+source now runs those per-record blob checks through a bounded worker pool so
+the 2,096 indexed generated-record rows can complete without weakening corrupt
+or missing blob detection. Install/restart the daemon from the commit carrying
+this change before treating the running daemon image as updated.
+
+RFC 0143 Slice B remains a blocked live run
+(`run_448c756fc1ca401172a2cf19c57baa2f`,
+`blk_7050883e550f7a8bc2bd006228d1983a`) because its frozen write scope omitted
+`contracts/`. `STRIATUM-25` is already accepted for the workflow-validation
+prevention fix; do not use `recovery resolve-blocker` on this run. The daemon
+surface says the legitimate path is cancel/supersede and rerun with corrected
+scope.
+
 ## 2026-06-29 delta - RFC 0172 accepted as proof-only supervision
 
 RFC 0172 is accepted as **D275** after the health gate that blocked the earlier
