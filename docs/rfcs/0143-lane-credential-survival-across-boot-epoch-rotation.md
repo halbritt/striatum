@@ -4,10 +4,11 @@ Status: accepted (D261, 2026-06-24) — **split**: Slice A **BUILT + LANDED**
 (`a6d5610f`, 2026-06-24) — the legible `session_unrecoverable_across_rotation`
 typed-exit floor as pure daemon-side observability; Slice B (options 2/3, the
 `CapabilityReseal` authority) is **unblocked by [RFC 0168](0168-per-lane-security-principal.md)**
-(per-lane OS uid; P0 build v3 accepted and integrated), with a draft build in
-`rfc-0143-slice-b-build` that keeps `CapabilityReseal` daemon-internal and
-requires a fresh lane UID lease/generation before resealing. See `## Decision
-(D261)` below.
+(per-lane OS uid; P0 build v3 accepted and integrated), with an accepted and
+apply-verified Slice B build in `rfc-0143-slice-b-build`
+(`run_20d2fb3e999d1b5ae4e5de6b180d86a3`, 2026-06-29) that keeps
+`CapabilityReseal` daemon-internal and requires a fresh lane UID
+lease/generation before resealing. See `## Decision (D261)` below.
 
 > **Slice A landed (2026-06-24, `a6d5610f`).** A daemon-observed
 > `daemon.stale_epoch_rotation` event (recorded when `validateBootEpoch` rejects a
@@ -22,8 +23,8 @@ requires a fresh lane UID lease/generation before resealing. See `## Decision
 > legibility, RFC-0168-bounded**, sound via the **observability-only** invariant (a
 > forged typed class is no more privileged than a forged `agent_exited_unsealed`,
 > which a same-uid sibling can already cause). Verified by sealed `builtin:go-build` +
-> `builtin:go-vet` bubblewrap receipts. Closes the legibility half of #512; the reseal
-> half awaits Slice B / RFC 0168.
+> `builtin:go-vet` bubblewrap receipts. Closes the legibility half of #512; the Slice B
+> build now sits on the integrated RFC 0168 substrate.
 Date: 2026-06-21
 author: proposer-claude-opus-4-8
 
@@ -253,17 +254,17 @@ a post-launch tmux query — authenticates the replacement. A `0600` reseal file
   proposed W1 connect-out channel is a pure Slice-B feature, not a prerequisite
   for Slice A. Slice A therefore clears on its own merits as observability and
   does not touch the credential trust model.
-- **Slice B — draft build in progress.** Options 2/3 (the `CapabilityReseal`
-  authority and its channel) were gated on
+- **Slice B — build accepted and apply-verified.** Options 2/3 (the
+  `CapabilityReseal` authority and its channel) were gated on
   [RFC 0168](0168-per-lane-security-principal.md) landing. RFC 0168 P0 build v3
-  is now accepted and integrated, so the draft implementation binds reseal to
-  daemon-owned session/job state plus the same-run active lane UID lease id,
+  is now accepted and integrated, so the reviewed implementation binds reseal
+  to daemon-owned session/job state plus the same-run active lane UID lease id,
   generation, session id, supervisor id, and uid.
   The `reseal` capability is not a grantable public bearer and no admin token is
   made lane-readable. If the UID lease is missing, stale, mismatched, tied to a
   sibling supervisor/session, tied to another run, or outside the short
   work-lease grace window, the daemon records the Slice A typed floor and falls
-  back to the existing requeue/escalate recovery path. Tracked issue: #585.
+  back to the existing requeue/escalate recovery path. Tracked issue: #512.
 
 This decision does not widen who can read the admin token. Slice A remains pure
 observability; Slice B proceeds only as bounded recovery authority on top of the
