@@ -26,7 +26,7 @@ hash at the same artifact id still reds.
 
 `doctor --verbose --json` after installing and restarting system
 `striatumd.service` from `61b81220` returned `ok=true`, `problems_count=0`,
-and `warnings_count=192`. `generated_record_integrity` checked all 2,096
+with advisory warnings only. `generated_record_integrity` checked all 2,096
 indexed rows with `problem_count=0`, and `artifact_anchor_integrity` checked all
 608 artifact rows with `problem_count=0`. The remaining high-volume
 artifact/worktree findings are warnings from the D204/D205 legibility classes:
