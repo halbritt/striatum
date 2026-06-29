@@ -6,8 +6,10 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/halbritt/striatum/go/pkg/agentloop"
+	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/pgtest"
 	gosupervisor "github.com/halbritt/striatum/go/pkg/supervisor"
 )
@@ -221,13 +223,11 @@ func TestTypedFloorGrantsNoAutoSealAuthority(t *testing.T) {
 	}
 }
 
-// TestRotationLockedLaneWithDurableArtifactAutoFinalizesTaggedTyped is the finalize
-// half of acceptance (a)/(d): a rotation-locked lane WITH an already-published,
-// body-reconstructable durable artifact takes the SAME #308 auto-finalize path as
-// agent_exited_unsealed (the job completes from the durable artifact — NOT a new seal
-// minted by the floor), only TAGGED with the typed class. This proves the typed floor
-// adds no new finalize path and is no-more-privileged (observability-only).
-func TestRotationLockedLaneWithDurableArtifactAutoFinalizesTaggedTyped(t *testing.T) {
+// TestRotationLockedLaneWithFreshLaneUIDLeaseCapabilityResealsDurableArtifact is
+// the RFC 0143 Slice B positive path: a rotation-locked lane WITH a durable
+// expected artifact only completes when the daemon can prove the owning
+// supervisor still holds the active per-lane UID lease/generation.
+func TestRotationLockedLaneWithFreshLaneUIDLeaseCapabilityResealsDurableArtifact(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git not on PATH: %v", err)
 	}
@@ -241,6 +241,8 @@ func TestRotationLockedLaneWithDurableArtifactAutoFinalizesTaggedTyped(t *testin
 	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
 	seedPublishedArtifact(t, ctx, runner, ids, "art_rot_finalize", "out", "docs/out.txt", payload, nil)
 	seedUnsealedPublishedFinalJob308(t, ctx, runner, ids)
+	refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+	seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
 
 	// The daemon observed a stale-epoch rejection for this owning session (T1).
 	if err := RecordStaleEpochRejection(ctx, runner, ids.repoID, ids.runID, ids.sessionID); err != nil {
@@ -267,16 +269,220 @@ func TestRotationLockedLaneWithDurableArtifactAutoFinalizesTaggedTyped(t *testin
 	if requeue != 0 {
 		t.Fatalf("requeue_count = %d, want 0", requeue)
 	}
-	// ...but the action is TAGGED with the typed rotation class (legible reason).
+	// ...but Slice B records the narrow reseal action, not the generic finalize path.
 	summary := recoveryActionsFromSweep(t, result)
 	acts, _ := summary["actions"].([]map[string]any)
-	foundTyped := false
-	for _, a := range acts {
-		if a["action"] == "auto_finalize_unsealed" && a["acted"] == true && a["stall_class"] == stallClassSessionUnrecoverableAcrossRotation {
-			foundTyped = true
+	action, ok := findRecoveryAction(acts, "capability_reseal")
+	if !ok || action["acted"] != true || action["stall_class"] != stallClassSessionUnrecoverableAcrossRotation {
+		t.Fatalf("capability_reseal action missing or wrong; actions=%#v", acts)
+	}
+	resealedEvents := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND job_id = $3
+		   AND event_type = 'recovery.capability_resealed'`, ids.repoID, ids.runID, ids.jobID)
+	if resealedEvents != 1 {
+		t.Fatalf("recovery.capability_resealed events = %d, want 1", resealedEvents)
+	}
+}
+
+func TestRotationCapabilityResealRejectsStaleLaneUIDGeneration(t *testing.T) {
+	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_stale_generation", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
+		refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+		seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 8, "", "")
+	})
+	assertRotationResealUnavailable(t, result, "lane_uid_generation_mismatch")
+	assertRotationNotCompleted(t, runner, ids, "stale generation")
+}
+
+func TestRotationCapabilityResealRejectsSiblingLaneUIDLeaseReplay(t *testing.T) {
+	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_sibling_replay", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
+		refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+		seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "sess_sibling_replay", "sup_sibling_replay")
+	})
+	assertRotationResealUnavailable(t, result, "lane_uid_generation_mismatch")
+	assertRotationNotCompleted(t, runner, ids, "sibling uid lease replay")
+}
+
+func TestRotationCapabilityResealBeyondGraceKeepsTypedFloor(t *testing.T) {
+	ids, result, runner := sweepRotationDurableArtifactWithAuthority(t, "rot_grace_expired", func(ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs) {
+		expireWorkLeaseForRotationReseal(t, ctx, runner, ids, -2*time.Minute)
+		seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
+	})
+	assertRotationResealUnavailable(t, result, "reseal_grace_expired")
+	assertRotationNotCompleted(t, runner, ids, "expired reseal grace")
+}
+
+func TestRotationCapabilityResealUsesExpectedArtifactsOnly(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "rot_unexpected_artifact", true)
+
+	payload := []byte("wrong-path rotation deliverable\n")
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/wrong.txt", string(payload))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifact(t, ctx, runner, ids, "art_rot_wrong", "wrong", "docs/wrong.txt", payload, nil)
+	seedUnsealedPublishedFinalJob308(t, ctx, runner, ids)
+	refreshWorkLeaseForRotationReseal(t, ctx, runner, ids, time.Minute)
+	seedLaneUIDResealAuthority(t, ctx, runner, ids, 7, 7, "", "")
+	if err := RecordStaleEpochRejection(ctx, runner, ids.repoID, ids.runID, ids.sessionID); err != nil {
+		t.Fatalf("record stale-epoch observation: %v", err)
+	}
+	stubRotationDeadProbe(t)
+
+	result, err := SweepRun(ctx, runner, ids.repoID, ids.runID, "")
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got == "completed" {
+		t.Fatalf("job state = completed: reseal must use daemon expected artifacts, not unexpected lane input; recovery_actions=%#v", result["recovery_actions"])
+	}
+	summary := recoveryActionsFromSweep(t, result)
+	acts, _ := summary["actions"].([]map[string]any)
+	if action, ok := findRecoveryAction(acts, "capability_reseal"); ok && action["acted"] == true {
+		t.Fatalf("capability_reseal acted with only an unexpected artifact path; actions=%#v", acts)
+	}
+}
+
+func sweepRotationDurableArtifactWithAuthority(t *testing.T, suffix string, configure func(context.Context, db.Runner, worktreeRequiredFixtureIDs)) (worktreeRequiredFixtureIDs, map[string]any, db.Runner) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, suffix, true)
+
+	payload := []byte("durable rotation deliverable\n")
+	sha := commitWorktreeFile(t, ids.worktreeRoot, "docs/out.txt", string(payload))
+	gitRun(t, repoRoot, "update-ref", "refs/heads/"+ids.runBranch, sha)
+	seedPublishedArtifact(t, ctx, runner, ids, "art_"+suffix, "out", "docs/out.txt", payload, nil)
+	seedUnsealedPublishedFinalJob308(t, ctx, runner, ids)
+	configure(ctx, runner, ids)
+	if err := RecordStaleEpochRejection(ctx, runner, ids.repoID, ids.runID, ids.sessionID); err != nil {
+		t.Fatalf("record stale-epoch observation: %v", err)
+	}
+	stubRotationDeadProbe(t)
+
+	result, err := SweepRun(ctx, runner, ids.repoID, ids.runID, "")
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	return ids, result, runner
+}
+
+func seedLaneUIDResealAuthority(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, leaseGeneration, metadataGeneration int64, leaseSessionID, leaseSupervisorID string) string {
+	t.Helper()
+	if leaseSessionID == "" {
+		leaseSessionID = ids.sessionID
+	}
+	if leaseSupervisorID == "" {
+		leaseSupervisorID = "sup_" + ids.sessionID
+	}
+	uidLeaseID := "luid_" + ids.sessionID
+	now := time.Now().UTC()
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.lane_uid_leases (
+		  repository_id, lease_id, pool_uid, pool_user, generation,
+		  run_id, session_id, supervisor_id, state, leased_at
+		) VALUES ($1,$2,65042,'lane-pool-rfc0143', $3, $4, $5, $6, 'active', $7)`,
+		ids.repoID, uidLeaseID, leaseGeneration, ids.runID, leaseSessionID, leaseSupervisorID, now); err != nil {
+		t.Fatalf("insert lane uid lease: %v", err)
+	}
+	metadataJSON := fmt.Sprintf(`{"lane_uid_lease_id":%q,"lane_uid":65042,"lane_uid_generation":%d}`, uidLeaseID, metadataGeneration)
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.process_supervisor_pointers
+		   SET metadata_json = metadata_json || $3::jsonb
+		 WHERE repository_id = $1 AND session_id = $2`,
+		ids.repoID, ids.sessionID, metadataJSON); err != nil {
+		t.Fatalf("update supervisor metadata: %v", err)
+	}
+	return uidLeaseID
+}
+
+func refreshWorkLeaseForRotationReseal(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, ttl time.Duration) {
+	t.Helper()
+	expiresAt := time.Now().UTC().Add(ttl)
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.leases
+		   SET state = 'active', expires_at = $3, released_at = NULL, release_reason = NULL
+		 WHERE repository_id = $1 AND lease_id = $2`,
+		ids.repoID, ids.leaseID, expiresAt); err != nil {
+		t.Fatalf("refresh work lease: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs
+		   SET current_lease_id = $3
+		 WHERE repository_id = $1 AND job_id = $2`,
+		ids.repoID, ids.jobID, ids.leaseID); err != nil {
+		t.Fatalf("restore job lease pointer: %v", err)
+	}
+}
+
+func expireWorkLeaseForRotationReseal(t *testing.T, ctx context.Context, runner db.Runner, ids worktreeRequiredFixtureIDs, age time.Duration) {
+	t.Helper()
+	expiresAt := time.Now().UTC().Add(age)
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.leases
+		   SET state = 'expired', expires_at = $3, released_at = $3, release_reason = 'expired'
+		 WHERE repository_id = $1 AND lease_id = $2`,
+		ids.repoID, ids.leaseID, expiresAt); err != nil {
+		t.Fatalf("expire work lease: %v", err)
+	}
+}
+
+func assertRotationResealUnavailable(t *testing.T, result map[string]any, reason string) {
+	t.Helper()
+	summary := recoveryActionsFromSweep(t, result)
+	acts, _ := summary["actions"].([]map[string]any)
+	action, ok := findRecoveryAction(acts, "capability_reseal_unavailable")
+	if !ok {
+		t.Fatalf("capability_reseal_unavailable action missing; actions=%#v", acts)
+	}
+	if action["reason"] != reason {
+		t.Fatalf("capability_reseal_unavailable reason = %#v, want %q; action=%#v", action["reason"], reason, action)
+	}
+	if action["stall_class"] != stallClassSessionUnrecoverableAcrossRotation {
+		t.Fatalf("stall_class = %#v, want %q", action["stall_class"], stallClassSessionUnrecoverableAcrossRotation)
+	}
+}
+
+func assertRotationNotCompleted(t *testing.T, runner db.Runner, ids worktreeRequiredFixtureIDs, reason string) {
+	t.Helper()
+	ctx := context.Background()
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got == "completed" {
+		t.Fatalf("job state = completed: %s must fail closed", reason)
+	}
+	if got := jobLastStallClass(t, ctx, runner, ids.repoID, ids.jobID); got != stallClassSessionUnrecoverableAcrossRotation {
+		t.Fatalf("last_stall_class = %q, want %q", got, stallClassSessionUnrecoverableAcrossRotation)
+	}
+	resealedEvents := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND job_id = $3
+		   AND event_type = 'recovery.capability_resealed'`, ids.repoID, ids.runID, ids.jobID)
+	if resealedEvents != 0 {
+		t.Fatalf("recovery.capability_resealed events = %d, want 0", resealedEvents)
+	}
+}
+
+func findRecoveryAction(actions []map[string]any, name string) (map[string]any, bool) {
+	for _, action := range actions {
+		if action["action"] == name {
+			return action, true
 		}
 	}
-	if !foundTyped {
-		t.Fatalf("auto_finalize_unsealed action not tagged with the typed rotation class; actions=%#v", acts)
+	return nil, false
+}
+
+func stubRotationDeadProbe(t *testing.T) {
+	t.Helper()
+	restore := probeLaneLiveness
+	probeLaneLiveness = func(context.Context, map[string]any, int, string) gosupervisor.LaneLiveness {
+		return gosupervisor.LaneLiveness{Backed: "tmux", Alive: false, Class: string(gosupervisor.TmuxLivenessPaneDead), ObservedPID: 8888}
 	}
+	t.Cleanup(func() { probeLaneLiveness = restore })
 }

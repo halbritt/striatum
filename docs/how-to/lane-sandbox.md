@@ -138,6 +138,16 @@ delivery fail closed if a supervisor presents a stale generation after the uid
 was scrubbed or reused. `supervise.report` applies the same generation check
 before it records heartbeat or terminal metadata from the helper path.
 
+RFC 0143 Slice B reuses that same lease binding for rotation reseal recovery.
+When a dead lane is exactly classified as
+`session_unrecoverable_across_rotation`, the daemon may finish an
+already-published expected artifact only after it proves the owning session's
+supervisor metadata still matches an active `lane_uid_leases` row, including
+lease id, generation, session id, supervisor id, and uid. Stale generation,
+missing lease, sibling-lane replay, inactive session, or an expired work lease
+beyond the short reseal grace fails closed back to the typed Slice A recovery
+floor; it does not revive a stale lane token or expose the daemon admin token.
+
 Each pool user needs the same sudo and PostgreSQL deny posture as the single
 `STRIATUM_LANE_OS_USER` account. If the pool is exhausted because all users are
 active, scrubbing, or quarantined, `supervise.start` returns

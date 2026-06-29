@@ -211,6 +211,26 @@ operator session passed `go test ./...`, `make check-docs`, `make lint`, and
 checkpoints. RFC 0143 Slice B (`CapabilityReseal`) is now unblocked and is the
 next roadmap item.
 
+## 2026-06-29 delta — RFC 0143 Slice B draft build in progress
+
+The `rfc-0143-slice-b-build` lane draft adds a daemon-internal
+`CapabilityReseal` path to the recovery sweep for the exact
+`session_unrecoverable_across_rotation` class. It does not add a public reseal
+method, does not mint a general reseal bearer, and does not make the daemon
+admin/runtime token lane-readable. The sweep may finalize an already-published,
+reconstructable expected artifact only after the owning supervisor metadata
+still matches an active RFC 0168 `lane_uid_leases` row by lease id, generation,
+session id, supervisor id, and uid, and only while the work lease is active or
+inside the short reseal grace window.
+
+Failure remains the Slice A typed floor: stale generation, missing uid lease,
+sibling-lane lease replay, inactive session, or work lease beyond grace records
+`capability_reseal_unavailable` and falls back to the existing typed
+requeue/escalate path. Focused tests are added for the success case, stale
+generation, sibling replay, beyond-grace refusal, and expected-artifact-only
+finalization. The PostgreSQL-gated cases compile in the current environment but
+skip without `STRIATUM_PG_TEST_URL`.
+
 ## 2026-06-28 delta — RFC 0171 accepted, first build slice shipped
 
 RFC 0171 is accepted as D273. It addresses the 2026-06-28 architecture-review

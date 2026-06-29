@@ -188,19 +188,19 @@ const (
 	// stallClassSessionUnrecoverableAcrossRotation — RFC 0143 Slice A (#512): a
 	// confirmed-dead supervised agent whose OWNING SESSION was locked out of resealing
 	// across a daemon boot-epoch rotation. It is a STRICT REFINEMENT of
-	// agent_exited_unsealed for the rotation case: it routes the SAME
-	// finalize-or-escalate path with a distinct, legible reason and remediation
-	// (operator requeue / Slice B), so it is OBSERVABILITY-ONLY — no-more-privileged
-	// than agent_exited_unsealed, triggering no auto-seal and minting/using no
-	// credential (Correction 2). It is EXACT-ATTRIBUTION: it never infers the floor
-	// from complete-on-disk + lane-lost alone — it requires a forge-resistant daemon
-	// observation (T1) or the wrapper's own direct-path exit 97 (T2-direct), and the
-	// tmux #{pane_dead_status}==97 carrier ONLY when a LIVE T1 observation corroborates.
-	// Under the shared striatum-lane uid no carrier is forge-resistant; that residual
-	// is best-effort, RFC-0168-bounded (#585), and sound only because of the
-	// observability-only invariant.
+	// agent_exited_unsealed for the rotation case. Slice A is still the typed floor:
+	// if Slice B cannot prove fresh per-lane-uid reseal authority, the job routes
+	// through the same requeue/escalate budget with this legible reason. Slice B may
+	// use CapabilityReseal only when the owning lane UID lease is still active and
+	// generation-matched; no public bearer or operator/admin token widening exists.
+	// It is EXACT-ATTRIBUTION: it never infers the floor from complete-on-disk +
+	// lane-lost alone — it requires a forge-resistant daemon observation (T1) or
+	// the wrapper's own direct-path exit 97 (T2-direct), and the tmux
+	// #{pane_dead_status}==97 carrier ONLY when a LIVE T1 observation corroborates.
 	stallClassSessionUnrecoverableAcrossRotation = "session_unrecoverable_across_rotation"
 )
+
+const rotationResealGraceWindow = 30 * time.Second
 
 // isNecrosisStallClass reports whether a recovery stall class is a CONFIRMED-DEAD
 // class — the necrosis set the RFC 0137 Phase B exporter counts. It is the single
@@ -755,6 +755,7 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		       al.lease_id AS active_lease_id, al.acquired_at AS active_lease_acquired_at,
 		       al.expires_at AS active_lease_expires_at,
 		       al.last_heartbeat_at AS active_lease_last_heartbeat_at,
+		       sp.supervisor_id AS supervisor_pointer_supervisor_id,
 		       sp.pid AS supervisor_pointer_pid,
 		       sp.pid_start_time AS supervisor_pointer_pid_start_time,
 		       sp.state AS supervisor_pointer_state,
@@ -834,7 +835,7 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		     LIMIT 1
 		  ) al ON true
 		  LEFT JOIN LATERAL (
-		    SELECT pp.pid, pp.pid_start_time, pp.state, pp.metadata_json
+		    SELECT pp.supervisor_id, pp.pid, pp.pid_start_time, pp.state, pp.metadata_json
 		      FROM striatumd.process_supervisor_pointers pp
 		     WHERE pp.repository_id = s.repository_id
 		       AND pp.session_id = s.session_id
@@ -982,20 +983,40 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 		deadLaneUnsealed := (sessionDead && leaseClearedOrGone && !leaseStaleActive(row)) ||
 			(confirmedDead() && deadAgentExitedUnsealed(activity))
 		if deadLaneUnsealed && deadAgentExitedUnsealed(activity) {
-			// RFC 0143 Slice A (#512): when the unsealed dead lane is rotation-locked,
-			// TAG this finalize/reopen path with the typed class instead of the generic
-			// one. The path itself is UNCHANGED — same tryFinalizeUnsealedFromDurableArtifact
-			// + closeStalledOwningSession — so the typed class is no-more-privileged
-			// (observability-only, Correction 2): it only makes the recovery REASON
-			// legible. exact-attribution: deadAgentUnrecoverableAcrossRotation requires a
-			// forge-resistant carrier, never complete-on-disk + lane-lost alone.
+			// RFC 0143: Slice A supplies the exact typed floor. Slice B is the only
+			// route that can finalize a rotation-locked lane's durable artifact here,
+			// and only after proving active per-lane-uid lease/generation authority.
+			// If that proof is absent or stale, the typed floor remains and the job
+			// drops into the existing requeue/escalate path.
 			unsealedStallClass := stallClassAgentExitedUnsealed
 			if deadAgentUnrecoverableAcrossRotation(ctx, tx, repositoryID, runID, row) {
 				unsealedStallClass = stallClassSessionUnrecoverableAcrossRotation
 			}
-			finalized, ferr := tryFinalizeUnsealedFromDurableArtifact(ctx, tx, repositoryID, jobID)
-			if ferr != nil {
-				return nil, ferr
+			finalized := false
+			if unsealedStallClass == stallClassSessionUnrecoverableAcrossRotation {
+				var unavailable map[string]any
+				var ferr error
+				finalized, unavailable, ferr = tryCapabilityResealRotationFromDurableArtifact(ctx, tx, repositoryID, runID, row, now)
+				if ferr != nil {
+					return nil, ferr
+				}
+				if unavailable != nil {
+					actions = append(actions, map[string]any{
+						"workflow_job_id": workflowJobID,
+						"job_id":          jobID,
+						"action":          "capability_reseal_unavailable",
+						"stall_class":     unsealedStallClass,
+						"acted":           false,
+						"reason":          unavailable["reason"],
+						"details":         unavailable["details"],
+					})
+				}
+			} else {
+				var ferr error
+				finalized, ferr = tryFinalizeUnsealedFromDurableArtifact(ctx, tx, repositoryID, jobID)
+				if ferr != nil {
+					return nil, ferr
+				}
 			}
 			if finalized {
 				// Close the (possibly still-active) owning session so it cannot wake to
@@ -1011,7 +1032,7 @@ func recoverStuckJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID s
 				actions = append(actions, map[string]any{
 					"workflow_job_id":       workflowJobID,
 					"job_id":                jobID,
-					"action":                "auto_finalize_unsealed",
+					"action":                autoFinalizeActionForStallClass(unsealedStallClass),
 					"stall_class":           unsealedStallClass,
 					"acted":                 true,
 					"stalled_owner_closed":  ownerClosed,
@@ -1865,6 +1886,223 @@ func tryFinalizeUnsealedFromDurableArtifact(ctx context.Context, tx db.TxRunner,
 		return false, err
 	}
 	return true, nil
+}
+
+func autoFinalizeActionForStallClass(stallClass string) string {
+	if stallClass == stallClassSessionUnrecoverableAcrossRotation {
+		return "capability_reseal"
+	}
+	return "auto_finalize_unsealed"
+}
+
+func tryCapabilityResealRotationFromDurableArtifact(ctx context.Context, tx db.TxRunner, repositoryID, runID string, row map[string]any, now time.Time) (bool, map[string]any, error) {
+	jobID := fmt.Sprint(nullable(row["job_id"]))
+	sessionID := fmt.Sprint(nullable(row["session_id"]))
+	leaseID := fmt.Sprint(nullable(row["lease_id"]))
+	messageID := nullable(row["current_message_id"])
+
+	unavailable, err := validateCapabilityResealRotation(ctx, tx, repositoryID, row, now)
+	if err != nil {
+		return false, nil, err
+	}
+	if unavailable != nil {
+		payload := map[string]any{
+			"reason":      unavailable["reason"],
+			"details":     unavailable["details"],
+			"stall_class": stallClassSessionUnrecoverableAcrossRotation,
+			"capability":  string(rpc.CapabilityReseal),
+		}
+		if _, eerr := appendEvent(ctx, tx, repositoryID, runID, "recovery.capability_reseal_unavailable", nullable(sessionID), jobID, messageID, nil, nullable(leaseID), payload); eerr != nil {
+			return false, nil, eerr
+		}
+		return false, unavailable, nil
+	}
+
+	resealCtx := rpc.WithAuthContext(ctx, rpc.AuthContext{
+		RepositoryID: repositoryID,
+		SessionID:    sessionID,
+		Capability:   rpc.CapabilityReseal,
+		Decision:     "allowed",
+	})
+	finalized, err := tryFinalizeUnsealedFromDurableArtifact(resealCtx, tx, repositoryID, jobID)
+	if err != nil || !finalized {
+		return finalized, nil, err
+	}
+
+	metadata := asMap(row["supervisor_pointer_metadata_json"])
+	payload := map[string]any{
+		"source":                  "rfc0143_slice_b",
+		"capability":              string(rpc.CapabilityReseal),
+		"stall_class":             stallClassSessionUnrecoverableAcrossRotation,
+		"lane_uid_lease_id":       metadataString(metadata["lane_uid_lease_id"]),
+		"lane_uid_generation":     metadata["lane_uid_generation"],
+		"supervisor_id":           nullable(row["supervisor_pointer_supervisor_id"]),
+		"work_lease_id":           nullable(leaseID),
+		"work_lease_state":        nullable(row["lease_state"]),
+		"work_lease_expires_at":   timeString(row["lease_expires_at"]),
+		"reseal_grace_seconds":    int(rotationResealGraceWindow.Seconds()),
+		"public_bearer_minted":    false,
+		"operator_token_widened":  false,
+		"session_bound_authority": true,
+	}
+	if _, eerr := appendEvent(ctx, tx, repositoryID, runID, "recovery.capability_resealed", nullable(sessionID), jobID, messageID, nil, nullable(leaseID), payload); eerr != nil {
+		return false, nil, eerr
+	}
+	return true, nil, nil
+}
+
+func validateCapabilityResealRotation(ctx context.Context, tx db.TxRunner, repositoryID string, row map[string]any, now time.Time) (map[string]any, error) {
+	jobID := fmt.Sprint(nullable(row["job_id"]))
+	sessionID := fmt.Sprint(nullable(row["session_id"]))
+	if sessionID == "" || sessionID == "<nil>" {
+		return resealUnavailable("reseal_session_missing", map[string]any{"job_id": jobID}), nil
+	}
+	if state := fmt.Sprint(nullable(row["session_state"])); state != "active" {
+		return resealUnavailable("reseal_session_not_active", map[string]any{
+			"job_id":        jobID,
+			"session_id":    sessionID,
+			"session_state": state,
+		}), nil
+	}
+
+	workLeaseID := fmt.Sprint(nullable(row["lease_id"]))
+	if workLeaseID == "" || workLeaseID == "<nil>" {
+		return resealUnavailable("reseal_work_lease_missing", map[string]any{
+			"job_id":     jobID,
+			"session_id": sessionID,
+		}), nil
+	}
+	if ownerSession := fmt.Sprint(nullable(row["owner_session_id"])); ownerSession != sessionID {
+		return resealUnavailable("reseal_work_lease_owner_mismatch", map[string]any{
+			"job_id":                    jobID,
+			"lease_id":                  workLeaseID,
+			"expected_owner_session_id": sessionID,
+			"observed_owner_session_id": ownerSession,
+		}), nil
+	}
+	if unavailable := validateResealWorkLease(row, workLeaseID, now); unavailable != nil {
+		return unavailable, nil
+	}
+
+	supervisorID := fmt.Sprint(nullable(row["supervisor_pointer_supervisor_id"]))
+	if supervisorID == "" || supervisorID == "<nil>" {
+		return resealUnavailable("reseal_supervisor_missing", map[string]any{
+			"job_id":     jobID,
+			"session_id": sessionID,
+		}), nil
+	}
+	metadata := asMap(row["supervisor_pointer_metadata_json"])
+	uidLeaseID := metadataString(metadata["lane_uid_lease_id"])
+	if uidLeaseID == "" {
+		return resealUnavailable("lane_uid_lease_missing", map[string]any{
+			"job_id":        jobID,
+			"session_id":    sessionID,
+			"supervisor_id": supervisorID,
+		}), nil
+	}
+	wantGeneration, ok := int64ValueOptional(metadata["lane_uid_generation"])
+	if !ok || wantGeneration <= 0 {
+		return resealUnavailable("lane_uid_generation_missing", map[string]any{
+			"job_id":        jobID,
+			"session_id":    sessionID,
+			"supervisor_id": supervisorID,
+			"lease_id":      uidLeaseID,
+		}), nil
+	}
+
+	uidLease, err := oneRow(ctx, tx, `
+		SELECT state, generation, session_id, supervisor_id, pool_uid, pool_user
+		  FROM striatumd.lane_uid_leases
+		 WHERE repository_id = $1 AND lease_id = $2
+		 FOR UPDATE`, repositoryID, uidLeaseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return resealUnavailable("lane_uid_lease_missing", map[string]any{
+			"job_id":        jobID,
+			"session_id":    sessionID,
+			"supervisor_id": supervisorID,
+			"lease_id":      uidLeaseID,
+		}), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	gotGeneration, _ := int64ValueOptional(uidLease["generation"])
+	if rowString(uidLease, "state") != laneUIDLeaseStateActive ||
+		gotGeneration != wantGeneration ||
+		rowString(uidLease, "session_id") != sessionID ||
+		rowString(uidLease, "supervisor_id") != supervisorID {
+		return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
+			"job_id":                 jobID,
+			"session_id":             sessionID,
+			"supervisor_id":          supervisorID,
+			"lease_id":               uidLeaseID,
+			"expected_generation":    wantGeneration,
+			"observed_generation":    gotGeneration,
+			"observed_state":         uidLease["state"],
+			"observed_session_id":    uidLease["session_id"],
+			"observed_supervisor_id": uidLease["supervisor_id"],
+		}), nil
+	}
+	if wantUID, ok := int64ValueOptional(metadata["lane_uid"]); ok && wantUID > 0 {
+		gotUID, _ := int64ValueOptional(uidLease["pool_uid"])
+		if gotUID != wantUID {
+			return resealUnavailable("lane_uid_generation_mismatch", map[string]any{
+				"job_id":              jobID,
+				"session_id":          sessionID,
+				"supervisor_id":       supervisorID,
+				"lease_id":            uidLeaseID,
+				"expected_lane_uid":   wantUID,
+				"observed_pool_uid":   gotUID,
+				"observed_pool_user":  uidLease["pool_user"],
+				"expected_generation": wantGeneration,
+				"observed_generation": gotGeneration,
+			}), nil
+		}
+	}
+	return nil, nil
+}
+
+func validateResealWorkLease(row map[string]any, workLeaseID string, now time.Time) map[string]any {
+	state := fmt.Sprint(nullable(row["lease_state"]))
+	expiresAt, ok := timeFromAny(row["lease_expires_at"])
+	if !ok {
+		return resealUnavailable("reseal_work_lease_expiry_missing", map[string]any{
+			"lease_id":    workLeaseID,
+			"lease_state": state,
+		})
+	}
+	lateBy := now.Sub(expiresAt)
+	if lateBy < 0 {
+		lateBy = 0
+	}
+	switch state {
+	case "active", "expired":
+		if lateBy > rotationResealGraceWindow {
+			return resealUnavailable("reseal_grace_expired", map[string]any{
+				"lease_id":             workLeaseID,
+				"lease_state":          state,
+				"lease_expires_at":     expiresAt.UTC().Format(time.RFC3339),
+				"grace_seconds":        int(rotationResealGraceWindow.Seconds()),
+				"seconds_since_expiry": int(lateBy.Seconds()),
+			})
+		}
+	default:
+		return resealUnavailable("reseal_work_lease_inactive", map[string]any{
+			"lease_id":    workLeaseID,
+			"lease_state": state,
+		})
+	}
+	return nil
+}
+
+func resealUnavailable(reason string, details map[string]any) map[string]any {
+	if details == nil {
+		details = map[string]any{}
+	}
+	return map[string]any{
+		"reason":  reason,
+		"details": details,
+	}
 }
 
 // tryReopenFreshAttemptForStaleArtifact handles the #317 trap: a dead-lane job

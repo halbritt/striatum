@@ -92,8 +92,12 @@ Rationale:
 
 - **RFC 0143 Slice B** (`CapabilityReseal` authority) is gated on this RFC
   landing. With the per-lane uid in place, Slice B becomes RFC 0143 option 2 in
-  its safe form: a durable, **lane-uid-owned `0600`** session-scoped reseal
-  token, invalidated on session close, bounded by the session TTL.
+  its safe form: reseal authority must be bound to the concrete lane uid lease
+  and generation. A future lane-readable file/socket can be **lane-uid-owned
+  `0600`**, session-scoped, invalidated on session close, and bounded by the
+  session TTL; the current Slice B draft keeps the `reseal` capability
+  daemon-internal and uses the active `lane_uid_leases` row plus supervisor
+  metadata to reject stale generations and sibling-lane replays.
 - **RFC 0143 Slice A** (the legible `session_unrecoverable_across_rotation`
   typed-exit floor, option 4) **does NOT depend on this RFC** and ships
   independently — its predicate is computed entirely from daemon-side durable

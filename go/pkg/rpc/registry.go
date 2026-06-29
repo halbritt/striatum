@@ -21,6 +21,10 @@ const (
 	CapabilityAdmin            Capability = "admin"
 	CapabilityRecovery         Capability = "recovery"
 	CapabilitySurgicalRecovery Capability = "surgical_recovery"
+	// CapabilityReseal is daemon-internal recovery authority for RFC 0143 Slice B.
+	// It is deliberately not present in Capabilities, so no bearer token can be
+	// minted with general-purpose reseal authority through the public registry.
+	CapabilityReseal Capability = "reseal"
 )
 
 var Capabilities = map[Capability]struct{}{

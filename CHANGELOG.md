@@ -37,6 +37,14 @@
   `supervise.report` lease-generation freshness before heartbeat/state writes,
   and resolving relative provider credential selectors against the lane launch
   root.
+- **RFC 0143 Slice B draft.** Added daemon-internal `CapabilityReseal` recovery
+  for exact `session_unrecoverable_across_rotation` jobs whose published
+  expected artifacts are already reconstructable and whose owning supervisor
+  still matches an active RFC 0168 lane UID lease id/generation. Stale
+  generation, missing or mismatched uid lease, sibling-lane replay, inactive
+  session, and work lease expiry beyond the reseal grace fail closed back to the
+  typed Slice A recovery floor. The `reseal` capability is not grantable through
+  the public capability map and no admin token is made lane-readable.
 
 ### Fixed
 
