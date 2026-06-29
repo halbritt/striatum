@@ -67,6 +67,7 @@
         "allowed_paths": [
           "docs/operator/artifacts/rfc-0143-slice-b-build/",
           "go/",
+          "contracts/",
           "docs/how-to/",
           "docs/reference/",
           "docs/rfcs/0143-lane-credential-survival-across-boot-epoch-rotation.md",
@@ -141,6 +142,7 @@
         "allowed_paths": [
           "docs/operator/artifacts/rfc-0143-slice-b-build/",
           "go/",
+          "contracts/",
           "docs/how-to/",
           "docs/reference/",
           "docs/rfcs/0143-lane-credential-survival-across-boot-epoch-rotation.md",
@@ -175,7 +177,8 @@
       ],
       "command": [
         "codex",
-        "--yolo"
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
       ],
       "display_model": "author",
       "supervision": {
@@ -195,7 +198,8 @@
       ],
       "command": [
         "codex",
-        "--yolo"
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen"
       ],
       "display_model": "reviewer",
       "supervision": {
