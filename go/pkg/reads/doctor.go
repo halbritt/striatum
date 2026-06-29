@@ -13,6 +13,9 @@ import (
 )
 
 const doctorSupervisorProbeTimeout = 5 * time.Second
+const doctorBlobProbeTimeout = 5 * time.Second
+const doctorGeneratedRecordIntegrityTimeout = 8 * time.Second
+const doctorArtifactAnchorIntegrityTimeout = 8 * time.Second
 const doctorRecoveryCursorWedgedAfter = 5 * time.Minute
 
 // HandleDoctor mirrors reads/doctor.py. Returns a flat health report of
@@ -257,12 +260,31 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	verifierPinBlock, verifierPinWarnings := verifierPinDriftBlock(doctorRepoRoot(ctx, runner, repositoryID))
 	warnings = append(warnings, verifierPinWarnings...)
 
-	blobBlock := blobDoctorBlock(ctx, runner, repositoryID)
-	generatedRecordBlock, generatedRecordProblems, generatedRecordRecords := doctorGeneratedRecordIntegrity(ctx, runner, repositoryID, blobBlock)
+	blobCtx, blobCancel := context.WithTimeout(ctx, doctorBlobProbeTimeout)
+	blobBlock := blobDoctorBlock(blobCtx, runner, repositoryID)
+	if err := blobCtx.Err(); err != nil {
+		blobBlock["incomplete"] = true
+		blobBlock["incomplete_reason"] = err.Error()
+		warning, record := doctorIncompleteWarning("blob", blobBlock)
+		warnings = append(warnings, warning)
+		warningRecords = append(warningRecords, record)
+	}
+	blobCancel()
+
+	generatedCtx, generatedCancel := context.WithTimeout(ctx, doctorGeneratedRecordIntegrityTimeout)
+	generatedRecordBlock, generatedRecordProblems, generatedRecordRecords := doctorGeneratedRecordIntegrity(generatedCtx, runner, repositoryID, blobBlock)
+	if boolValue(generatedRecordBlock["incomplete"]) {
+		warning, record := doctorIncompleteWarning("generated_record_integrity", generatedRecordBlock)
+		warnings = append(warnings, warning)
+		warningRecords = append(warningRecords, record)
+	}
+	generatedCancel()
 	problems = append(problems, generatedRecordProblems...)
 	problemRecords = append(problemRecords, generatedRecordRecords...)
 
-	artifactAnchorBlock, artifactAnchorProblems, artifactAnchorRecords, artifactAnchorWarnings, artifactAnchorWarningRecords := doctorArtifactAnchorIntegrity(ctx, runner, repositoryID, blobBlock)
+	artifactCtx, artifactCancel := context.WithTimeout(ctx, doctorArtifactAnchorIntegrityTimeout)
+	artifactAnchorBlock, artifactAnchorProblems, artifactAnchorRecords, artifactAnchorWarnings, artifactAnchorWarningRecords := doctorArtifactAnchorIntegrity(artifactCtx, runner, repositoryID, blobBlock)
+	artifactCancel()
 	problems = append(problems, artifactAnchorProblems...)
 	problemRecords = append(problemRecords, artifactAnchorRecords...)
 	warnings = append(warnings, artifactAnchorWarnings...)
@@ -380,6 +402,32 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 		result["warning_records"] = warningRecords
 	}
 	return result, nil
+}
+
+func doctorIncompleteWarning(blockName string, block map[string]any) (string, map[string]any) {
+	reason := strings.TrimSpace(stringFrom(block, "incomplete_reason"))
+	if reason == "" {
+		reason = "context deadline exceeded"
+	}
+	checked := intFrom(block, "checked_count")
+	total := intFrom(block, "record_count")
+	if total == 0 {
+		total = intFrom(block, "artifact_count")
+	}
+	message := blockName + ".incomplete: doctor subcheck stopped before full verification"
+	if total > 0 {
+		message += " after " + intPlaceholder(checked) + " of " + intPlaceholder(total) + " rows"
+	}
+	message += ": " + reason
+	return message, map[string]any{
+		"check": blockName + "_incomplete",
+		"context": map[string]any{
+			"block":         blockName,
+			"checked_count": checked,
+			"total_count":   total,
+			"reason":        reason,
+		},
+	}
 }
 
 func doctorRecoverySweepCursor(ctx context.Context, runner db.Runner, repositoryID string, now time.Time) (map[string]any, []string, []map[string]any) {

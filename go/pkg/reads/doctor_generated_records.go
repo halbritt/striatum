@@ -92,6 +92,11 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 
 	checked := 0
 	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			block["incomplete"] = true
+			block["incomplete_reason"] = err.Error()
+			break
+		}
 		checked++
 		recordID := stringFrom(row, "record_id")
 		sourcePath := stringFrom(row, "source_path")
@@ -111,6 +116,11 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 			continue
 		}
 		remoteSHA, exists, err := packageBlobClient.RemoteSha256(ctx, bucket, blobKey)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			block["incomplete"] = true
+			block["incomplete_reason"] = ctxErr.Error()
+			break
+		}
 		if err != nil {
 			detail := err.Error()
 			problems = append(problems, generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, recordID, detail))
@@ -136,6 +146,11 @@ func doctorGeneratedRecordIntegrity(ctx context.Context, runner db.Runner, repos
 			continue
 		}
 		if _, err := packageBlobClient.GetBytes(ctx, bucket, blobKey, blobSHA); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				block["incomplete"] = true
+				block["incomplete_reason"] = ctxErr.Error()
+				break
+			}
 			detail := err.Error()
 			problems = append(problems, generatedRecordProblemString(generatedRecordBlobBodyVerifyFailed, recordID, detail))
 			records = append(records, generatedRecordProblemRecord(generatedRecordBlobBodyVerifyFailed, recordID, sourcePath, detail))

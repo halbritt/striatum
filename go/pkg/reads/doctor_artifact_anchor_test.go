@@ -37,6 +37,8 @@ func (r *doctorArtifactAnchorRunner) Query(_ context.Context, sql string, _ ...a
 			return dashboardAllRowsFromMaps(nil), nil
 		}
 		return dashboardAllRowsFromMaps([]map[string]any{{"table_name": "striatumd.generated_records"}}), nil
+	case strings.Contains(sql, "FROM striatumd.generated_records") && strings.Contains(sql, "HAVING COUNT(*) > 1"):
+		return dashboardAllRowsFromMaps(nil), nil
 	case strings.Contains(sql, "FROM striatumd.generated_records"):
 		return dashboardAllRowsFromMaps(r.generatedRecordRows), nil
 	case strings.Contains(sql, "FROM striatumd.events") && strings.Contains(sql, "artifact_id"):
@@ -53,9 +55,9 @@ func (r *doctorArtifactAnchorRunner) Query(_ context.Context, sql string, _ ...a
 		return dashboardAllRowsFromMaps(r.artifactRows), nil
 	case strings.Contains(sql, "FROM striatumd.repositories"):
 		if r.repoRoot == "" {
-			return dashboardAllRowsFromMaps(nil), nil
+			return dashboardAllRowsFromMaps([]map[string]any{{"blob_bucket": "bucket-1"}}), nil
 		}
-		return dashboardAllRowsFromMaps([]map[string]any{{"repo_root": r.repoRoot}}), nil
+		return dashboardAllRowsFromMaps([]map[string]any{{"repo_root": r.repoRoot, "blob_bucket": "bucket-1"}}), nil
 	case strings.Contains(sql, "COUNT(*) AS c"):
 		return dashboardAllRowsFromMaps([]map[string]any{{"c": int64(0)}}), nil
 	default:
@@ -463,6 +465,58 @@ func TestDoctorArtifactAnchorIntegrityStillRedsGenuineLossOffDefault(t *testing.
 	)
 	if !strings.Contains(strings.Join(problems, "\n"), "artifact_anchor_hash_mismatch.art_orphan") {
 		t.Fatalf("genuine off-default loss must still red: problems=%#v", problems)
+	}
+}
+
+func TestDoctorGeneratedRecordIntegrityCanceledIsIncompleteNotProblem(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	block, problems, records := doctorGeneratedRecordIntegrity(ctx, &doctorArtifactAnchorRunner{
+		generatedRecordTableExists: true,
+		generatedRecordRows: []map[string]any{{
+			"record_id":      "grec_1",
+			"source_path":    "docs/report.md",
+			"content_sha256": testSHA256("body\n"),
+			"blob_key":       "records/grec_1.md",
+			"blob_sha256":    testSHA256("body\n"),
+		}},
+	}, "repo_anchor", healthyBlobBlock())
+
+	if block["incomplete"] != true || !strings.Contains(stringFrom(block, "incomplete_reason"), "context canceled") {
+		t.Fatalf("block = %#v, want incomplete context-canceled marker", block)
+	}
+	if block["checked_count"] != 0 || block["record_count"] != 1 {
+		t.Fatalf("block counts = %#v, want zero checked of one record", block)
+	}
+	if len(problems) != 0 || len(records) != 0 {
+		t.Fatalf("canceled generated-record check must not emit hard problems: problems=%#v records=%#v", problems, records)
+	}
+}
+
+func TestDoctorArtifactAnchorIntegrityCanceledIsWarningNotProblem(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	row := artifactAnchorRow("/tmp/repo", "art_cancel", "run_cancel", "job_cancel", "main", "docs/a.md", testSHA256("a"))
+
+	block, problems, records, warnings, warningRecords := doctorArtifactAnchorIntegrity(ctx, &doctorArtifactAnchorRunner{
+		artifactRows: []map[string]any{row},
+	}, "repo_anchor", healthyBlobBlock())
+
+	if block["incomplete"] != true || !strings.Contains(stringFrom(block, "incomplete_reason"), "context canceled") {
+		t.Fatalf("block = %#v, want incomplete context-canceled marker", block)
+	}
+	if block["checked_count"] != 0 || block["artifact_count"] != 1 {
+		t.Fatalf("block counts = %#v, want zero checked of one artifact", block)
+	}
+	if len(problems) != 0 || len(records) != 0 {
+		t.Fatalf("canceled artifact-anchor check must not emit hard problems: problems=%#v records=%#v", problems, records)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), "artifact_anchor_integrity.incomplete") {
+		t.Fatalf("warnings = %#v, want incomplete artifact-anchor warning", warnings)
+	}
+	if len(warningRecords) != 1 || warningRecords[0]["check"] != "artifact_anchor_integrity_incomplete" {
+		t.Fatalf("warningRecords = %#v, want incomplete record", warningRecords)
 	}
 }
 

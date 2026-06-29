@@ -250,7 +250,18 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, reposi
 		block["error"] = err.Error()
 		return block, nil, nil, nil, nil
 	}
+	checked := 0
 	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			block["incomplete"] = true
+			block["incomplete_reason"] = err.Error()
+			block["checked_count"] = checked
+			warning, warningRecord := doctorIncompleteWarning("artifact_anchor_integrity", block)
+			warnings = append(warnings, warning)
+			warningRecords = append(warningRecords, warningRecord)
+			break
+		}
+		checked++
 		// #303: a tombstoned (operator-pruned) artifact is recorded debris; skip
 		// it entirely so it neither reds nor degrades the report.
 		if tombstoned[stringFrom(row, "artifact_id")] {
@@ -270,6 +281,15 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, reposi
 			gitChecked++
 			problem, record, warning, warningRecord = checkArtifactAnchor(ctx, row, defaultRef, pass)
 		}
+		if err := ctx.Err(); err != nil {
+			block["incomplete"] = true
+			block["incomplete_reason"] = err.Error()
+			block["checked_count"] = checked
+			warning, warningRecord := doctorIncompleteWarning("artifact_anchor_integrity", block)
+			warnings = append(warnings, warning)
+			warningRecords = append(warningRecords, warningRecord)
+			break
+		}
 		if problem != "" {
 			problems = append(problems, problem)
 			records = append(records, record)
@@ -281,6 +301,7 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, reposi
 	}
 	block["git_anchor_count"] = gitChecked
 	block["blob_exhaust_count"] = blobChecked
+	block["checked_count"] = checked
 	block["generated_record_backed_count"] = pass.generatedBackedCount
 	block["generated_record_path_warning_count"] = pass.generatedPathOnlyCount
 	block["problem_count"] = len(problems)
