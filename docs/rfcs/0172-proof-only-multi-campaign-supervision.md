@@ -1,6 +1,6 @@
 # RFC 0172: Proof-only multi-campaign supervision
 
-Status: proposed
+Status: accepted (D275, 2026-06-29)
 Date: 2026-06-29
 Context:
 `docs/operator/artifacts/multi-campaign-supervision-design-bootstrap/MULTI_CAMPAIGN_SUPERVISION_DESIGN_SCOPE_PRD.md`

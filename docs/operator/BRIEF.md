@@ -12,16 +12,33 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-29 delta - RFC 0172 accepted as proof-only supervision
+
+RFC 0172 is accepted as **D275** after the health gate that blocked the earlier
+closeout recovered: `operator bootstrap`, `doctor --json`, and `daemon status`
+all returned successfully. The accepted boundary is still proof-only /
+recommendation-only. Campaign arcs, authority receipts, replay checks,
+quarantine rows, contradiction reports, tracker mirrors, and portfolio rows are
+provenance and stop pressure, not permission.
+
+No daemon schema, RPC, route-map, CLI, dashboard, tracker-backend,
+workflow-launch, sequencing, promotion, acceptance-state update, or done-seal
+authority lands from this acceptance alone. Build remains a later Wave 4 roadmap
+item after reliability-spine sequencing, and any future RPC/route-map slice must
+update `docs/reference/command-authority-matrix.md` plus authority guardrail
+tests.
+
 ## 2026-06-29 delta - RFC 0172 multi-campaign supervision drafted
 
 The `MULTI_CAMPAIGN_SUPERVISION` falsification gate completed and cleared only
-the RFC/product-decision next step. RFC 0172 is now proposed at
+the RFC/product-decision next step. RFC 0172 was initially proposed at
 `docs/rfcs/0172-proof-only-multi-campaign-supervision.md`; it preserves the two
 binding floors from the gate: provenance/status surfaces are stop pressure, not
 permission, and replay/done proof must be same-boundary fresh. No architecture
-is accepted and no daemon schema, RPC, UI, tracker backend, implementation
+or build plan was accepted by that draft alone. D275 now accepts the proof-only
+direction, but no daemon schema, RPC, UI, tracker backend, implementation
 ticket, workflow-launch authority, or build plan is authorized until the RFC is
-accepted and sequenced.
+roadmap-sequenced.
 
 ## 2026-06-29 delta - RFC 0171 operator generated-doc bulk deletion shipped
 

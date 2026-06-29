@@ -4,6 +4,11 @@
 
 ### Added
 
+- **RFC 0172 accepted.** Accepted proof-only multi-campaign supervision as
+  D275: campaign arcs, authority receipts, fresh-context replay,
+  deferral quarantine, contradiction reports, and read-only portfolio status.
+  V1 remains proof-only/recommendation-only; tracker and dashboard rows are
+  provenance and stop pressure, not workflow authority.
 - **RFC 0171 accepted.** Records the build plan for moving generated
   operator/run record bodies to daemon-indexed blob storage while keeping git
   reviewable through compact dockets, pointer manifests, and materializable
