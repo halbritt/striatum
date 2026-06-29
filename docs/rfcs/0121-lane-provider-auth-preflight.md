@@ -331,7 +331,7 @@ work, complete work, publish artifacts, attest bylines, or create durable
 provenance.
 
 This matches the DDD rule in
-[`docs/explanation/domain-driven-design.md` "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model):
+[`docs/reference/domain-driven-design.md` "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model):
 the new concept is named because it protects an existing aggregate boundary
 (`supervise.start`) and has distinct invariants, but it does not become a new
 aggregate root or persistence substrate.

@@ -183,7 +183,7 @@ default recommendations work but extend in two ways:
 - [RFC 0034](../rfcs/0034-workflow-generator-and-template-catalog.md) —
   the workflow generator that writes `workflow.json` files.
 - [RFC 0043](../rfcs/0043-postgres-as-sole-substrate-and-daemon-required-runtime.md) — fixes `.striatum/` as runtime scratch only.
-- [`docs/USING_STRIATUM.md`](../tutorials/using-striatum.md) — the day-zero
+- [`docs/USING_STRIATUM.md`](../how-to/using-striatum.md) — the day-zero
   walkthrough that uses this layout in its examples.
 - [`docs/WRITING_WORKFLOWS.md`](../how-to/writing-workflows.md) — how to
   author a `workflow.json` that declares the artifact paths

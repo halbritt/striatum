@@ -298,7 +298,7 @@ tree.
 
 RFC 0040 V1 bakes the "no-questions" front-matter completeness fragments into
 the bundled template catalog (see
-[`docs/HARNESS_FRICTION_PATTERNS.md`](../explanation/harness-friction-patterns.md)).
+[`docs/HARNESS_FRICTION_PATTERNS.md`](../reference/harness-friction-patterns.md)).
 New workflows scaffolded via `workflow generate` pick them up automatically.
 
 The Python-era `workflow upgrade` CLI is not part of the current Go CLI. For an

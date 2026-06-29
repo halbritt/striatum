@@ -284,7 +284,7 @@ frame library (wired alongside RFC 0087 AC5's shape fixture).
 
 ## Domain Modeling
 
-Per [`docs/explanation/domain-driven-design.md` § "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model)
+Per [`docs/reference/domain-driven-design.md` § "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model)
 (precedent: RFC 0019, RFC 0087):
 
 - A **frame** and a **frame category** are **value objects** and *authoring inputs* —

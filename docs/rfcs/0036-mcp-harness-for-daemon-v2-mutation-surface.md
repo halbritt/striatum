@@ -10,7 +10,7 @@ Context:
 [`RFC 0032`](0032-cross-repo-workflows-and-mcp-mutation-capabilities.md),
 [`RFC 0034`](0034-workflow-generator-and-template-catalog.md) §10,
 [`docs/DECISION_LOG.md`](../decisions/decision-log.md) (D061, D063, D080, D087, D088, D090),
-[`docs/MCP.md`](../explanation/mcp.md),
+[`docs/MCP.md`](../reference/mcp.md),
 `src/striatum/skills/install.py`,
 `src/striatum/skills/templates/claude_code/`,
 `src/striatum/mcp.py`,

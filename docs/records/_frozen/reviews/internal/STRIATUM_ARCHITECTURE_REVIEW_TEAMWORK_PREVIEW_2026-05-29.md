@@ -17,7 +17,7 @@ The following list represents the authoritative index of all primary codebase fi
 *   `docs/reference/spec.md`
 *   `docs/reference/command-authority-matrix.md`
 *   `docs/how-to/postgres-transition.md`
-*   `docs/explanation/domain-driven-design.md`
+*   `docs/reference/domain-driven-design.md`
 *   `go/cmd/striatum/main.go`
 *   `go/cmd/striatumd/main.go`
 *   `go/pkg/rpc/server.go`

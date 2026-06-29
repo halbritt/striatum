@@ -34,7 +34,7 @@ The doc system has explicit boundaries — see
 - New concepts add a glossary entry to
   [`docs/reference/ubiquitous-language.md`](docs/reference/ubiquitous-language.md)
   *first*, validator + introspection second
-  (see [`docs/DDD.md`](docs/explanation/domain-driven-design.md) § "Adding to the model").
+  (see [`docs/DDD.md`](docs/reference/domain-driven-design.md) § "Adding to the model").
 - Significant design changes go through an RFC under
   [`docs/rfcs/`](docs/rfcs/) before implementation.
 - README is first-contact material capped at 250 lines by a

@@ -8,7 +8,7 @@ Context:
 [`RFC 0031`](0031-daemon-owned-supervision-and-sealed-apply-boundary.md) (accepted),
 [`RFC 0033`](0033-storage-substrate-rewrite-for-daemon-v2.md) (accepted),
 [`docs/DECISION_LOG.md`](../decisions/decision-log.md) (D082, D083, D086),
-[`docs/MCP.md`](../explanation/mcp.md),
+[`docs/MCP.md`](../reference/mcp.md),
 [`docs/SPEC.md`](../reference/spec.md) § "Product Boundary", § "State Store", and
 § "Workflow Config",
 `src/striatum/mcp.py`

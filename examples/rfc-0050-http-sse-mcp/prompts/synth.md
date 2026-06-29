@@ -1,8 +1,8 @@
 # RFC 0050 design synthesis
 
 You have read all three design proposals under
-`docs/rfc-0050/design/`. Produce a single buildable synthesis at
-`docs/rfc-0050/DESIGN_SYNTHESIS.md`.
+`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/`. Produce a single buildable synthesis at
+`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md`.
 
 The synthesis should:
 
@@ -24,7 +24,7 @@ The synthesis should:
   through. Defer agentloop PTY refactor and `src/striatum/mcp.py`
   deletion to follow-on runs.
 
-Do not edit files under `docs/rfc-0050/design/`. Do not write source
+Do not edit files under `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/`. Do not write source
 code.
 
 When the synthesis is complete, emit the `submit-handoff` packet that

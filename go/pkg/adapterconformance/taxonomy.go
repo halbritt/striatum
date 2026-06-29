@@ -21,7 +21,7 @@
 //     the go/cmd/striatum-adapter-conformance driver binary, which carry the
 //     C1/C3..C12 live assertions.
 //
-// See dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md for the
+// See docs/dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md for the
 // accepted design (esp. §1.1 the contract, §1.2 the taxonomy, §1.3 the
 // architecture, §1.4 lane-env).
 package adapterconformance

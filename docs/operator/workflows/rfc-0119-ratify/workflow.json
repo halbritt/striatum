@@ -1,0 +1,236 @@
+{
+  "schema_version": "striatum.workflow.v1.1",
+  "workflow_id": "striatum-rfc-0119-ratify",
+  "workflow_version": "2026-06-11",
+  "name": "Ratify striatum RFC 0119 before any Go code lands (PLAN S11)",
+  "allow_same_model_review_pairing": true,
+  "branch": {
+    "mode": "confirm",
+    "suggested_name": "striatum/rfc-0119-ratify",
+    "allow_dirty": false
+  },
+  "coordinator": {
+    "role_id": "holder",
+    "lane_id": "holder"
+  },
+  "lanes": {
+    "holder": {
+      "adapter": "process",
+      "command": ["claude", "--dangerously-skip-permissions"],
+      "adapter_capabilities": {"agent_loop": true},
+      "supervision": {"transport": "pty_helper", "compatible": true, "require_tmux": true},
+      "worktree_isolation": "per_job",
+      "capabilities": ["write", "synthesis"]
+    },
+    "challenge": {
+      "adapter": "process",
+      "command": ["claude", "--dangerously-skip-permissions"],
+      "adapter_capabilities": {"agent_loop": true},
+      "supervision": {"transport": "pty_helper", "compatible": true, "require_tmux": true},
+      "worktree_isolation": "per_job",
+      "capabilities": ["review"]
+    },
+    "adjudication": {
+      "adapter": "process",
+      "command": ["claude", "--dangerously-skip-permissions"],
+      "adapter_capabilities": {"agent_loop": true},
+      "supervision": {"transport": "pty_helper", "compatible": true, "require_tmux": true},
+      "worktree_isolation": "per_job",
+      "capabilities": ["write", "synthesis"]
+    }
+  },
+  "roles": {
+    "holder": {"definition_path": "roles/holder.md"},
+    "falsifier": {"definition_path": "roles/falsifier.md"},
+    "adjudicator": {"definition_path": "roles/adjudicator.md"},
+    "committer": {"definition_path": "roles/committer.md"}
+  },
+  "context_docs": [
+    {"path": "docs/rfcs/0119-warm-tier-memory-boundary.md", "required": false},
+    {"path": "docs/reference/spec.md", "required": false},
+    {"path": "docs/decisions/decision-log.md", "required": false}
+  ],
+  "parallelism": {
+    "mode": "declared",
+    "max_active_jobs": 1,
+    "require_disjoint_write_scopes": true
+  },
+  "phases": [
+    {
+      "id": "dialogue",
+      "name": "Dialogue",
+      "description": "Holder drafts the acceptance case, falsifiers challenge, adjudicator rules",
+      "synthesis_job_id": "adjudicate"
+    },
+    {
+      "id": "commit",
+      "name": "Commit",
+      "description": "Acceptance + decision-log entry published only after the ledger clears",
+      "synthesis_job_id": "final_summary"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "hold_case",
+      "type": "build",
+      "title": "Hold the case for accepting RFC 0119",
+      "role_id": "holder",
+      "lane_id": "holder",
+      "phase_id": "dialogue",
+      "objective": "Read docs/rfcs/0119-warm-tier-memory-boundary.md and publish the case for accepting it as the claim falsifiers will challenge.",
+      "task_prompt": {"path": "prompts/hold_case.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/HOLDER_CASE.md"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "holder_case",
+          "kind": "handoff",
+          "path": "docs/rfcs/0119/HOLDER_CASE.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "falsifier_1",
+      "type": "build",
+      "title": "Falsifier 1 — corpus invariants and state-transition dependence",
+      "role_id": "falsifier",
+      "lane_id": "challenge",
+      "phase_id": "dialogue",
+      "objective": "Attack the acceptance case from the corpus-invariant and state-transition posture: does RFC 0119 break the three corpus invariants or make any state transition depend on memory?",
+      "task_prompt": {"path": "prompts/falsify_case.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/falsifier_1/"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "falsifier_1",
+          "kind": "handoff",
+          "path": "docs/rfcs/0119/falsifier_1/FALSIFIER.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "falsifier_2",
+      "type": "build",
+      "title": "Falsifier 2 — durable-provenance boundary",
+      "role_id": "falsifier",
+      "lane_id": "challenge",
+      "phase_id": "dialogue",
+      "objective": "Attack the acceptance case from the durable-provenance posture: does the eviction policy or any export class erode the spec.md durable-provenance boundary?",
+      "task_prompt": {"path": "prompts/falsify_case.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/falsifier_2/"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "falsifier_2",
+          "kind": "handoff",
+          "path": "docs/rfcs/0119/falsifier_2/FALSIFIER.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "adjudicate",
+      "type": "phase_synthesis",
+      "title": "Adjudicate the ratification gate",
+      "role_id": "adjudicator",
+      "lane_id": "adjudication",
+      "phase_id": "dialogue",
+      "fresh_session_required": true,
+      "objective": "Read only the dialogue trajectory and publish the collaboration ledger verdict: clear, needs_revision, or refuse the gate.",
+      "task_prompt": {"path": "prompts/adjudicate_case.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/adjudicator/"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "collaboration_ledger_${cycle}",
+          "kind": "collaboration_ledger",
+          "path": "docs/rfcs/0119/adjudicator/COLLABORATION_LEDGER_${cycle}.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "commit_acceptance",
+      "type": "synthesis",
+      "title": "Commit RFC 0119 acceptance + D178",
+      "role_id": "committer",
+      "lane_id": "holder",
+      "phase_id": "commit",
+      "objective": "Publish the acceptance synthesis (flip RFC status to accepted and the proposed decision-log entry D178) only after the ledger records a clearing verdict; otherwise publish a refusal note.",
+      "task_prompt": {"path": "prompts/commit_acceptance.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/ACCEPTANCE.md", "docs/decisions/D178.md"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "acceptance",
+          "kind": "synthesis",
+          "path": "docs/rfcs/0119/ACCEPTANCE.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "final_summary",
+      "type": "phase_synthesis",
+      "title": "Summarize the ratification gate",
+      "role_id": "adjudicator",
+      "lane_id": "adjudication",
+      "phase_id": "commit",
+      "objective": "Summarize the cleared (or refused) ratification gate: the verdict, each binding constraint and where the acceptance discharges it, and the proposed D178 entry.",
+      "task_prompt": {"path": "prompts/final_summary.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/rfcs/0119/GATE_SUMMARY.md"],
+        "forbidden_paths": [".striatum/", ".git/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "gate_summary",
+          "kind": "synthesis",
+          "path": "docs/rfcs/0119/GATE_SUMMARY.md",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "hold_case", "to": "falsifier_1", "on": "completed"},
+    {"from": "falsifier_1", "to": "falsifier_2", "on": "completed"},
+    {"from": "falsifier_2", "to": "adjudicate", "on": "completed"},
+    {"from": "adjudicate", "to": "commit_acceptance", "on": "completed"},
+    {"from": "commit_acceptance", "to": "final_summary", "on": "completed"}
+  ],
+  "cycles": [
+    {
+      "from": "adjudicate",
+      "to": "falsifier_1",
+      "on_verdict": "needs_revision",
+      "max_iterations": 1,
+      "allow_same_model": true,
+      "allow_same_lane": true
+    }
+  ]
+}

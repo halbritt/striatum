@@ -67,7 +67,7 @@ func TestRecordsMigrationVerifyReportsMissingBlob(t *testing.T) {
 
 	row := map[string]any{
 		"record_id":      "rec_1",
-		"source_path":    "docs/records/audits/report.md",
+		"source_path":    "docs/audits/report.md",
 		"source_commit":  "commit_1",
 		"record_class":   "audit_record",
 		"content_sha256": strings.Repeat("a", 64),
@@ -80,7 +80,7 @@ func TestRecordsMigrationVerifyReportsMissingBlob(t *testing.T) {
 		Params: map[string]any{
 			"repository_id": "repo_1",
 			"entries": []any{map[string]any{
-				"path":          "docs/records/audits/report.md",
+				"path":          "docs/audits/report.md",
 				"source_commit": "commit_1",
 				"record_class":  "audit_record",
 				"sha256":        strings.Repeat("a", 64),
@@ -108,7 +108,7 @@ func TestRecordsMigrationVerifyAcceptsJSONNumberManifestSize(t *testing.T) {
 
 	row := map[string]any{
 		"record_id":      "rec_1",
-		"source_path":    "docs/records/audits/report.md",
+		"source_path":    "docs/audits/report.md",
 		"source_commit":  "commit_1",
 		"record_class":   "audit_record",
 		"content_sha256": sha,
@@ -121,7 +121,7 @@ func TestRecordsMigrationVerifyAcceptsJSONNumberManifestSize(t *testing.T) {
 		Params: map[string]any{
 			"repository_id": "repo_1",
 			"entries": []any{map[string]any{
-				"path":          "docs/records/audits/report.md",
+				"path":          "docs/audits/report.md",
 				"source_commit": "commit_1",
 				"record_class":  "audit_record",
 				"sha256":        sha,
@@ -164,7 +164,7 @@ func TestDoctorGeneratedRecordIntegrityReportsMetadataMissing(t *testing.T) {
 		context.Background(),
 		&doctorGeneratedRecordRunner{rows: []map[string]any{{
 			"record_id":      "rec_missing_meta",
-			"source_path":    "docs/records/audits/report.md",
+			"source_path":    "docs/audits/report.md",
 			"content_sha256": strings.Repeat("a", 64),
 		}}},
 		"repo_1",

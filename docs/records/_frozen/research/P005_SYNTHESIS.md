@@ -4,11 +4,11 @@ date: 2026-05-10
 author: synthesis-claude-opus-4-7-001
 source_prompt: prompts/P005_true_provenance_loophole.md
 sources:
-  - docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md
-  - docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
-  - docs/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
-  - docs/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md
-  - docs/research/P005_PROVENANCE_BYPASS_STRATEGIES.md
+  - docs/records/_frozen/research/TRUE_PROVENANCE_AND_CONTAINMENT.md
+  - docs/records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
+  - docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
+  - docs/records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md
+  - docs/records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md
 ---
 
 # P005 Synthesis: Sealed Provenance Mode

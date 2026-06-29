@@ -303,7 +303,7 @@ a witness is only caught socially. RFC V1 moves that determinism into the engine
 
 ## Domain Modeling
 
-Per [`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model)
+Per [`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model)
 (RFC 0019 precedent):
 
 - **`ClaimLedger`** — a **value object** carried as a gate artifact: an immutable

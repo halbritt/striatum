@@ -7,7 +7,7 @@ author: proposer-claude-opus-4-8-001
 ## Review reconciliation (2026-06-02 RFC 0103 review dogfood)
 
 Reviewed live **through the runner** by a multi-lane panel
-(`dogfoods/rfc-0103-review/`, run `run_05c653068a094c25ca8ce2da0b190a33`): a
+(`docs/dogfoods/rfc-0103-review/`, run `run_05c653068a094c25ca8ce2da0b190a33`): a
 claude presenter published a review brief; a **codex** (threat_model) and a
 **claude** (devil's-advocate) reviewer each published a finding and submitted a
 verdict — **both `needs_revision`**, through the production handlers. Both
@@ -34,7 +34,7 @@ acceptance "once R1/R2 + the F-notes are addressed"):
   one supported shape."
 
 The review findings are preserved at
-`dogfoods/rfc-0103-review/artifacts/review/{codex,claude}/REVIEW.md`.
+`docs/dogfoods/rfc-0103-review/artifacts/review/{codex,claude}/REVIEW.md`.
 
 ## Context
 

@@ -291,7 +291,7 @@ until Phase A has run at least once in a dogfood.
 
 ## Domain Modeling
 
-Per [`docs/DDD.md` § "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model)
+Per [`docs/DDD.md` § "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model)
 (precedent: RFC 0019):
 
 - **Frame pack** is a **value object** and an *authoring input*, not an

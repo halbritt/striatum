@@ -119,7 +119,7 @@ until a new decision reopens it).
   rejected.
 - `striatum evidence export`: emits the decision event +
   `superseded_verdicts.jsonl` listing the affected verdicts.
-- Web UI (per `../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`):
+- Web UI (per `../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`):
   `RunStatePill` adds a `compromised` variant; `VerdictChip`
   renders a strikethrough + "superseded by <decision_id>" overlay
   when applicable.

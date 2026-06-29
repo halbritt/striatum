@@ -25,9 +25,10 @@ go/bin/
 # are subsumed by this broader exclusion. Recovered via
 # `striatum corpus migrate-historical-dogfoods` round-trip in S3.
 docs/dogfood/
-# Keep the two index files git-tracked: they are not per-run scaffold
+# Keep the aggregate index files git-tracked: they are not per-run scaffold
 # bodies, they are the human-readable map of what each numbered run
 # shipped.
+!docs/dogfood/README.md
 !docs/dogfood/HISTORICAL.md
 !docs/dogfood/FRICTION_LOG.md
 

@@ -4,7 +4,7 @@ Status: plan
 Date: 2026-06-17
 Anchored build: `f2d35c4e` (line numbers are symbol-anchored; offsets drift under
 concurrent merges — trust the symbol over the line).
-Source findings: `../../records/audits/STRIATUMD_CONCURRENCY_RESOLUTION_REVIEW_OPUS_4_8_2026-06-17.md`
+Source findings: `../../audits/STRIATUMD_CONCURRENCY_RESOLUTION_REVIEW_OPUS_4_8_2026-06-17.md`
 (ledger §C, inverse check §D, recommendations) over `REPORT.md`.
 
 > Priority = value × safety × unblock-order, **not** elegance or raw impact. Cheap,

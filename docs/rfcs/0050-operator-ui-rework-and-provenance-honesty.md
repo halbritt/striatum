@@ -4,13 +4,13 @@
 **Scope:** historical UI rework plan; active service cleanup is tracked by
 RFC 0061 / TODO 52
 **Canonical design:** [`docs/design/UI_REWORK.md`](../design/UI_REWORK.md)
-**Closes (partially):** `../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md` deliverable; §8.10 deferred items
+**Closes (partially):** `../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md` deliverable; §8.10 deferred items
 
 ## Background
 
 `docs/design/UI_REWORK.md` is a 1845-line implementation-ready
 handoff produced by Claude Design from
-`../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. It covers the local web UI
+`../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. It covers the local web UI
 (`striatum serve --web`) and the terminal dashboard
 (`striatum dashboard`) end-to-end: design intent, six primary
 operator flows, screen specifications for every template,
@@ -154,7 +154,7 @@ implement → 3-way build review) is collapsed to:
   gemini adversarial): the standard cross-lane verification.
 
 Rationale for skipping the design phase: `UI_REWORK.md` already
-is the design output of `../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. Three
+is the design output of `../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. Three
 more designers rediscovering the same scope would be redundant.
 
 ## Future RFCs absorbed
@@ -186,7 +186,7 @@ this RFC's V1.5 + V2 phases:
 
 - 2026-05-14: `docs/design/UI_REWORK.md` landed on main as
   `f6e81a4` via Claude Design pass against
-  `../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`.
+  `../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`.
 - 2026-05-14: operator added context (OQ-4 backend hook, OQ-1
   alignment, GH #5 muted-chip discipline, RFC renumbering to
   0050).

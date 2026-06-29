@@ -21,29 +21,31 @@ machine-checked*.
 
 ## The model
 
-Two axes. **Curated vs Exhaust:** curated docs are human-intent, mutable, edited
-in place; exhaust is machine-generated, write-once, time-ordered run output
-(committee reviews, audits, operator workflows, agent handoffs). **Diataxis**
-(tutorials / how-to / reference / explanation) governs only the curated half.
-Exhaust lands in one explicitly-named region, `docs/records/`, which is write-once
-and perishable. The rolling `docs/decisions/decision-log.md` is curated reference;
-individual dated decision records are exhaust. RFCs are curated-special and stay in
-`docs/rfcs/`.
+Two axes. **Curated vs provenance:** curated docs are human-intent, mutable,
+edited in place; provenance is historical run output, research snapshots,
+audits, and retired scaffolds that should remain discoverable without reading
+as current guidance. Current curated docs live under `docs/how-to/`,
+`docs/reference/`, `docs/agents/`, `docs/decisions/`, and `docs/rfcs/`.
+`docs/operator/`, `docs/campaigns/`, and `docs/dogfoods/` are sanctioned
+runtime or workflow-fixture regions. `docs/audits/` is the browseable audit
+corpus. `docs/records/_frozen/` is the frozen archival tail.
 
 ## TL;DR for an agent about to write a doc
 
-1. Is this a side-effect of a run (review / audit / handoff / scaffold)?
-   → `docs/records/<kind>/`, front-matter `type: record` + an `expires:` date. **Done.**
-   (This is where loose root-level `STRIATUM_*_<DATE>.md` audits belong.)
-2. Else it's curated: pick the Diataxis `type` by *purpose* (learning→tutorial,
-   task→how-to, lookup→reference, understanding→explanation; design→rfc), write
-   under the matching `docs/<type>/` path with `status: working|canonical`.
+1. Is this current operator/runtime material?
+   → use the existing sanctioned region (`docs/operator/`, `docs/campaigns/`,
+   or `docs/dogfoods/`) and keep the directory README accurate.
+2. Is this a whole-repo audit, hygiene report, review, or reconcile report?
+   → `docs/audits/`.
+3. Is this frozen provenance, old research, or an archived run packet?
+   → `docs/records/_frozen/`.
+4. Else it is curated: task guides go in `docs/how-to/`, lookup contracts in
+   `docs/reference/`, agent-facing guidance in `docs/agents/`, designs in
+   `docs/rfcs/`, and decisions in `docs/decisions/`.
 
 ## Status
 
-**Migration Phase 1 — warn-only.** The linter reports but does not block. striatum
-already has the Diataxis directories, so its remaining migration is the fold of
-`docs/operator/` + `docs/campaigns/` + `docs/_archive/` + `.agents/` run artifacts +
-the loose root audits into `docs/records/` (+`_frozen/`), tracked in the
-[migration plan](https://github.com/halbritt/doc-convention-lint/blob/master/MIGRATION_PLAN.md).
-Run `doc-lint lint --all --warn-only` to see current drift.
+**Migration Phase 1 — warn-only.** The linter reports but does not block.
+Striatum keeps a repo-specific overlay because several runtime surfaces are
+path contracts, not generic Diataxis shelves. Run
+`doc-lint lint --all --warn-only` to see current drift.

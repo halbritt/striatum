@@ -4,8 +4,8 @@ date: 2026-05-10
 author: researcher-ikllama-qwen3.6-35b-a3b-001
 source_prompt: prompts/P005_true_provenance_loophole.md
 related_research:
-  - docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
-  - docs/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
+  - docs/records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
+  - docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
 ---
 
 # P005: Provenance Bypass — Architectural Strategies for True Provenance
@@ -184,8 +184,8 @@ The question is whether this should be:
 
 ## See Also
 
-- `docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`
-- `docs/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md`
+- `docs/records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`
+- `docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md`
 - `docs/DDD.md` — domain-driven design framing
 - `docs/SPEC.md` — implementation contract
 - `docs/UBIQUITOUS_LANGUAGE.md` — glossary

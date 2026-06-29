@@ -110,7 +110,7 @@ already added in v1.41.0) chains the new override flag through to
 
 ### Web UI
 
-Per `../research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`:
+Per `../records/_frozen/research/CLAUDE_DESIGN_UI_REWORK_PROMPT.md`:
 
 - `LaneAttestationChip` shows `attested` / `unattested:<reason>`.
 - New `LaneEvidenceChip` shows `process_execution_present` /

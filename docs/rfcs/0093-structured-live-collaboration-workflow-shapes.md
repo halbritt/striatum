@@ -405,7 +405,7 @@ over the curated `dialogue` trajectory.
 
 ## Domain Modeling
 
-Per [`docs/DDD.md` § "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model)
+Per [`docs/DDD.md` § "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model)
 (precedent: RFC 0019, RFC 0087):
 
 - **Collaboration shape** is a **value object** and an *authoring input* —

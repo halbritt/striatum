@@ -1,6 +1,6 @@
 # RFC 0072: Blob-Backed Artifact Storage
 
-Status: accepted (V1 infrastructure shipped; bulk migration is operator-side per [BLOB_TRANSITION.md](../explanation/blob-transition.md))
+Status: accepted (V1 infrastructure shipped; bulk migration is operator-side per [BLOB_TRANSITION.md](../how-to/blob-transition.md))
 Date: 2026-05-18
 Context: [RFC 0043](0043-postgres-as-sole-substrate-and-daemon-required-runtime.md), [RFC 0044](0044-engram-phase-1-implementation-spec.md), [RFC 0046](0046-lane-evidence-guard-at-publish-artifact.md), [RFC 0066](0066-replay-archive-corpus-v2-foundations.md)
 

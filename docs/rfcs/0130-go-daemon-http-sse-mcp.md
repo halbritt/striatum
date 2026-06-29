@@ -7,9 +7,10 @@
 > `docs/rfcs/README.md`). Renumbered to **RFC 0130** on 2026-06-16 to resolve the
 > duplicate `0050` prefix it shared with
 > [`RFC 0050 — Operator UI rework and provenance honesty`](0050-operator-ui-rework-and-provenance-honesty.md)
-> (GitHub issue #320). The operator-UI RFC keeps `0050` (it owns the `rfc-0050`
-> label and the `docs/rfc-0050/` design tree). Historical operator run records and
-> the example fixture under `docs/operator/{plans,workflows,artifacts}/rfc-0050-*`
+> (GitHub issue #320). The operator-UI RFC keeps `0050` and the historical
+> `rfc-0050` label; its old design proposals now live under
+> `docs/records/_frozen/rfcs/rfc-0050/design/`. Historical operator run records
+> and the example fixture under `docs/operator/{plans,workflows,artifacts}/rfc-0050-*`
 > and `examples/rfc-0050-http-sse-mcp/` retain their original `rfc-0050-*` slugs as
 > frozen run-record provenance (`.check-docs-ignore`).
 

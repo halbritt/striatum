@@ -68,11 +68,11 @@
   `OPERATOR_REPORT.md` bodies from git after import batch
   `inventory-d0c894978b26b00f` verified and materialized byte-identical
   blob-backed reconstructions:
-  `dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`,
-  `dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`,
-  `dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`,
-  `dogfoods/rfc-0103-review/OPERATOR_REPORT.md`, and
-  `dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`.
+  `docs/dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`,
+  `docs/dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`,
+  `docs/dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`,
+  `docs/dogfoods/rfc-0103-review/OPERATOR_REPORT.md`, and
+  `docs/dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`.
 
 ## v2.39.0 — 2026-06-27
 
@@ -748,7 +748,7 @@
     lane still loses attestation and is reaped.
 - **Failure-mode audit remediation + open-issue triage wave (2026-06-19, D236).**
   Resolves the SERIOUS/MINOR availability & liveness findings from the
-  `docs/records/audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md` audit (#451–#458) plus the
+  `docs/audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md` audit (#451–#458) plus the
   prod-critical owner-DDL crash-loop (#442/#441) and three smaller runner bugs
   (#445/#446/#447), each as a direct runner-fix PR:
   - **daemon: a background-sweep panic no longer crash-loops the single writer
@@ -3013,7 +3013,7 @@ owner dep; the daemon generating/presenting its secret; the R-V3 flag flip
   `<error>method</error>`; success stays a terse one-line summary;
   `structuredContent.error`/`error_message` unchanged. Live-verified against
   the restarted daemon. P2+P3 below were built through a reviewed
-  implementation dogfood (`dogfoods/rfc-0111-p2p3/`, claude implementer + agy
+  implementation dogfood (`docs/dogfoods/rfc-0111-p2p3/`, claude implementer + agy
   reviewer, verdict accept) and also live-verified end to end.
 - **#160 — one-line installer.** New root `install.sh`: OS/arch detection,
   SHA256SUMS verification, installs `striatum` + `striatumd` +
@@ -3981,7 +3981,7 @@ Make/CI Tier-B wiring remain deferred.
 ### RFC 0101 Phase 2 (Slice 1) — hermetic adapter-conformance core (Tier A)
 
 New package `go/pkg/adapterconformance/` implementing the accepted RFC 0101
-Layer-2 design (`dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md`)
+Layer-2 design (`docs/dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md`)
 as a hermetic suite that rides `make -C go check` (no PostgreSQL, daemon, or
 agent CLI): the closed `FailureClass` taxonomy partitioned into **contract** vs
 **infra** classes (with a self-validation test that the partition is total and
@@ -4525,7 +4525,7 @@ together with its coupled build gates — the Makefile `ui-*` targets
 (`go/pkg/webassets`, RFC 0092); no Go code referenced `src/` except historical
 provenance comments. Also dropped the now-dead `.gitignore` un-ignore rules for
 the deleted bundle and added RFC-0078 historical banners to
-`docs/explanation/harness-friction-patterns.md` and `docs/reference/prd.md`
+`docs/reference/harness-friction-patterns.md` and `docs/reference/prd.md`
 (D018) where they cited retired `src/striatum/...py` paths. Go build + vet + lint
 green; no CI step depends on the removed frontend.
 
@@ -5266,7 +5266,7 @@ Recent checkpoints:
   guidance uses daemon PostgreSQL registration.
 - External architecture review and remediation-plan artifacts moved from the
   repository root into `docs/reviews/external/`; comparison and design
-  research notes moved into `docs/research/`, leaving the root limited to
+  research notes moved into `docs/records/_frozen/research/`, leaving the root limited to
   canonical project files.
 - The frontend Vite build now groups Shiki's dynamic imports into one
   `island-shiki-*` lazy chunk and the bundle guard enforces file/chunk-count

@@ -3,16 +3,16 @@ package migration
 import "testing"
 
 func TestRecordIDAndBlobKeyAreDeterministic(t *testing.T) {
-	id1 := RecordID("abcdef1234567890", "docs/records/audits/report.md", "ABCDEF")
-	id2 := RecordID("abcdef1234567890", "./docs/records/audits/report.md", "abcdef")
+	id1 := RecordID("abcdef1234567890", "docs/audits/report.md", "ABCDEF")
+	id2 := RecordID("abcdef1234567890", "./docs/audits/report.md", "abcdef")
 	if id1 != id2 {
 		t.Fatalf("RecordID not normalized: %q != %q", id1, id2)
 	}
-	if id1 == RecordID("abcdef1234567890", "docs/records/audits/other.md", "abcdef") {
+	if id1 == RecordID("abcdef1234567890", "docs/audits/other.md", "abcdef") {
 		t.Fatal("RecordID did not vary by source path")
 	}
-	key := BlobKey("abcdef1234567890abcdef", "docs/records/audits/report.md", "0123456789abcdef0123")
-	want := "records/historical/abcdef1234567890/0123456789abcdef/docs/records/audits/report.md"
+	key := BlobKey("abcdef1234567890abcdef", "docs/audits/report.md", "0123456789abcdef0123")
+	want := "records/historical/abcdef1234567890/0123456789abcdef/docs/audits/report.md"
 	if key != want {
 		t.Fatalf("BlobKey = %q, want %q", key, want)
 	}

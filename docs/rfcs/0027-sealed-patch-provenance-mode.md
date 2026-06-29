@@ -5,8 +5,8 @@ Date: 2026-05-10
 Context:
 [`docs/records/_frozen/research/P005_SYNTHESIS.md`](../records/_frozen/research/P005_SYNTHESIS.md),
 [`docs/records/_frozen/research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md`](../records/_frozen/research/P005_TRUE_PROVENANCE_CONSENSUS_SYNTHESIS.md),
-[`docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md`](../research/TRUE_PROVENANCE_AND_CONTAINMENT.md),
-[`docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`](../research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md),
+[`docs/records/_frozen/research/TRUE_PROVENANCE_AND_CONTAINMENT.md`](../records/_frozen/research/TRUE_PROVENANCE_AND_CONTAINMENT.md),
+[`docs/records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`](../records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md),
 [`docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md`](../records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md),
 [`docs/records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md`](../records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md),
 [`docs/records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md`](../records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md),
@@ -372,7 +372,7 @@ advisory behavior.
 ## Domain Modeling
 
 This RFC adds several terms to the model. Per
-[`docs/explanation/domain-driven-design.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model),
+[`docs/reference/domain-driven-design.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model),
 the accepted implementation should update `docs/reference/ubiquitous-language.md`
 before validator and introspection changes land.
 

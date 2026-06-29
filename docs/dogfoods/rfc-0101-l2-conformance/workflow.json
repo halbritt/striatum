@@ -1,0 +1,585 @@
+{
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "rfc-0101-l2-conformance",
+  "workflow_version": "2026-05-31",
+  "name": "RFC 0101 L2 \u2014 adapter conformance harness (design + build)",
+  "branch": {
+    "mode": "confirm",
+    "suggested_name": "striatum/rfc-0101-l2-conformance",
+    "allow_dirty": true
+  },
+  "allow_same_model_review_pairing": true,
+  "coordinator": {
+    "role_id": "coordinator",
+    "lane_id": "claude_code"
+  },
+  "lanes": {
+    "codex": {
+      "adapter": "process",
+      "display_model": "Codex GPT-5.5 xhigh",
+      "command": [
+        "codex",
+        "--yolo"
+      ],
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "supervision": {
+        "transport": "pty_helper",
+        "compatible": true,
+        "require_tmux": true
+      },
+      "worktree_isolation": "per_job",
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ]
+    },
+    "claude_code": {
+      "adapter": "process",
+      "display_model": "Claude Opus 4.8",
+      "command": [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--model",
+        "claude-opus-4-8"
+      ],
+      "adapter_capabilities": {
+        "agent_loop": true
+      },
+      "supervision": {
+        "transport": "pty_helper",
+        "compatible": true,
+        "require_tmux": true
+      },
+      "worktree_isolation": "per_job",
+      "capabilities": [
+        "write",
+        "review",
+        "synthesis"
+      ]
+    }
+  },
+  "roles": {
+    "coordinator": {
+      "definition_path": "roles/coordinator.md"
+    },
+    "designer": {
+      "definition_path": "roles/designer.md"
+    },
+    "synthesizer": {
+      "definition_path": "roles/synthesizer.md"
+    },
+    "implementer": {
+      "definition_path": "roles/implementer.md"
+    },
+    "reviewer": {
+      "definition_path": "roles/reviewer.md"
+    }
+  },
+  "context_docs": [
+    {
+      "path": "README.md",
+      "required": false
+    }
+  ],
+  "parallelism": {
+    "mode": "declared",
+    "max_active_jobs": 3,
+    "require_disjoint_write_scopes": true
+  },
+  "jobs": [
+    {
+      "id": "design_codex",
+      "type": "draft",
+      "title": "Design (codex lane)",
+      "role_id": "designer",
+      "lane_id": "codex",
+      "parallel_group": "design",
+      "fresh_session_required": true,
+      "objective": "Produce an independent design proposal for the RFC 0101 Layer 2 adapter-conformance harness + lane-env hardening task described in your prompt. Do not coordinate with the other design lane.",
+      "task_prompt": {
+        "path": "prompts/design.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/design/codex/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "codex_design",
+          "kind": "handoff",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/design/codex/DESIGN.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "design_claude",
+      "type": "draft",
+      "title": "Design (claude_code lane)",
+      "role_id": "designer",
+      "lane_id": "claude_code",
+      "parallel_group": "design",
+      "fresh_session_required": true,
+      "objective": "Produce an independent design proposal for the RFC 0101 Layer 2 adapter-conformance harness + lane-env hardening task described in your prompt. Do not coordinate with the other design lane.",
+      "task_prompt": {
+        "path": "prompts/design.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/design/claude_code/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "claude_design",
+          "kind": "handoff",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/design/claude_code/DESIGN.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "synth",
+      "type": "synthesis",
+      "title": "Synthesize designs (interrogable)",
+      "role_id": "synthesizer",
+      "lane_id": "claude_code",
+      "fresh_session_required": true,
+      "interrogable": true,
+      "objective": "Reconcile the design proposals into a single buildable synthesis. Stay live after completing so the adversarial design-review panel can interrogate your preserved reasoning.",
+      "task_prompt": {
+        "path": "prompts/synth.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md"
+        ],
+        "forbidden_paths": [
+          ".striatum/",
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/design/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "design_synthesis",
+          "kind": "synthesis",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/DESIGN_SYNTHESIS.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_design_codex",
+      "type": "review",
+      "title": "Design review codex threat_model",
+      "role_id": "reviewer",
+      "lane_id": "codex",
+      "parallel_group": "design_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "threat_model",
+      "objective": "Threat-model the design synthesis (how does this NOT make the run robust?) and interrogate the live synthesizer before rendering a verdict.",
+      "task_prompt": {
+        "path": "prompts/review_design.md"
+      },
+      "inputs": [
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/codex/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "design_review_codex",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/codex/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_design_claude_a",
+      "type": "review",
+      "title": "Design review claude ergonomics_dx",
+      "role_id": "reviewer",
+      "lane_id": "claude_code",
+      "parallel_group": "design_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "ergonomics_dx",
+      "objective": "Review the design synthesis for operator/developer ergonomics and CI integration, then interrogate the live synthesizer before rendering a verdict.",
+      "task_prompt": {
+        "path": "prompts/review_design.md"
+      },
+      "inputs": [
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/claude_a/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "design_review_claude_a",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/claude_a/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_design_claude_b",
+      "type": "review",
+      "title": "Design review claude devils_advocate",
+      "role_id": "reviewer",
+      "lane_id": "claude_code",
+      "parallel_group": "design_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "devils_advocate",
+      "objective": "Adversarially falsify the design synthesis (construct a false-green and a false-red scenario), then interrogate the live synthesizer before rendering a verdict.",
+      "task_prompt": {
+        "path": "prompts/review_design.md"
+      },
+      "inputs": [
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/claude_b/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "design_review_claude_b",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/design/claude_b/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "implement",
+      "type": "build",
+      "title": "Implement cleared design (interrogable)",
+      "role_id": "implementer",
+      "lane_id": "claude_code",
+      "interrogable": true,
+      "required_review_postures": [
+        "threat_model",
+        "ergonomics_dx",
+        "devils_advocate"
+      ],
+      "objective": "Implement the cleared design: the conformance contract + harness skeleton + lane-env hardening (#76/#85/#70) as Go code under go/, plus make/CI wiring. Write a HANDOFF and stay live so the build-review panel can interrogate you.",
+      "task_prompt": {
+        "path": "prompts/implement.md"
+      },
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/build/",
+          "go/",
+          "docs/rfcs/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "build_handoff",
+          "kind": "handoff",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/build/HANDOFF.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_build_codex",
+      "type": "review",
+      "title": "Build review codex threat_model",
+      "role_id": "reviewer",
+      "lane_id": "codex",
+      "parallel_group": "build_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "threat_model",
+      "objective": "Threat-model the implementation against the on-disk code, then interrogate the live implementer before voting approve/needs_revision.",
+      "task_prompt": {
+        "path": "prompts/review_build.md"
+      },
+      "inputs": [
+        "build_handoff",
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/codex/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "build_review_codex",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/codex/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_build_claude_a",
+      "type": "review",
+      "title": "Build review claude ergonomics_dx",
+      "role_id": "reviewer",
+      "lane_id": "claude_code",
+      "parallel_group": "build_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "ergonomics_dx",
+      "objective": "Review the implementation for operator/developer ergonomics and verify claims against the on-disk code, then interrogate the live implementer before voting.",
+      "task_prompt": {
+        "path": "prompts/review_build.md"
+      },
+      "inputs": [
+        "build_handoff",
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/claude_a/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "build_review_claude_a",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/claude_a/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_build_claude_b",
+      "type": "review",
+      "title": "Build review claude devils_advocate",
+      "role_id": "reviewer",
+      "lane_id": "claude_code",
+      "parallel_group": "build_review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "devils_advocate",
+      "objective": "Adversarially probe the implementation (find a real lane failure that passes conformance yet wedges a live run), then interrogate the live implementer before voting.",
+      "task_prompt": {
+        "path": "prompts/review_build.md"
+      },
+      "inputs": [
+        "build_handoff",
+        "design_synthesis"
+      ],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": [
+          "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/claude_b/"
+        ],
+        "forbidden_paths": [
+          ".striatum/"
+        ]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "build_review_claude_b",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0101-l2-conformance/artifacts/review/build/claude_b/REVIEW.md",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "design_codex",
+      "to": "synth",
+      "on": "completed"
+    },
+    {
+      "from": "design_claude",
+      "to": "synth",
+      "on": "completed"
+    },
+    {
+      "from": "synth",
+      "to": "review_design_codex",
+      "on": "completed"
+    },
+    {
+      "from": "synth",
+      "to": "review_design_claude_a",
+      "on": "completed"
+    },
+    {
+      "from": "synth",
+      "to": "review_design_claude_b",
+      "on": "completed"
+    },
+    {
+      "from": "review_design_codex",
+      "to": "implement",
+      "on": "completed"
+    },
+    {
+      "from": "review_design_claude_a",
+      "to": "implement",
+      "on": "completed"
+    },
+    {
+      "from": "review_design_claude_b",
+      "to": "implement",
+      "on": "completed"
+    },
+    {
+      "from": "implement",
+      "to": "review_build_codex",
+      "on": "completed"
+    },
+    {
+      "from": "implement",
+      "to": "review_build_claude_a",
+      "on": "completed"
+    },
+    {
+      "from": "implement",
+      "to": "review_build_claude_b",
+      "on": "completed"
+    }
+  ],
+  "cycles": [
+    {
+      "from": "review_design_codex",
+      "to": "synth",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    },
+    {
+      "from": "review_design_claude_a",
+      "to": "synth",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    },
+    {
+      "from": "review_design_claude_b",
+      "to": "synth",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    },
+    {
+      "from": "review_build_codex",
+      "to": "implement",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    },
+    {
+      "from": "review_build_claude_a",
+      "to": "implement",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    },
+    {
+      "from": "review_build_claude_b",
+      "to": "implement",
+      "on_verdict": "needs_revision",
+      "max_iterations": 2,
+      "allow_same_lane": true,
+      "allow_same_model": true
+    }
+  ],
+  "review_panels": [
+    {
+      "panel_id": "design_panel",
+      "interrogable_job_id": "synth",
+      "reviewer_job_ids": [
+        "review_design_codex",
+        "review_design_claude_a",
+        "review_design_claude_b"
+      ],
+      "interrogation": {
+        "max_rounds": 2,
+        "max_questions_per_round": 3
+      }
+    },
+    {
+      "panel_id": "build_panel",
+      "interrogable_job_id": "implement",
+      "reviewer_job_ids": [
+        "review_build_codex",
+        "review_build_claude_a",
+        "review_build_claude_b"
+      ],
+      "interrogation": {
+        "max_rounds": 2,
+        "max_questions_per_round": 3
+      }
+    }
+  ]
+}

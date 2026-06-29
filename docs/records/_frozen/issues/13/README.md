@@ -1,6 +1,10 @@
+# Issue 13 Record
 
-# GH #13 Workflow Note
+This directory preserves the archived workflow packet for historical GitHub issue
+#13. This issue was scaffolded with its own `SPEC.md`, but it was executed as
+part of the historical #12-#13 ergonomics polish bundle at
+[`../12/workflow.json`](../12/workflow.json) rather than as a separate run.
 
-This issue is scaffolded with its own captured `SPEC.md` for traceability.
-Per `docs/ROADMAP.md`, it is executed as part of the #12-#13 ergonomics polish bundle at
-`docs/issues/12/workflow.json` rather than as a separate run.
+Status: frozen provenance. Keep the captured specs, workflow files, prompts,
+roles, handoffs, and reviews stable so the old run can be reconstructed. Use the
+current tracker and operator docs for live work.

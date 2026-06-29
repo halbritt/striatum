@@ -133,15 +133,15 @@ func TestRunDriveRejectsBadProviderAuthGate(t *testing.T) {
 
 func TestRecordsMigrationInventoryIsLocalJSON(t *testing.T) {
 	repoRoot := t.TempDir()
-	writeRepoFile(t, repoRoot, "dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md", "report")
-	writeRepoFile(t, repoRoot, "docs/records/audits/STRIATUM_AUDIT.md", "audit")
+	writeRepoFile(t, repoRoot, "docs/dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md", "report")
+	writeRepoFile(t, repoRoot, "docs/audits/STRIATUM_AUDIT.md", "audit")
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{
 		"--repo", repoRoot,
 		"records", "migration", "inventory",
-		"--root", "dogfoods",
-		"--root", "docs/records/audits",
+		"--root", "docs/dogfoods",
+		"--root", "docs/audits",
 	}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %s", exitCode, stderr.String())
@@ -169,7 +169,7 @@ func TestRecordsMigrationInventoryIsLocalJSON(t *testing.T) {
 	if len(payload.Entries) != 2 {
 		t.Fatalf("entries = %#v", payload.Entries)
 	}
-	if payload.Entries[0].Path != "docs/records/audits/STRIATUM_AUDIT.md" || payload.Entries[1].Path != "dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md" {
+	if payload.Entries[0].Path != "docs/audits/STRIATUM_AUDIT.md" || payload.Entries[1].Path != "docs/dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md" {
 		t.Fatalf("entries not sorted by path: %#v", payload.Entries)
 	}
 	if payload.Entries[0].RecordClass != "audit_record" || payload.Entries[0].Classification != "safe_to_blob_index" || payload.Entries[0].ProposedImportMode != "safe_to_blob_index" {
@@ -199,13 +199,13 @@ func TestRecordsDocketHelpUsesDaemonRoute(t *testing.T) {
 func TestWriteMaterializedRecordsAllowsEmptyBody(t *testing.T) {
 	outRoot := t.TempDir()
 	written, err := writeMaterializedRecords(outRoot, []any{map[string]any{
-		"source_path": "docs/records/audits/empty.md",
+		"source_path": "docs/audits/empty.md",
 		"body_base64": "",
 	}})
 	if err != nil {
 		t.Fatalf("writeMaterializedRecords: %v", err)
 	}
-	target := filepath.Join(outRoot, "docs", "records", "audits", "empty.md")
+	target := filepath.Join(outRoot, "docs", "audits", "empty.md")
 	if len(written) != 1 || written[0] != target {
 		t.Fatalf("written = %#v, want %s", written, target)
 	}

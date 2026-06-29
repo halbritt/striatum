@@ -31,13 +31,13 @@ var hygieneExcludedPathPrefixes = []string{
 	"go/",
 	// Historical / retired-status documentation and provenance.
 	"docs/records/_frozen/",
-	"docs/records/audits/",
+	"docs/audits/",
 	"docs/rfcs/",
 	"docs/decisions/",
-	"docs/research/",
+	"docs/records/_frozen/research/",
 	"docs/operator/workflows/",
 	"docs/operator/artifacts/",
-	"dogfoods/",
+	"docs/dogfoods/",
 	"prompts/",
 }
 
@@ -169,7 +169,7 @@ func TestClaudePrintHygieneDetectionLogic(t *testing.T) {
 		{"docs/records/_frozen/src_templates/bin/claude-supervised-wrapper.sh", true},
 		{"docs/rfcs/0049-interactive-claude-lane-mcp-control-plane.md", true},
 		{"CHANGELOG.md", true},
-		{"docs/records/audits/STRIATUM_DOCS_DRIFT_AUDIT_GEMINI_3_5_FLASH_2026-06-08.md", true},
+		{"docs/audits/STRIATUM_DOCS_DRIFT_AUDIT_GEMINI_3_5_FLASH_2026-06-08.md", true},
 		{"docs/reference/roadmap.md", true},
 		{"docs/how-to/writing-workflows.md", true},
 		{"examples/foo/README.md", true},

@@ -1,0 +1,124 @@
+{
+    "schema_version": "striatum.workflow.v1",
+    "workflow_id": "rfc-0103-floor",
+    "workflow_version": "2026-06-02",
+    "name": "RFC 0103 umbrella FLOOR — review-gated, needs_revision + interrogation, restart-survival",
+    "branch": {
+        "mode": "confirm",
+        "suggested_name": "striatum/rfc-0103-floor",
+        "allow_dirty": true
+    },
+    "coordinator": {
+        "role_id": "presenter",
+        "lane_id": "claude"
+    },
+    "allow_same_model_review_pairing": true,
+    "lanes": {
+        "claude": {
+            "adapter": "process",
+            "display_model": "Claude Opus 4.8",
+            "command": [
+                "claude",
+                "--dangerously-skip-permissions",
+                "--model",
+                "claude-opus-4-8"
+            ],
+            "adapter_capabilities": {
+                "agent_loop": true
+            },
+            "supervision": {
+                "transport": "pty_helper",
+                "compatible": true,
+                "require_tmux": true
+            },
+            "capabilities": [
+                "write",
+                "review",
+                "interrogate"
+            ]
+        }
+    },
+    "roles": {
+        "presenter": {
+            "definition_path": "roles/presenter.md"
+        },
+        "reviewer": {
+            "definition_path": "roles/reviewer.md"
+        }
+    },
+    "context_docs": [],
+    "parallelism": {
+        "mode": "declared",
+        "max_active_jobs": 1,
+        "require_disjoint_write_scopes": true
+    },
+    "jobs": [
+        {
+            "id": "present",
+            "type": "synthesis",
+            "title": "Author the RFC 0103 floor-evidence synthesis note",
+            "role_id": "presenter",
+            "lane_id": "claude",
+            "interrogable": true,
+            "objective": "Author a short markdown synthesis summarizing the RFC 0103 W3/W4 acceptance evidence; revise once when the reviewer requires it.",
+            "task_prompt": {
+                "path": "prompts/present.md"
+            },
+            "write_scope": {
+                "mode": "repo_write",
+                "repo_write": true,
+                "allowed_paths": [
+                    "docs/dogfoods/rfc-0103-floor/artifacts/"
+                ],
+                "forbidden_paths": [
+                    ".striatum/"
+                ]
+            },
+            "expected_artifacts": [
+                {
+                    "logical_name": "floor_synthesis",
+                    "kind": "synthesis",
+                    "path": "docs/dogfoods/rfc-0103-floor/artifacts/FLOOR_SYNTHESIS.md",
+                    "required": true
+                }
+            ]
+        },
+        {
+            "id": "review",
+            "type": "review",
+            "title": "Interrogate the presenter and review the floor synthesis",
+            "role_id": "reviewer",
+            "lane_id": "claude",
+            "objective": "Interrogate the presenter, then vote: needs_revision on the first attempt with one concrete finding, accept on the second.",
+            "task_prompt": {
+                "path": "prompts/review.md"
+            },
+            "write_scope": {
+                "mode": "review_only_artifact",
+                "repo_write": false,
+                "allowed_paths": [
+                    "docs/dogfoods/rfc-0103-floor/artifacts/"
+                ],
+                "forbidden_paths": [
+                    ".striatum/"
+                ]
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from": "present",
+            "to": "review",
+            "on": "completed"
+        }
+    ],
+    "cycles": [
+        {
+            "from": "review",
+            "to": "present",
+            "on_verdict": "needs_revision",
+            "max_iterations": 1,
+            "allow_same_lane": true
+        }
+    ]
+}

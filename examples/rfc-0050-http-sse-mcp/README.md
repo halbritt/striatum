@@ -53,7 +53,7 @@ Watch with `striatum dashboard --run-id <id>`.
 ## Artifact layout
 
 ```
-docs/rfc-0050/
+docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/
 ├── design/
 │   ├── codex/DESIGN.md
 │   ├── claude_code/DESIGN.md

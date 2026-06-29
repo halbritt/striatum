@@ -324,4 +324,4 @@ artifact, session, lease, event, and capability concepts remain the same. The
 primary domain clarification is that "client surface" no longer implies a
 Python implementation; Go becomes the only Striatum runtime implementation in
 active HEAD. This follows the boundary-clarification guidance in
-[`docs/DDD.md § Adding to the model`](../explanation/domain-driven-design.md#adding-to-the-model).
+[`docs/DDD.md § Adding to the model`](../reference/domain-driven-design.md#adding-to-the-model).

@@ -76,7 +76,7 @@ func TestHandleRecordsMigrationImportUploadsAndIndexesGeneratedRecord(t *testing
 	result, err := HandleRecordsMigrationImport(context.Background(), runner, rpc.Envelope{
 		Params: map[string]any{
 			"repository_id":   "repo_1",
-			"source_path":     "docs/records/audits/report.md",
+			"source_path":     "docs/audits/report.md",
 			"source_commit":   "abcdef1234567890",
 			"record_class":    "audit_record",
 			"content_sha256":  digest,
@@ -96,7 +96,7 @@ func TestHandleRecordsMigrationImportUploadsAndIndexesGeneratedRecord(t *testing
 	if !strings.Contains(runner.execSQL, "INSERT INTO striatumd.generated_records") || !strings.Contains(runner.execSQL, "ON CONFLICT") {
 		t.Fatalf("exec SQL did not upsert generated_records: %s", runner.execSQL)
 	}
-	if len(runner.execArgs) < 16 || runner.execArgs[2] != "docs/records/audits/report.md" || runner.execArgs[8] != digest || runner.execArgs[15] != "batch_1" {
+	if len(runner.execArgs) < 16 || runner.execArgs[2] != "docs/audits/report.md" || runner.execArgs[8] != digest || runner.execArgs[15] != "batch_1" {
 		t.Fatalf("exec args = %#v", runner.execArgs)
 	}
 }
@@ -113,7 +113,7 @@ func TestHandleRecordsMigrationImportAllowsEmptyBody(t *testing.T) {
 	result, err := HandleRecordsMigrationImport(context.Background(), runner, rpc.Envelope{
 		Params: map[string]any{
 			"repository_id":  "repo_1",
-			"source_path":    "docs/records/audits/empty.md",
+			"source_path":    "docs/audits/empty.md",
 			"record_class":   "audit_record",
 			"content_sha256": digest,
 			"body_base64":    "",

@@ -183,4 +183,4 @@ checks for the remaining Go production contract and method-removal behavior.
 This RFC changes an implementation boundary, not the workflow model. The daemon
 core is a runtime implementation of the existing daemon aggregate authority.
 Workflow state, method semantics, and audit events remain the same model
-described in [`docs/DDD.md § Adding to the model`](../explanation/domain-driven-design.md#adding-to-the-model).
+described in [`docs/DDD.md § Adding to the model`](../reference/domain-driven-design.md#adding-to-the-model).

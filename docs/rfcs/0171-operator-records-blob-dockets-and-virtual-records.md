@@ -6,7 +6,7 @@ Context: [RFC 0072](0072-blob-backed-artifact-storage.md),
 [RFC 0123](0123-blob-routed-lane-exhaust-and-git-publication-specs.md),
 [RFC 0170](0170-self-culling-repository-and-cull-workflow-class.md),
 the 2026-06-28 architecture review finding on provenance accumulation
-([audit](../records/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_GPT_5_CODEX_2026-06-28.md)).
+([audit](../audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_GPT_5_CODEX_2026-06-28.md)).
 
 ## Problem
 
@@ -143,7 +143,7 @@ legacy behavior, but doctor must report the posture honestly.
 ### Historical inventory and import proof
 
 Add a read-only historical inventory command for paths such as `docs/operator`,
-`docs/records/audits`, `docs/records/_frozen`, `docs/dogfood`, and `dogfoods`.
+`docs/audits`, `docs/records/_frozen`, `docs/dogfood`, and `docs/dogfoods`.
 The command emits deterministic JSON with path, size, sha256, source commit,
 inferred record class, proposed import mode, and a classification of
 `safe_to_blob_index`, `keep_in_git`, or `manual_review`.

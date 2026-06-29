@@ -54,7 +54,7 @@
   },
   "context_docs": [
     {
-      "path": "docs/rfcs/0050-go-daemon-http-sse-mcp.md",
+      "path": "docs/rfcs/0130-go-daemon-http-sse-mcp.md",
       "required": true
     },
     {
@@ -96,7 +96,7 @@
         "mode": "repo_write",
         "repo_write": true,
         "allowed_paths": [
-          "docs/rfc-0050/design/codex/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/codex/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -106,7 +106,7 @@
         {
           "logical_name": "codex_design",
           "kind": "handoff",
-          "path": "docs/rfc-0050/design/codex/DESIGN.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/codex/DESIGN.md",
           "required": true
         }
       ]
@@ -127,7 +127,7 @@
         "mode": "repo_write",
         "repo_write": true,
         "allowed_paths": [
-          "docs/rfc-0050/design/claude_code/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/claude_code/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -137,7 +137,7 @@
         {
           "logical_name": "claude_design",
           "kind": "handoff",
-          "path": "docs/rfc-0050/design/claude_code/DESIGN.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/claude_code/DESIGN.md",
           "required": true
         }
       ]
@@ -158,7 +158,7 @@
         "mode": "repo_write",
         "repo_write": true,
         "allowed_paths": [
-          "docs/rfc-0050/design/gemini/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/gemini/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -168,7 +168,7 @@
         {
           "logical_name": "gemini_design",
           "kind": "handoff",
-          "path": "docs/rfc-0050/design/gemini/DESIGN.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/gemini/DESIGN.md",
           "required": true
         }
       ]
@@ -188,18 +188,18 @@
         "mode": "repo_write",
         "repo_write": true,
         "allowed_paths": [
-          "docs/rfc-0050/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/"
         ],
         "forbidden_paths": [
           ".striatum/",
-          "docs/rfc-0050/design/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/"
         ]
       },
       "expected_artifacts": [
         {
           "logical_name": "synthesis",
           "kind": "synthesis",
-          "path": "docs/rfc-0050/DESIGN_SYNTHESIS.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md",
           "required": true
         }
       ]
@@ -221,7 +221,7 @@
         "mode": "review_only_artifact",
         "repo_write": false,
         "allowed_paths": [
-          "docs/rfc-0050/review/design/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/design/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -231,7 +231,7 @@
         {
           "logical_name": "design_review",
           "kind": "finding",
-          "path": "docs/rfc-0050/review/design/REVIEW.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/design/REVIEW.md",
           "required": true
         }
       ]
@@ -255,7 +255,7 @@
         "mode": "repo_write",
         "repo_write": true,
         "allowed_paths": [
-          "docs/rfc-0050/build/",
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/build/",
           "go/pkg/mcp/",
           "go/pkg/rpc/",
           "go/cmd/striatumd/",
@@ -272,7 +272,7 @@
         {
           "logical_name": "implementation",
           "kind": "handoff",
-          "path": "docs/rfc-0050/build/HANDOFF.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/build/HANDOFF.md",
           "required": true
         }
       ]
@@ -295,7 +295,7 @@
         "mode": "review_only_artifact",
         "repo_write": false,
         "allowed_paths": [
-          "docs/rfc-0050/review/build/codex/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/codex/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -305,7 +305,7 @@
         {
           "logical_name": "build_review_codex",
           "kind": "finding",
-          "path": "docs/rfc-0050/review/build/codex/REVIEW.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/codex/REVIEW.md",
           "required": true
         }
       ]
@@ -328,7 +328,7 @@
         "mode": "review_only_artifact",
         "repo_write": false,
         "allowed_paths": [
-          "docs/rfc-0050/review/build/claude_code/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/claude_code/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -338,7 +338,7 @@
         {
           "logical_name": "build_review_claude",
           "kind": "finding",
-          "path": "docs/rfc-0050/review/build/claude_code/REVIEW.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/claude_code/REVIEW.md",
           "required": true
         }
       ]
@@ -361,7 +361,7 @@
         "mode": "review_only_artifact",
         "repo_write": false,
         "allowed_paths": [
-          "docs/rfc-0050/review/build/gemini/"
+          "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/gemini/"
         ],
         "forbidden_paths": [
           ".striatum/"
@@ -371,7 +371,7 @@
         {
           "logical_name": "build_review_gemini",
           "kind": "finding",
-          "path": "docs/rfc-0050/review/build/gemini/REVIEW.md",
+          "path": "docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/gemini/REVIEW.md",
           "required": true
         }
       ]

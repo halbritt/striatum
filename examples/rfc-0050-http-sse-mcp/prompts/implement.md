@@ -1,7 +1,7 @@
 # Implementation — RFC 0050 HTTP/SSE MCP
 
 Build the smallest-scope item from
-`docs/rfc-0050/DESIGN_SYNTHESIS.md`, incorporating any required
+`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md`, incorporating any required
 revisions from the design review.
 
 Scope (in this run only):
@@ -30,7 +30,7 @@ reviewable. Resist scope creep.
 
 Hand off:
 
-- Write `docs/rfc-0050/build/HANDOFF.md` summarizing what landed, what
+- Write `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/build/HANDOFF.md` summarizing what landed, what
   was deferred, the exact verification commands the reviewers should
   run (e.g., `cd go && go test ./...`, plus a curl-against-SSE recipe
   or a Go test invocation), and the port-config flag/env-var name.

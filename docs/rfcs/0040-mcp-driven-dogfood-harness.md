@@ -11,7 +11,7 @@ side supervised-progress heartbeat were scoped to the systems half and landed
 under the same RFC; D110 later removed the SQLite-bound composite tools from
 the production daemon contract, so operators now use primitive daemon methods
 until a PostgreSQL-native composite is accepted. See
-[`docs/HARNESS_FRICTION_PATTERNS.md`](../explanation/harness-friction-patterns.md)
+[`docs/HARNESS_FRICTION_PATTERNS.md`](../reference/harness-friction-patterns.md)
 for the long-form record of the four observed friction patterns and the
 fixes that landed.
 Context:

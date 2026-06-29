@@ -19,7 +19,7 @@ Postures used by this fixture:
 Responsibilities:
 
 - Read only the artifacts under review and the documents they cite
-  (`docs/rfc-0050/DESIGN_SYNTHESIS.md`, `docs/rfc-0050/build/HANDOFF.md`,
+  (`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md`, `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/build/HANDOFF.md`,
   and the diff it points to).
 - Write findings to your lane's review directory.
 - Emit one of `approved`, `needs_revision`, or `rejected`.

@@ -66,11 +66,12 @@ func TestRetiredVocabularyGrepGate(t *testing.T) {
 			// Skip files under docs that are historical, decisions, RFCS, or operator runs
 			if strings.HasPrefix(rel, "docs/decisions/decision-log.md") ||
 				strings.HasPrefix(rel, "docs/reference/ubiquitous-language.md") ||
+				strings.HasPrefix(rel, "docs/reference/harness-friction-patterns.md") ||
 				strings.HasPrefix(rel, "docs/rfcs/") ||
 				strings.HasPrefix(rel, "docs/records/") ||
+				strings.HasPrefix(rel, "docs/dogfoods/") ||
 				strings.HasPrefix(rel, "docs/operator/") ||
-				strings.HasPrefix(rel, "docs/research/") ||
-				strings.HasPrefix(rel, "docs/explanation/") ||
+				strings.HasPrefix(rel, "docs/records/_frozen/research/") ||
 				strings.HasPrefix(rel, "docs/reference/todo.md") {
 				return nil
 			}

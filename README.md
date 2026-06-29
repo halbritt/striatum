@@ -196,7 +196,7 @@ Striatum runs with two named roles (RFC 0053):
 - **AI operator** — the default driver. Claims work, publishes artifacts, and advances state through daemon MCP tools. CLI verbs are compatibility/debug fallbacks, not the normal live control plane.
 - **Human principal** — escalation only. Resolves blockers the AI judges itself stuck on (`escalation` artifacts). Routine work belongs to the operator.
 
-The [day-zero usage guide](docs/tutorials/using-striatum.md) walks new arrivals through both roles, prerequisites, first run, and the principal's escalation surface.
+The [day-zero usage guide](docs/how-to/using-striatum.md) walks new arrivals through both roles, prerequisites, first run, and the principal's escalation surface.
 
 ---
 
@@ -249,7 +249,7 @@ striatum --repo "$TARGET_REPO" run start --run-id <run_id> --json
 striatum --repo "$TARGET_REPO" dashboard --run-id <run_id> --once
 ```
 
-Architecture map: [`ARCHITECTURE.md`](ARCHITECTURE.md). Full walkthrough: [`docs/USING_STRIATUM.md`](docs/tutorials/using-striatum.md). AI-operator playbook: [`docs/HOW_TO_AGENT.md`](docs/how-to/how-to-agent.md). Human-principal escalation guide: [`docs/HOW_TO_HUMAN.md`](docs/how-to/how-to-human.md).
+Architecture map: [`ARCHITECTURE.md`](ARCHITECTURE.md). Full walkthrough: [`docs/USING_STRIATUM.md`](docs/how-to/using-striatum.md). AI-operator playbook: [`docs/HOW_TO_AGENT.md`](docs/how-to/how-to-agent.md). Human-principal escalation guide: [`docs/HOW_TO_HUMAN.md`](docs/how-to/how-to-human.md).
 
 ### Install the agent skill bundle
 
@@ -335,7 +335,7 @@ make check
 
 | File | When to read |
 |---|---|
-| [`docs/tutorials/using-striatum.md`](docs/tutorials/using-striatum.md) | The day-zero usage guide — operator + principal in one pass |
+| [`docs/how-to/using-striatum.md`](docs/how-to/using-striatum.md) | The day-zero usage guide — operator + principal in one pass |
 | [`docs/how-to/how-to-human.md`](docs/how-to/how-to-human.md) | Human-principal escalation playbook; retains manual operator reference for debugging and demos |
 | [`docs/how-to/how-to-agent.md`](docs/how-to/how-to-agent.md) | Long-form companion to the RFC 0015 agent skill bundle |
 | [`docs/how-to/postgres-transition.md`](docs/how-to/postgres-transition.md) | Operator runbook for the D094 / RFC 0043 PostgreSQL cutover, retired SQLite handling, and repo registration |

@@ -30,7 +30,7 @@ package adapterconformance
 // daemon socket. The real surface — a `systemctl restart striatumd` that
 // SIGKILLs the helper cgroup / cancels its spawn context and recreates the
 // socket mid-run — is covered by the [live-corroborated] gate
-// (dogfoods/rfc-0103-w3-141-restart). The escalation-within-budget assertions
+// (docs/dogfoods/rfc-0103-w3-141-restart). The escalation-within-budget assertions
 // below are the success criterion only for an explicitly UNRECOVERABLE injected
 // fault, with a paired assertion that the run never silently wedges; a
 // recoverable fault (the systemd restart) must COMPLETE, not escalate.

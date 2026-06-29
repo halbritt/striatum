@@ -16,8 +16,8 @@ import (
 
 func TestWriteScopeViolationsRejectsOutsideAndForbiddenPaths(t *testing.T) {
 	got := writeScopeViolations(
-		[]string{"docs/rfc-0050/design/codex/DESIGN.md", "go/pkg/mcp/capabilities.go", ".striatum/scratch/pid"},
-		[]string{"docs/rfc-0050/design/codex/"},
+		[]string{"docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/codex/DESIGN.md", "go/pkg/mcp/capabilities.go", ".striatum/scratch/pid"},
+		[]string{"docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/codex/"},
 		[]string{".striatum/"},
 	)
 	want := []string{".striatum/scratch/pid", "go/pkg/mcp/capabilities.go"}

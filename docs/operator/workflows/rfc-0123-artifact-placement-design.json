@@ -6,7 +6,7 @@
   },
   "context_docs": [
     "docs/rfcs/0123-blob-routed-lane-exhaust-and-git-publication-specs.md",
-    "docs/explanation/blob-transition.md",
+    "docs/how-to/blob-transition.md",
     "go/pkg/mutations/artifact.go",
     "go/pkg/reads/artifact_content.go",
     "go/pkg/reads/doctor_artifact_anchor.go",

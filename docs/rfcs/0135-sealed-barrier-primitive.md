@@ -510,7 +510,7 @@ entity); the barrier readiness predicate is a **domain invariant** over the
 `(entity, seal)` value, evaluated transactionally under the per-run advisory lock
 (RFC 0104). The four callers are the same aggregate invariant projected onto four
 aggregate roots (fan-in job, review seat, review obligation, run). Cites
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0019 is the precedent.
 
 ## Appendix — design provenance

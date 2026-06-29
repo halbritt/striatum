@@ -448,5 +448,5 @@ segments, never on rows**, and that *physical* storage layout (range partitions)
 *semantically invisible* to the chain invariant (the row hash and chain linkage are
 unchanged by partitioning). The partition key joining the identity tuple is an
 aggregate-key change on the two log aggregates. Cites
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0019 is the precedent.

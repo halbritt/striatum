@@ -115,7 +115,7 @@ Order within tier reflects dependency, not effort.
 ### P0-REPO-ROOT-CLEANUP
 
 - **source**: Claude S6 (Codex and Gemini did not flag).
-- **what**: Move 11+ dev-scratch files out of the repo root. `final_status.json` and `status.json` → delete or move to `.scratch/`. Six `STRIATUM_*_REVIEW_*.md` (including all three from today and three older ones) and four `STRIATUM_*_REMEDIATION_PLAN*.md` → move to `docs/reviews/external/`. `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md` → move to `docs/research/` or delete.
+- **what**: Move 11+ dev-scratch files out of the repo root. `final_status.json` and `status.json` → delete or move to `.scratch/`. Six `STRIATUM_*_REVIEW_*.md` (including all three from today and three older ones) and four `STRIATUM_*_REMEDIATION_PLAN*.md` → move to `docs/reviews/external/`. `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md` → move to `docs/records/_frozen/research/` or delete.
 - **why**: First impression for a team adopter cloning the repo. Currently reads as "someone's scratchpad." For team-adoption target, this matters.
 - **touches**: repo root (11+ files moved or deleted).
 - **effort**: 30 minutes.

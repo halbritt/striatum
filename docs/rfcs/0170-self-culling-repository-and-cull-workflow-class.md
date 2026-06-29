@@ -2,7 +2,7 @@
 
 Status: proposed / P0 implemented (D271; runtime schema 45)
 Date: 2026-06-25
-Context: deep architecture review 2026-06-24 (`docs/records/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_CLAUDE_OPUS_4_8_2026-06-24.md`, "machine-speed accretion with no brake"); RFC 0020 (autonomous stalled-run recovery / the sweep), RFC 0122 (daemon auto-spawn scheduler), RFC 0106 (shape graduation + `falsification_gate`/`verification_gate`), RFC 0134/0141 (verifier sealed receipts), RFC 0136 (hash-chained `event_chain_segment`), RFC 0047 (verdict supersession columns), RFC 0117 (worktree/branch ref safety), RFC 0167 (operator identity & run attribution)
+Context: deep architecture review 2026-06-24 (`docs/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_CLAUDE_OPUS_4_8_2026-06-24.md`, "machine-speed accretion with no brake"); RFC 0020 (autonomous stalled-run recovery / the sweep), RFC 0122 (daemon auto-spawn scheduler), RFC 0106 (shape graduation + `falsification_gate`/`verification_gate`), RFC 0134/0141 (verifier sealed receipts), RFC 0136 (hash-chained `event_chain_segment`), RFC 0047 (verdict supersession columns), RFC 0117 (worktree/branch ref safety), RFC 0167 (operator identity & run attribution)
 author: proposer-claude-opus-4-8
 
 > **Provenance.** Scoped with a divergent-ideation pass (5 cognitive frames —
@@ -282,7 +282,7 @@ same graph.
 
 ## Pointers
 
-- `docs/records/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_CLAUDE_OPUS_4_8_2026-06-24.md` (the accretion finding this RFC answers)
+- `docs/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_CLAUDE_OPUS_4_8_2026-06-24.md` (the accretion finding this RFC answers)
 - RFC 0020 (recovery sweep), RFC 0122 (auto-spawn scheduler), RFC 0106 (shape graduation / `falsification_gate`)
 - RFC 0134 / 0141 (verifier sealed receipt — the second-key template), RFC 0136 (hash-chained `event_chain_segment` — the un-cull substrate)
 - RFC 0047 (verdict supersession columns — the free Tier-1 edge), RFC 0117 (worktree/branch ref safety), RFC 0167 (operator identity — overdraft attribution)

@@ -356,7 +356,7 @@ Both concepts belong outside the Striatum session-token authority model. They
 describe whether a lane can start its provider CLI, not who the lane is allowed
 to be inside Striatum.
 
-Per [`docs/DDD.md` "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model),
+Per [`docs/DDD.md` "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model),
 the behavior should be named in the ubiquitous language and exposed through
 typed domain events such as:
 

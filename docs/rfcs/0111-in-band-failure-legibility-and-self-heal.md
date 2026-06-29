@@ -109,7 +109,7 @@ they are not lost — both are now tracked as issues:
 
 ## Domain Modeling
 
-This is a **boundary clarification** (per `docs/explanation/domain-driven-design.md § "Adding to
+This is a **boundary clarification** (per `docs/reference/domain-driven-design.md § "Adding to
 the model"`): the daemon's *failure* surface becomes a first-class, enumerated part of the RPC/MCP
 ubiquitous language — a value object (`rpc.Error` with `Code` + `Suggestion`) that crosses the
 write boundary intact, rather than prose that degrades to a method name at the MCP edge. No new

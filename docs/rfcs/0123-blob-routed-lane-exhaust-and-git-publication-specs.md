@@ -7,7 +7,7 @@ Context: [RFC 0072](0072-blob-backed-artifact-storage.md) (blob-backed
 artifact storage), [RFC 0117](0117-worktree-branch-ref-safety.md) (durable
 git anchors for repo-write commits), [RFC 0118](0118-gate-run-completion-on-attested-provenance.md)
 (attested completion), [RFC 0122](0122-scheduler-principal-auto-spawn.md)
-(parallel RFC number, not superseded), [Blob Transition Runbook](../explanation/blob-transition.md),
+(parallel RFC number, not superseded), [Blob Transition Runbook](../how-to/blob-transition.md),
 and current code in `go/pkg/mutations/artifact.go`,
 `go/pkg/reads/artifact_content.go`, and
 `go/pkg/reads/doctor_artifact_anchor.go`.
@@ -307,4 +307,4 @@ The artifact aggregate remains daemon-owned PostgreSQL rows plus the selected
 body store. Placement clarifies the boundary between durable reviewable
 provenance (`git_publication` / `git_pointer_manifest`) and run-local evidence
 (`blob_exhaust`), matching
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model).
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model).

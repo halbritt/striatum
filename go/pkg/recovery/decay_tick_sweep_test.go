@@ -189,7 +189,7 @@ func TestDecayTickKnownSetCorpus(t *testing.T) {
 	if d081.withheldBy != "clause_4" {
 		t.Fatalf("D081 withheldBy = %q, want clause_4 (#618 documented audit citation)", d081.withheldBy)
 	}
-	if !hitPathContains(d081.countedHits, "docs/records/audits/STRIATUM_DECISION_RECORD_AUDIT_OPUS_4_8_2026-06-16.md") {
+	if !hitPathContains(d081.countedHits, "docs/audits/STRIATUM_DECISION_RECORD_AUDIT_OPUS_4_8_2026-06-16.md") {
 		t.Fatalf("D081 counted hits do not include the documented #618 audit citation: %#v", d081.countedHits)
 	}
 

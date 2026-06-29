@@ -46,9 +46,9 @@ SKIP_DIRS = frozenset(
 IGNORE_FILE = ".check-docs-ignore"
 GENERATED_OPERATOR_BODY_PREFIXES = (
     "docs/operator/artifacts/",
-    "docs/records/audits/",
+    "docs/audits/",
     "docs/dogfood/",
-    "dogfoods/",
+    "docs/dogfoods/",
 )
 GENERATED_OPERATOR_BODY_ALLOWED_NAMES = {
     "DOCKET.md",

@@ -94,7 +94,7 @@ bundle without an accepted product decision.
 ## See Also
 
 - [daemon-runbook.md](daemon-runbook.md) - daemon lifecycle and runtime layout.
-- [mcp.md](../explanation/mcp.md) - MCP endpoint discovery and authentication.
+- [mcp.md](../reference/mcp.md) - MCP endpoint discovery and authentication.
 - [SPEC.md - Local Web UI](../reference/spec.md#local-web-ui) - product
   boundary for the web surface.
 - [RFC 0085](../rfcs/0085-tailnet-identity-ui-auth.md) - optional read-only

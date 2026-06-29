@@ -4,7 +4,7 @@ You are one of three design lanes running in parallel for RFC 0050:
 native HTTP/SSE MCP server in `striatumd`, plus the agentloop becoming a
 pure PTY supervisor.
 
-**Read first:** `docs/rfcs/0050-go-daemon-http-sse-mcp.md`. Skim
+**Read first:** `docs/rfcs/0130-go-daemon-http-sse-mcp.md`. Skim
 `docs/operator/BRIEF.md` for the current state. Inspect
 `go/pkg/mcp/tools.go`, `go/pkg/mcp/capabilities.go`,
 `go/pkg/rpc/server.go`, and `go/pkg/agentloop/loop.go` to understand the
@@ -15,7 +15,7 @@ Do **not** coordinate with the other lanes — independent perspectives
 are the point.
 
 Produce a single `DESIGN.md` inside your lane's allowed write path
-(`docs/rfc-0050/design/<lane>/DESIGN.md`). Cover at minimum:
+(`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/<lane>/DESIGN.md`). Cover at minimum:
 
 - **HTTP listener** — bind address, port choice/config (env var, flag,
   `.striatum/` registry), localhost-only enforcement (per `serve`

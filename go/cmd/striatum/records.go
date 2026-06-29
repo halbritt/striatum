@@ -140,7 +140,7 @@ func printRecordsInventoryHelp(out io.Writer) {
 	_, _ = fmt.Fprintln(out, "usage: striatum records migration inventory [--root path]... [path ...]")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Read-only. Walks historical record roots and emits deterministic JSON entries.")
-	_, _ = fmt.Fprintln(out, "Default roots: docs/operator, docs/records/audits, docs/records/_frozen, docs/dogfood, dogfoods")
+	_, _ = fmt.Fprintln(out, "Default roots: docs/operator, docs/audits, docs/records/_frozen, docs/dogfood, docs/dogfoods")
 	_, _ = fmt.Fprintln(out, "Repeat --root to override the defaults. Positional paths are also treated as roots.")
 }
 

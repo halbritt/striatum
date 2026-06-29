@@ -26,7 +26,7 @@
       "required": true
     },
     {
-      "path": "docs/explanation/blob-transition.md",
+      "path": "docs/how-to/blob-transition.md",
       "required": true
     }
   ],

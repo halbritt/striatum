@@ -24,10 +24,10 @@ const (
 
 var defaultRoots = []string{
 	"docs/operator",
-	"docs/records/audits",
+	"docs/audits",
 	"docs/records/_frozen",
 	"docs/dogfood",
-	"dogfoods",
+	"docs/dogfoods",
 }
 
 type SourceCommitFunc func(ctx context.Context, repoRoot, relPath string) (string, error)
@@ -117,7 +117,7 @@ func Classify(relPath string) (recordClass, proposedImportMode, classification s
 	isMarkdown := ext == ".md"
 
 	switch p {
-	case "docs/operator/BRIEF.md", "docs/operator/INDEX.md", "docs/operator/rfc-roadmap.md":
+	case "docs/operator/BRIEF.md", "docs/operator/INDEX.md", "docs/operator/README.md", "docs/operator/rfc-roadmap.md":
 		return "operator_current_surface", ClassificationKeepInGit, ClassificationKeepInGit
 	case "docs/dogfood/HISTORICAL.md":
 		return "dogfood_index", ClassificationKeepInGit, ClassificationKeepInGit
@@ -125,7 +125,7 @@ func Classify(relPath string) (recordClass, proposedImportMode, classification s
 		return "dogfood_friction_log", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
 	}
 
-	if strings.HasPrefix(p, "dogfoods/") {
+	if strings.HasPrefix(p, "docs/dogfoods/") {
 		switch path.Base(p) {
 		case "workflow.json":
 			return "workflow_fixture", ClassificationKeepInGit, ClassificationKeepInGit
@@ -145,7 +145,7 @@ func Classify(relPath string) (recordClass, proposedImportMode, classification s
 		return "historical_operator_artifact_doc", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
 	case strings.HasPrefix(p, "docs/operator/workflows/"):
 		return "historical_operator_workflow_doc", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
-	case strings.HasPrefix(p, "docs/records/audits/"):
+	case strings.HasPrefix(p, "docs/audits/"):
 		return "audit_record", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
 	case strings.HasPrefix(p, "docs/records/_frozen/"):
 		return "frozen_historical_record", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex

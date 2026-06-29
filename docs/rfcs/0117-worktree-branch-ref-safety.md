@@ -583,7 +583,7 @@ surface.
 
 ## Domain Modeling
 
-This RFC clarifies a **boundary** (per `docs/explanation/domain-driven-design.md
+This RFC clarifies a **boundary** (per `docs/reference/domain-driven-design.md
 § "Adding to the model"`) rather than adding an aggregate: it makes explicit
 which git refs the **Run** aggregate (and its **Job** entities) is the custodian
 of, and asserts that the operator's working checkout is *outside* the daemon's

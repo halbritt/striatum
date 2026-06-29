@@ -311,7 +311,7 @@ verification_gate` and decide whether to regenerate it from the shape or retire 
 
 ## Domain Modeling
 
-Per [`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model):
+Per [`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model):
 
 - **`AllowlistIntent`** — a **value object**: the committed, hashless, sanctioned
   set (`Check{id, argv, pass_when, backs_claim, negative_control}`). Reviewable

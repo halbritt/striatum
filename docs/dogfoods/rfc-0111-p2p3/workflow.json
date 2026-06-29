@@ -1,0 +1,150 @@
+{
+    "schema_version": "striatum.workflow.v1",
+    "workflow_id": "rfc-0111-p2p3",
+    "workflow_version": "2026-06-04",
+    "name": "RFC 0111 P2+P3 — Suggestion on rpc.Error + closed guard-tested error-code catalog",
+    "branch": {
+        "mode": "confirm",
+        "suggested_name": "striatum/rfc-0111-p2p3",
+        "allow_dirty": true
+    },
+    "coordinator": {
+        "role_id": "implementer",
+        "lane_id": "claude"
+    },
+    "allow_same_model_review_pairing": false,
+    "lanes": {
+        "claude": {
+            "adapter": "process",
+            "display_model": "Claude Opus 4.8",
+            "command": [
+                "claude",
+                "--dangerously-skip-permissions",
+                "--model",
+                "claude-opus-4-8"
+            ],
+            "adapter_capabilities": {
+                "agent_loop": true
+            },
+            "supervision": {
+                "transport": "pty_helper",
+                "compatible": true,
+                "require_tmux": true
+            },
+            "worktree_isolation": "per_job",
+            "capabilities": [
+                "write",
+                "review",
+                "interrogate"
+            ]
+        },
+        "agy": {
+            "adapter": "process",
+            "display_model": "Antigravity (gemini)",
+            "command": [
+                "agy",
+                "--dangerously-skip-permissions"
+            ],
+            "adapter_capabilities": {
+                "agent_loop": true
+            },
+            "supervision": {
+                "transport": "pty_helper",
+                "compatible": true,
+                "require_tmux": true
+            },
+            "capabilities": [
+                "review",
+                "interrogate"
+            ]
+        }
+    },
+    "roles": {
+        "implementer": {
+            "definition_path": "roles/implementer.md"
+        },
+        "reviewer": {
+            "definition_path": "roles/reviewer.md"
+        }
+    },
+    "context_docs": [
+        "docs/rfcs/0111-in-band-failure-legibility-and-self-heal.md"
+    ],
+    "parallelism": {
+        "mode": "declared",
+        "max_active_jobs": 1,
+        "require_disjoint_write_scopes": true
+    },
+    "jobs": [
+        {
+            "id": "implement",
+            "type": "synthesis",
+            "title": "Implement RFC 0111 P2+P3 (Suggestion field + closed error-code catalog)",
+            "role_id": "implementer",
+            "lane_id": "claude",
+            "interrogable": true,
+            "objective": "Implement P2 (Suggestion on rpc.Error, threaded ErrorResponse → MCP content) and P3 (closed guard-tested code catalog + command-authority-matrix section) per the accepted RFC 0111; publish an implementation synthesis with typed test evidence.",
+            "task_prompt": {
+                "path": "prompts/implement.md"
+            },
+            "write_scope": {
+                "mode": "repo_write",
+                "repo_write": true,
+                "allowed_paths": [
+                    "go/",
+                    "docs/reference/command-authority-matrix.md",
+                    "CHANGELOG.md",
+                    "docs/dogfoods/rfc-0111-p2p3/artifacts/"
+                ],
+                "forbidden_paths": [
+                    ".striatum/"
+                ]
+            },
+            "expected_artifacts": [
+                {
+                    "logical_name": "implementation_synthesis",
+                    "kind": "synthesis",
+                    "path": "docs/dogfoods/rfc-0111-p2p3/artifacts/IMPLEMENTATION.md",
+                    "required": true
+                }
+            ]
+        },
+        {
+            "id": "review",
+            "type": "review",
+            "title": "Review the P2+P3 implementation against RFC 0111 acceptance",
+            "role_id": "reviewer",
+            "lane_id": "agy",
+            "objective": "Verify the implementation discharges every RFC 0111 acceptance criterion for P2 and P3 with real, runnable evidence; vote needs_revision with concrete findings if any criterion is unmet.",
+            "task_prompt": {
+                "path": "prompts/review.md"
+            },
+            "write_scope": {
+                "mode": "review_only_artifact",
+                "repo_write": false,
+                "allowed_paths": [
+                    "docs/dogfoods/rfc-0111-p2p3/artifacts/"
+                ],
+                "forbidden_paths": [
+                    ".striatum/"
+                ]
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from": "implement",
+            "to": "review",
+            "on": "completed"
+        }
+    ],
+    "cycles": [
+        {
+            "from": "review",
+            "to": "implement",
+            "on_verdict": "needs_revision",
+            "max_iterations": 2,
+            "allow_same_lane": true
+        }
+    ]
+}

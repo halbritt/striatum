@@ -9,7 +9,7 @@ Context:
   terminal-gap exit (parks run in needs_operator)." Source: the failure-mode audit
   (Claude Opus 4.8, 2026-06-19, static-traced, medium confidence) finding
   **FMA-003** in
-  [`STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md`](../records/audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md)
+  [`STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md`](../audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md)
   (§3). Labeled `rfc-0133` — this is in the fan-in / sealed-barrier family.
 - [RFC 0133](0133-fan-in-deferred-join-barrier-and-manifest.md) (accepted, D213) —
   the fan-in deferred join barrier + join manifest. This RFC's terminal-gap edge is
@@ -367,5 +367,5 @@ only be relaxed by an explicit author declaration, a provably-dead seat, and a
 durable degraded record** — never silently. The terminal-gap edge is evaluated under
 the same per-run advisory lock (RFC 0104) and the same `(entity, seal)` predicate
 (RFC 0135). Cites
-[`docs/explanation/domain-driven-design.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/reference/domain-driven-design.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0019 is the precedent.

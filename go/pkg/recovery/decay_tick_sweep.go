@@ -477,7 +477,7 @@ func isInboundScanFile(rel string) bool {
 	}
 	for _, prefix := range []string{
 		"docs/records/_frozen/",
-		"docs/research/",
+		"docs/records/_frozen/research/",
 		"docs/dogfood/",
 		"docs/handoffs/",
 		"docs/operator/artifacts/",
@@ -494,7 +494,7 @@ func isInboundScanFile(rel string) bool {
 func sourceLive(rel string, status string) bool {
 	for _, prefix := range []string{
 		"docs/records/_frozen/",
-		"docs/research/",
+		"docs/records/_frozen/research/",
 		"docs/dogfood/",
 		"docs/handoffs/",
 		"docs/operator/artifacts/",
@@ -633,7 +633,7 @@ func protectedCullPath(rel string) bool {
 	}
 	for _, prefix := range []string{
 		"docs/records/_frozen/",
-		"docs/research/",
+		"docs/records/_frozen/research/",
 		"docs/dogfood/",
 		"docs/handoffs/",
 		"docs/operator/plans/",

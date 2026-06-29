@@ -506,7 +506,7 @@ V1 lands when:
 
 ## Domain Modeling
 
-Per [`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model):
+Per [`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model):
 
 - `operator_brief`, `work_plan`, `progress_note`, and `operator_report`
   are **artifacts** — repository-resident value objects whose identity

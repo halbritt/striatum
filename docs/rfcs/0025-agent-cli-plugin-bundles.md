@@ -532,7 +532,7 @@ RFC 0015. It has no identity of its own; two bundles produced by
 the same Striatum version, profile, and namespace are
 interchangeable. The aggregate root remains the runner-installed
 template set; the manifest is the bundle's projection key. See
-[`docs/DDD.md` § "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model).
+[`docs/DDD.md` § "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model).
 
 The closed set of supported plugin profiles
 (`claude_code`, `codex`, `gemini`) is a value object; promoting a

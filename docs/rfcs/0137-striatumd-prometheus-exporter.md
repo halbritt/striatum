@@ -319,7 +319,7 @@ violated. Build the safety/contract harness **first** (TDD), then the taxonomy.
 
 ## Domain Modeling
 
-Per `docs/explanation/domain-driven-design.md § "Adding to the model"`, the
+Per `docs/reference/domain-driven-design.md § "Adding to the model"`, the
 exporter is a **boundary clarification plus a read-model projection**, not a new
 aggregate root. The `MetricsSnapshot` is a derived value object computed from
 existing aggregates (runs, leases, supervisors, jobs) at a reconcile tick;

@@ -1,7 +1,7 @@
 # Designer
 
 Designers produce one of the three parallel design proposals for RFC 0050
-or the single synthesis. Read `docs/rfcs/0050-go-daemon-http-sse-mcp.md`
+or the single synthesis. Read `docs/rfcs/0130-go-daemon-http-sse-mcp.md`
 first.
 
 Independent-design responsibilities:
@@ -13,9 +13,9 @@ Independent-design responsibilities:
 
 Synthesis responsibilities:
 
-- Read all three design proposals under `docs/rfc-0050/design/`, then
+- Read all three design proposals under `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/design/`, then
   publish a single buildable synthesis at
-  `docs/rfc-0050/DESIGN_SYNTHESIS.md`.
+  `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md`.
 - Cite which design each carried-forward idea came from.
 - Pick concrete approaches for: HTTP listener wiring, SSE framing,
   capability-token auth path, tools/list and tools/call mapping, port

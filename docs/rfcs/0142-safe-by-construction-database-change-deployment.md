@@ -323,7 +323,7 @@ This introduces several **value objects** and one **boundary clarification**.
 The **boundary clarification** is that **schema mutation is an explicit,
 provenance-tracked operation owned by a dedicated deployer**, not an implicit
 side effect of the serving process's startup. Cites
-[`docs/explanation/domain-driven-design.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/reference/domain-driven-design.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0110 (the two-role boundary), RFC 0134 (the receipt-binding precedent), and
 RFC 0136 (the reshape this unblocks) are the precedents.
 

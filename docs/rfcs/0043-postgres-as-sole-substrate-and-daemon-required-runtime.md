@@ -609,7 +609,7 @@ Terms to add to `docs/UBIQUITOUS_LANGUAGE.md` after acceptance:
 - **Repo-local schema version** — retired. The daemon-DB schema
   version (RFC 0033 substrate version) now covers all schemas.
 
-DDD framing (per [`docs/DDD.md`](../explanation/domain-driven-design.md)): the change is a
+DDD framing (per [`docs/DDD.md`](../reference/domain-driven-design.md)): the change is a
 **boundary clarification**, not a new aggregate. The "live state"
 bounded context expands from "repo-local SQLite plus daemon Postgres"
 to "daemon Postgres, namespaced by repository." Aggregate roots

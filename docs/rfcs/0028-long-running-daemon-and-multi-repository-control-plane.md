@@ -4,7 +4,7 @@ Status: superseded V1 foundation
 Date: 2026-05-10
 Context:
 [`docs/SPEC.md`](../reference/spec.md),
-[`docs/MCP.md`](../explanation/mcp.md),
+[`docs/MCP.md`](../reference/mcp.md),
 [`RFC 0012`](0012-local-service-api.md),
 [`RFC 0013`](0013-local-web-ui.md),
 [`RFC 0020`](0020-autonomous-stalled-run-recovery.md),

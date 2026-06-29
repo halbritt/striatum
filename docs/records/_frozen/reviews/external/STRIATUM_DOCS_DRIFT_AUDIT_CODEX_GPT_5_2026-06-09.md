@@ -288,7 +288,7 @@ against the current Go source:
   `plugin install`.
 - `docs/how-to/writing-workflows.md`: marked the RFC 0038 React Flow workflow
   editor as retired in the current Go web UI.
-- `docs/explanation/blob-transition.md`: replaced retired `adopt`,
+- `docs/how-to/blob-transition.md`: replaced retired `adopt`,
   `daemon doctor`, generic `invoke`, and `corpus verify` command shapes with
   current `repo add --apply-blob-creation`, `doctor --verbose`, and Go web API
   reads; explicitly marked the historical dogfood bulk-migration CLI wrapper as
@@ -297,7 +297,7 @@ against the current Go source:
   current-contract claims for unimplemented `corpus verify`, `archive verify`,
   and `archive inspect`; the current Go CLI exposes `corpus export` and
   `archive create`.
-- `docs/explanation/domain-driven-design.md`: replaced a stale `workflow graph`
+- `docs/reference/domain-driven-design.md`: replaced a stale `workflow graph`
   example with current local workflow-authoring wording.
 - `go/pkg/rpc/error_catalog.go`, `go/pkg/admin/repo_init.go`,
   `go/pkg/mutations/corpus_migrate.go`, and

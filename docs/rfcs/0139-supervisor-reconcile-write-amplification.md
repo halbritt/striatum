@@ -389,6 +389,6 @@ multi-index, per-event-rewritten row is the source of the amplification; separat
 write cadences (coalesce) and their index participation (drop `state` from the non-partial
 run index; reserve a side table for the timestamps) realigns physical write behavior with the
 domain meaning. Cites
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0031 (daemon-owned supervision pointers) and RFC 0009 (long-lived process supervision)
 are the precedents for the aggregate.

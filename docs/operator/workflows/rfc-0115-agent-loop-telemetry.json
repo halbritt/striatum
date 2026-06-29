@@ -10,7 +10,7 @@
       "required": true
     },
     {
-      "path": "docs/explanation/mcp.md",
+      "path": "docs/reference/mcp.md",
       "required": true
     },
     {

@@ -22,7 +22,7 @@ func TestDocketNormalizesSortsAndRendersJSON(t *testing.T) {
   "schema_version": "striatum.records.docket.v1",
   "run_id": "run_rfc0171",
   "generated_at": "2026-06-28T00:00:00Z",
-  "merkle_root": "24b4aa8d40aef82d93736471b0c41827e4ec384a849b87f280e9fefa5db5fc5e",
+  "merkle_root": "6a6aeb3121f470d0934fedb6684ce1a0f675dce1d526a932ef30e3b7b7bb3614",
   "entries": [
     {
       "run_id": "run_rfc0171",
@@ -55,7 +55,7 @@ func TestDocketNormalizesSortsAndRendersJSON(t *testing.T) {
     {
       "run_id": "run_rfc0171",
       "record_id": "rec_history",
-      "source_path": "docs/records/audits/history.md",
+      "source_path": "docs/audits/history.md",
       "class": "historical_audit",
       "placement": "git_pointer_manifest",
       "retention_class": "historical_index",
@@ -86,7 +86,7 @@ func TestDocketMerkleRootStableAcrossInputOrderAndWhitespace(t *testing.T) {
 	if first != second {
 		t.Fatalf("MerkleRoot not stable: first=%s second=%s", first, second)
 	}
-	if first != "24b4aa8d40aef82d93736471b0c41827e4ec384a849b87f280e9fefa5db5fc5e" {
+	if first != "6a6aeb3121f470d0934fedb6684ce1a0f675dce1d526a932ef30e3b7b7bb3614" {
 		t.Fatalf("MerkleRoot = %s", first)
 	}
 }
@@ -100,13 +100,13 @@ func TestDocketRendersCompactMarkdown(t *testing.T) {
 
 - Run: ` + "`run_rfc0171`" + `
 - Generated: ` + "`2026-06-28T00:00:00Z`" + `
-- Merkle root: ` + "`24b4aa8d40aef82d93736471b0c41827e4ec384a849b87f280e9fefa5db5fc5e`" + `
+- Merkle root: ` + "`6a6aeb3121f470d0934fedb6684ce1a0f675dce1d526a932ef30e3b7b7bb3614`" + `
 
 | Identity | Job | Name/path | Kind/class | Placement | Retention | SHA-256 | Pointer | Size | URI |
 |---|---|---|---|---|---|---|---|---:|---|
 | ` + "`artifact:art_alpha`" + ` | ` + "`job_a`" + ` | ` + "`alpha.md`" + ` | ` + "`finding`" + ` | ` + "`blob_exhaust`" + ` | ` + "`generated_exhaust`" + ` | ` + "`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`" + ` | ` + "`blob:runs/run_rfc0171/jobs/job_a/artifacts/alpha.md`" + ` | 120 | ` + "`striatum://artifact/art_alpha`" + ` |
 | ` + "`artifact:art_beta`" + ` | ` + "`job_b`" + ` | ` + "`beta.md`" + ` | ` + "`synthesis`" + ` | ` + "`git_publication`" + ` | ` + "`durable_provenance`" + ` | ` + "`bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`" + ` | ` + "`repo:docs/operator/artifacts/rfc-0171/beta.md`" + ` | 80 | ` + "`striatum://artifact/art_beta`" + ` |
-| ` + "`record:rec_history`" + ` | - | ` + "`docs/records/audits/history.md`" + ` | ` + "`historical_audit`" + ` | ` + "`git_pointer_manifest`" + ` | ` + "`historical_index`" + ` | ` + "`cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc`" + ` | ` + "`blob:records/history.md / repo:docs/records/dockets/history.pointer.json`" + ` | 42 | ` + "`striatum://record/rec_history`" + ` |
+| ` + "`record:rec_history`" + ` | - | ` + "`docs/audits/history.md`" + ` | ` + "`historical_audit`" + ` | ` + "`git_pointer_manifest`" + ` | ` + "`historical_index`" + ` | ` + "`cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc`" + ` | ` + "`blob:records/history.md / repo:docs/records/dockets/history.pointer.json`" + ` | 42 | ` + "`striatum://record/rec_history`" + ` |
 `
 	if body != want {
 		t.Fatalf("Markdown render mismatch:\n%s", body)
@@ -159,7 +159,7 @@ func sampleDocketScrambled() Docket {
 		Entries: []Entry{
 			{
 				RecordID:       " rec_history ",
-				SourcePath:     " docs/records/audits/history.md ",
+				SourcePath:     " docs/audits/history.md ",
 				Class:          " historical_audit ",
 				Placement:      " git_pointer_manifest ",
 				RetentionClass: " historical_index ",
@@ -236,7 +236,7 @@ func sampleDocketSorted() Docket {
 			{
 				RunID:          "run_rfc0171",
 				RecordID:       "rec_history",
-				SourcePath:     "docs/records/audits/history.md",
+				SourcePath:     "docs/audits/history.md",
 				Class:          "historical_audit",
 				Placement:      PlacementGitPointerManifest,
 				RetentionClass: "historical_index",

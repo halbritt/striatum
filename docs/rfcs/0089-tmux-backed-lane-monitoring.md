@@ -312,7 +312,7 @@ supervisor lifecycle events (`supervisor.started`, `supervisor.lost`,
 `supervisor.stopped`, plus any future tmux-specific diagnostic event), and they
 must carry metadata only, never terminal text.
 
-See [`docs/DDD.md` "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model)
+See [`docs/DDD.md` "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model)
 for the project rule that new concepts need an explicit domain home.
 
 ## Proposed Decision-Log Entry

@@ -90,9 +90,9 @@ Context:
 `docs/rfcs/0005-harness-meta-optimization.md`,
 `docs/rfcs/0008-worktree-isolation-for-parallel-jobs.md`,
 `docs/rfcs/0009-long-lived-process-supervision.md`,
-`docs/research/0010-tool-harness-profiles/claude_code.md`,
-`docs/research/0010-tool-harness-profiles/codex.md`,
-`docs/research/0010-tool-harness-profiles/gemini_cli.md`,
+`docs/records/_frozen/research/0010-tool-harness-profiles/claude_code.md`,
+`docs/records/_frozen/research/0010-tool-harness-profiles/codex.md`,
+`docs/records/_frozen/research/0010-tool-harness-profiles/gemini_cli.md`,
 [Claude Code sub-agents](https://code.claude.com/docs/en/sub-agents),
 [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams),
 [Codex](https://openai.com/codex/),
@@ -272,7 +272,7 @@ tool-local optimization, not a new source of claimable Striatum work.
 
 ### Schema Additions From 2026-05-08 Tool Research
 
-The research notes under `docs/research/0010-tool-harness-profiles/` (one
+The research notes under `docs/records/_frozen/research/0010-tool-harness-profiles/` (one
 per tool: Claude Code, Codex, Gemini CLI) surfaced fields the original
 schema cannot represent. The three are added at parity:
 

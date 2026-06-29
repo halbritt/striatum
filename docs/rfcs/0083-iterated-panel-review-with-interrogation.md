@@ -240,7 +240,7 @@ for the operator to merge, avoiding a concurrent-write conflict on the log.
 ## Domain Modeling
 
 This RFC adds no new aggregate. It is a **boundary clarification** in the sense
-of [`docs/DDD.md` § "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model): it
+of [`docs/DDD.md` § "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model): it
 names a reusable composition of existing concepts — fan-out (`parallel_group`),
 synthesis, the RFC 0082 *interrogation* aggregate, review postures (RFC 0018),
 and bounded `cycles` — and pins the two distinct bounded-iteration value

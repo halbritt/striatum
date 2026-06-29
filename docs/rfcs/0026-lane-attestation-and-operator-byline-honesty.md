@@ -356,7 +356,7 @@ A passing implementation must demonstrate:
 
 This RFC adds two concepts to the ubiquitous language and clarifies one
 existing boundary, fitting the patterns in
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model)
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model)
 (precedent: RFC 0019).
 
 - **Lane attestation** — a *value object* describing a session at a

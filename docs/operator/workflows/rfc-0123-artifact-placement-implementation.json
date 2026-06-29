@@ -8,7 +8,7 @@
     "docs/rfcs/0123-blob-routed-lane-exhaust-and-git-publication-specs.md",
     "docs/operator/artifacts/rfc-0123-artifact-placement-design/DECISION.md",
     "docs/operator/artifacts/rfc-0123-artifact-placement-design/ARBITRATOR_SYNTHESIS.md",
-    "docs/explanation/blob-transition.md",
+    "docs/how-to/blob-transition.md",
     "go/pkg/mutations/artifact.go",
     "go/pkg/reads/artifact_content.go",
     "go/pkg/reads/doctor_artifact_anchor.go",
@@ -124,7 +124,7 @@
       "write_scope": {
         "allowed_paths": [
           "docs/operator/artifacts/rfc-0123-artifact-placement-implementation/",
-          "docs/explanation/blob-transition.md",
+          "docs/how-to/blob-transition.md",
           "docs/reference/spec.md",
           "docs/decisions/decision-log.md",
           "go/pkg/artifactcontracts/",

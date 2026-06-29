@@ -403,7 +403,7 @@ demonstrates the closed loop.
 ## Domain Modeling
 
 `Blocker` is an aggregate root in the runner's domain model
-([`docs/DDD.md`](../explanation/domain-driven-design.md)). RFC 0029 adds a new lifecycle
+([`docs/DDD.md`](../reference/domain-driven-design.md)). RFC 0029 adds a new lifecycle
 transition (`open → resolved`) for the **process-adapter blocker
 family**, mirroring the transition that already exists for
 `human_checkpoint` blockers under `checkpoint resolve`. The

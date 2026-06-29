@@ -1,6 +1,6 @@
 # Design review — RFC 0050
 
-You are reviewing `docs/rfc-0050/DESIGN_SYNTHESIS.md` from a fresh
+You are reviewing `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/DESIGN_SYNTHESIS.md` from a fresh
 session. You have not seen the synthesis author's reasoning beyond the
 document itself.
 
@@ -23,7 +23,7 @@ Cover at minimum:
   `src/striatum/mcp.py` deletion to follow-on runs, or is it trying to
   do too much?
 
-Write the review at `docs/rfc-0050/review/design/REVIEW.md`.
+Write the review at `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/design/REVIEW.md`.
 
 Emit a verdict of `approved`, `needs_revision`, or `rejected`. If
 `needs_revision`, list the specific revisions the synthesizer must make

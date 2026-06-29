@@ -1,0 +1,135 @@
+{
+  "schema_version": "striatum.workflow.v1",
+  "workflow_id": "rfc-0103-review",
+  "workflow_version": "2026-06-02",
+  "name": "RFC 0103 review panel (single-pass, claude + codex)",
+  "branch": {
+    "mode": "confirm",
+    "suggested_name": "striatum/rfc-0103-review",
+    "allow_dirty": false
+  },
+  "coordinator": {
+    "role_id": "presenter",
+    "lane_id": "claude"
+  },
+  "allow_same_model_review_pairing": true,
+  "lanes": {
+    "claude": {
+      "adapter": "process",
+      "display_model": "Claude Opus 4.8",
+      "command": ["claude", "--dangerously-skip-permissions", "--model", "claude-opus-4-8"],
+      "adapter_capabilities": {"agent_loop": true},
+      "supervision": {"transport": "pty_helper", "compatible": true, "require_tmux": true},
+      "capabilities": ["write", "review", "synthesis"]
+    },
+    "codex": {
+      "adapter": "process",
+      "display_model": "Codex GPT-5.5 xhigh",
+      "command": ["codex", "--yolo"],
+      "adapter_capabilities": {"agent_loop": true},
+      "supervision": {"transport": "pty_helper", "compatible": true, "require_tmux": true},
+      "capabilities": ["write", "review", "synthesis"]
+    }
+  },
+  "roles": {
+    "presenter": {"definition_path": "roles/presenter.md"},
+    "reviewer": {"definition_path": "roles/reviewer.md"}
+  },
+  "context_docs": [
+    {"path": "../../docs/rfcs/0103-self-hosting-production-hardening.md", "required": true}
+  ],
+  "parallelism": {
+    "mode": "declared",
+    "max_active_jobs": 2,
+    "require_disjoint_write_scopes": true
+  },
+  "jobs": [
+    {
+      "id": "present",
+      "type": "synthesis",
+      "title": "Present RFC 0103 for review",
+      "role_id": "presenter",
+      "lane_id": "claude",
+      "fresh_session_required": true,
+      "objective": "Read RFC 0103 and write a concise review brief presenting its thesis, the seven workstreams, the dependency ordering, and the three sharpest open questions/risks a reviewer should probe.",
+      "task_prompt": {"path": "prompts/present.md"},
+      "write_scope": {
+        "mode": "repo_write",
+        "repo_write": true,
+        "allowed_paths": ["docs/dogfoods/rfc-0103-review/artifacts/"],
+        "forbidden_paths": [".striatum/", "docs/dogfoods/rfc-0103-review/artifacts/review/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "review_brief",
+          "kind": "handoff",
+          "path": "docs/dogfoods/rfc-0103-review/artifacts/REVIEW_BRIEF.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_codex",
+      "type": "review",
+      "title": "Review RFC 0103 (codex, soundness)",
+      "role_id": "reviewer",
+      "lane_id": "codex",
+      "parallel_group": "review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "threat_model",
+      "objective": "Review the brief and RFC 0103 for soundness: do the seven workstreams correctly partition the 17 issues, is the dependency ordering right, are the acceptance criteria real? Render a verdict.",
+      "task_prompt": {"path": "prompts/review.md"},
+      "inputs": ["review_brief"],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": ["docs/dogfoods/rfc-0103-review/artifacts/review/codex/"],
+        "forbidden_paths": [".striatum/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "review_codex",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0103-review/artifacts/review/codex/REVIEW.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review_claude",
+      "type": "review",
+      "title": "Review RFC 0103 (claude, devil's advocate)",
+      "role_id": "reviewer",
+      "lane_id": "claude",
+      "parallel_group": "review",
+      "fresh_session_required": true,
+      "reviewer_context_policy": "fresh",
+      "reviewer_access_scope": "document_only",
+      "review_posture": "devils_advocate",
+      "objective": "Adversarially probe RFC 0103: where is the consolidation incoherent, a workstream mis-scoped, or an acceptance criterion theatrical? Render a verdict.",
+      "task_prompt": {"path": "prompts/review.md"},
+      "inputs": ["review_brief"],
+      "write_scope": {
+        "mode": "review_only_artifact",
+        "repo_write": false,
+        "allowed_paths": ["docs/dogfoods/rfc-0103-review/artifacts/review/claude/"],
+        "forbidden_paths": [".striatum/"]
+      },
+      "expected_artifacts": [
+        {
+          "logical_name": "review_claude",
+          "kind": "finding",
+          "path": "docs/dogfoods/rfc-0103-review/artifacts/review/claude/REVIEW.md",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "present", "to": "review_codex", "on": "completed"},
+    {"from": "present", "to": "review_claude", "on": "completed"}
+  ],
+  "cycles": []
+}

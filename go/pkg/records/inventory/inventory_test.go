@@ -11,14 +11,14 @@ import (
 
 func TestRunSortsEntriesByPath(t *testing.T) {
 	repoRoot := t.TempDir()
-	writeFile(t, repoRoot, "docs/records/audits/zeta.md", "z")
+	writeFile(t, repoRoot, "docs/audits/zeta.md", "z")
 	writeFile(t, repoRoot, "docs/operator/progress/alpha.md", "alpha")
 	writeFile(t, repoRoot, "docs/operator/progress/beta.md", "beta")
 
 	manifest, err := Run(context.Background(), Options{
 		RepoRoot: repoRoot,
 		Roots: []string{
-			"docs/records/audits",
+			"docs/audits",
 			"docs/operator/progress",
 		},
 		SourceCommit: func(_ context.Context, _, relPath string) (string, error) {
@@ -31,9 +31,9 @@ func TestRunSortsEntriesByPath(t *testing.T) {
 
 	got := entryPaths(manifest.Entries)
 	want := []string{
+		"docs/audits/zeta.md",
 		"docs/operator/progress/alpha.md",
 		"docs/operator/progress/beta.md",
-		"docs/records/audits/zeta.md",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("paths = %#v, want %#v", got, want)
@@ -43,7 +43,7 @@ func TestRunSortsEntriesByPath(t *testing.T) {
 			t.Fatalf("paths = %#v, want %#v", got, want)
 		}
 	}
-	first := manifest.Entries[0]
+	first := manifest.Entries[1]
 	if first.Size != int64(len("alpha")) {
 		t.Fatalf("size = %d, want %d", first.Size, len("alpha"))
 	}
@@ -63,14 +63,14 @@ func TestClassificationRulesAreConservative(t *testing.T) {
 	}{
 		{"docs/operator/BRIEF.md", "operator_current_surface", ClassificationKeepInGit},
 		{"docs/operator/recovery-decisions/FINAL_REVIEW_RECOVERY_DECISION_2026-06-16.md", "operator_decision", ClassificationKeepInGit},
-		{"dogfoods/rfc-0101-l2-conformance/workflow.json", "workflow_fixture", ClassificationKeepInGit},
-		{"dogfoods/rfc-0101-l2-conformance/README.md", "dogfood_index", ClassificationKeepInGit},
-		{"docs/records/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW.md", "audit_record", ClassificationSafeToBlobIndex},
+		{"docs/dogfoods/rfc-0101-l2-conformance/workflow.json", "workflow_fixture", ClassificationKeepInGit},
+		{"docs/dogfoods/rfc-0101-l2-conformance/README.md", "dogfood_index", ClassificationKeepInGit},
+		{"docs/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW.md", "audit_record", ClassificationSafeToBlobIndex},
 		{"docs/records/_frozen/requests/ORIGINAL_REQUEST.md", "frozen_historical_record", ClassificationSafeToBlobIndex},
 		{"docs/operator/artifacts/rfc-0171/review/REVIEW.md", "historical_operator_artifact_doc", ClassificationSafeToBlobIndex},
 		{"docs/operator/workflows/rfc-0171/prompts/review.md", "historical_operator_workflow_doc", ClassificationSafeToBlobIndex},
 		{"docs/operator/plans/rfc-0078-remaining-work.md", "operator_work_plan", ClassificationSafeToBlobIndex},
-		{"dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md", "operator_report", ClassificationSafeToBlobIndex},
+		{"docs/dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md", "operator_report", ClassificationSafeToBlobIndex},
 		{"docs/operator/doctor-acknowledged-loss.json", "unknown", ClassificationManualReview},
 		{"docs/operator/daemon-perf-analysis/instrument.sh", "unknown", ClassificationManualReview},
 		{"docs/operator/daemon-perf-analysis/REPORT.md", "unknown", ClassificationManualReview},

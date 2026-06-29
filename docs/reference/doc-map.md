@@ -94,7 +94,7 @@ When two docs disagree, the home wins.
   concept. Per RFC 0019 / `domain-driven-design.md`, glossary changes come *first*,
   then validator + introspection.
 
-### `docs/explanation/domain-driven-design.md` — framing
+### `docs/reference/domain-driven-design.md` — framing
 
 - **What it is:** the domain-driven framing the codebase
   already has, written down.
@@ -124,7 +124,7 @@ When two docs disagree, the home wins.
   reference. Per RFC 0017, those moved out and a test enforces
   the README line budget so they don't drift back.
 
-### `docs/how-to/how-to-human.md`, `docs/how-to/how-to-agent.md`, `docs/tutorials/getting-started.md`, `docs/how-to/writing-workflows.md`, `docs/reference/cli-reference.md`
+### `docs/how-to/how-to-human.md`, `docs/how-to/how-to-agent.md`, `docs/how-to/getting-started.md`, `docs/how-to/writing-workflows.md`, `docs/reference/cli-reference.md`
 
 - **What they are:** operator-facing playbooks (RFC 0017).
 - **What they own:** the verb sequences a human or agent runs,
@@ -160,14 +160,41 @@ When two docs disagree, the home wins.
   (`how-to/*`), or historical rationale for the browser/editor surface
   (RFC 0024).
 
-### `docs/dogfood/<id>/BUILD_HANDOFF.md` — implementer notes
+### `docs/operator/README.md` and `docs/operator/BRIEF.md` — operator state
 
-- **What it is:** the implementer's notes from a specific
-  dogfood run.
-- **What it owns:** the file-by-file change list, the test
-  names, the smoke-test results, the reviewer-facing notes.
-- **When it changes:** never, after the run completes. It's the
-  primary source for "what actually shipped in this RFC's V1."
+- **What they are:** the entry point and current brief for operator work.
+- **What they own:** how to enter the operator surface, which live-state
+  command to run first, the current frontier, bounded next actions, hazards,
+  and links to workflow fixtures or plans.
+- **What they don't:** daemon state mutation. Live state belongs to daemon-owned
+  PostgreSQL and changes through daemon MCP/RPC or daemon-backed CLI commands.
+
+### `docs/audits/` — audit reports
+
+- **What it is:** dated whole-repo audits, hygiene reports, reconcile reports,
+  and review findings that are still useful to browse as a corpus.
+- **What it owns:** the report body and evidence from the audit date.
+- **What it doesn't:** current operator state or accepted product decisions.
+  Those belong in `docs/operator/` and `docs/decisions/`.
+
+### `docs/records/_frozen/` — frozen provenance
+
+- **What it is:** archived packets, retired research, old requests, historical
+  reviews, and migration-era evidence.
+- **What it owns:** preserved historical inputs and outputs, including retained
+  research such as `PROVENANCE.md` and `TRUE_PROVENANCE_AND_CONTAINMENT.md`.
+- **What it doesn't:** current guidance. Current docs should cite frozen records
+  only when they need provenance.
+
+### `docs/dogfood/` and `docs/dogfoods/` — dogfood material
+
+- **What they are:** `docs/dogfood/` is the aggregate historical dogfood
+  register; `docs/dogfoods/` contains named dogfood workflow fixtures and their
+  prompts, roles, and preserved artifacts.
+- **What they own:** dogfood-specific fixture structure and historical proof
+  material.
+- **What they don't:** the live operator frontier or the generic workflow
+  catalog.
 
 ### `docs/index.md` — pointer index
 
@@ -183,7 +210,7 @@ Cross-references go in one direction:
 - SPEC → RFC (for rationale only)
 - RFC → SPEC (for "after acceptance, the contract lives in
   SPEC")
-- decision log → RFC + dogfood
+- decision log → RFC + dogfood/audit records
 - DDD framing → ubiquitous language
 
 If you find yourself writing a back-edge (SPEC explains an RFC's

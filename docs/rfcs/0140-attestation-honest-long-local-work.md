@@ -11,7 +11,7 @@ Context:
   `wedged_no_tool_progress` → its attestation drops → `artifact.publish` refuses
   the role byline **mid-work**. Labeled `rfc-0091` (the lane-health / liveness
   classification family).
-- Failure-mode audit, `docs/records/audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md`
+- Failure-mode audit, `docs/audits/STRIATUM_FAILURE_MODE_AUDIT_OPUS_4_8_2026-06-19.md`
   §3 (FMA-009, severity **MINOR** — loud, operator-recoverable DX friction on
   honest slow work, not data corruption). The audit's "smallest next step":
   *"treat a fresh heartbeat as sufficient to keep attestation during
@@ -426,6 +426,6 @@ not *process death*. The new value distinction is the protocol state
 `alive_but_silent`: "the supervised process is provably alive and identity-matched,
 but has made no tool-call progress" — a first-class, attestation-preserving state
 between `working_local` and a death-implying stall. Cites
-[`docs/DDD.md § "Adding to the model"`](../explanation/domain-driven-design.md#adding-to-the-model);
+[`docs/DDD.md § "Adding to the model"`](../reference/domain-driven-design.md#adding-to-the-model);
 RFC 0091 (the lane-health module) and RFC 0131 (transport-aware liveness
 confidence) are the precedents this refines.

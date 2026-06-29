@@ -272,7 +272,7 @@ for the full closed list.
 
 - [daemon-runbook.md](daemon-runbook.md) - daemon install, lifecycle, runtime
   layout, logs, and troubleshooting.
-- [GETTING_STARTED.md](../tutorials/getting-started.md) - first-15-minutes
+- [GETTING_STARTED.md](../how-to/getting-started.md) - first-15-minutes
   walkthrough.
 - [HOW_TO_HUMAN.md](how-to-human.md) - operator playbook.
 - [CLI_REFERENCE.md](../reference/cli-reference.md) - CLI verbs and exit codes.

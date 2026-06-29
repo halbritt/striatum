@@ -329,7 +329,7 @@ The credential placer and any hydrator are an intentional privilege boundary
 
 ## Domain Modeling
 
-Per [`docs/DDD.md` "Adding to the model"](../explanation/domain-driven-design.md#adding-to-the-model),
+Per [`docs/DDD.md` "Adding to the model"](../reference/domain-driven-design.md#adding-to-the-model),
 this RFC adds:
 
 - **Credential assurance class** — a value object naming how a provider proves

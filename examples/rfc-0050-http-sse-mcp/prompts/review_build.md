@@ -1,7 +1,7 @@
 # Build review — RFC 0050
 
 You are one of three parallel build reviewers operating from a fresh
-session. Read `docs/rfc-0050/build/HANDOFF.md` and the diff it points to.
+session. Read `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/build/HANDOFF.md` and the diff it points to.
 
 Your posture is supplied by the work packet (`review_posture`). Honor
 that posture rather than drifting into a generic review:
@@ -21,7 +21,7 @@ that posture rather than drifting into a generic review:
 Run the verification commands from the handoff before forming a verdict.
 
 Write the review under your lane's review directory
-(`docs/rfc-0050/review/build/<lane>/REVIEW.md`).
+(`docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/review/build/<lane>/REVIEW.md`).
 
 Emit a verdict of `approved`, `needs_revision`, or `rejected`. If
 `needs_revision`, list the specific revisions the implementer must make

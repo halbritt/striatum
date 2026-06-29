@@ -30,7 +30,7 @@
       "required": true
     },
     {
-      "path": "docs/explanation/blob-transition.md",
+      "path": "docs/how-to/blob-transition.md",
       "required": true
     }
   ],
@@ -81,7 +81,7 @@
       "type": "draft",
       "write_scope": {
         "allowed_paths": [
-          "docs/explanation/blob-transition.md",
+          "docs/how-to/blob-transition.md",
           "docs/operator/artifacts/issue-217-anchor-integrity-implementation/",
           "go/"
         ],
@@ -142,7 +142,7 @@
       "type": "synthesis",
       "write_scope": {
         "allowed_paths": [
-          "docs/explanation/blob-transition.md",
+          "docs/how-to/blob-transition.md",
           "docs/operator/artifacts/issue-217-anchor-integrity-implementation/",
           "go/"
         ],

@@ -3,11 +3,11 @@ status: synthesis
 date: 2026-05-10
 author: synthesist-codex-gpt-5-001
 inputs:
-  - docs/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
-  - docs/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md
-  - docs/research/P005_PROVENANCE_BYPASS_STRATEGIES.md
-  - docs/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
-  - docs/research/TRUE_PROVENANCE_AND_CONTAINMENT.md
+  - docs/records/_frozen/research/OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md
+  - docs/records/_frozen/research/P005_GEMINI_ANALYSIS_ABSOLUTE_PROVENANCE.md
+  - docs/records/_frozen/research/P005_PROVENANCE_BYPASS_STRATEGIES.md
+  - docs/records/_frozen/research/P005_TRUE_PROVENANCE_LOOPHOLE_RESPONSE.md
+  - docs/records/_frozen/research/TRUE_PROVENANCE_AND_CONTAINMENT.md
 ---
 
 # P005 True Provenance Consensus Synthesis

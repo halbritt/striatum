@@ -17,4 +17,4 @@ Responsibilities:
     - agentloop PTY refactor.
     - `src/striatum/mcp.py` deletion.
 
-The coordinator never edits artifacts inside `docs/rfc-0050/`.
+The coordinator never edits artifacts inside `docs/operator/workflows/rfc-0050-http-sse-mcp/artifacts/`.

@@ -193,7 +193,7 @@ Ranked **blocker / serious / smell** with file evidence.
 
 **S5. The CLI argument parser is 1,343 lines** (`src/striatum/cli/parser.py`). Subparsers are added imperatively. Adding a verb requires editing `parser.py`, `contracts/daemon_methods.json`, a Python handler, and (usually) a Go handler. Four-place ceremony per verb. RFC 0060 (single daemon method contract source) addresses this for the contract side but not for the CLI parser. *Optional fix*: generate the parser from the contract.
 
-**S6. Repo-root pollution.** `final_status.json` (256 KB), `status.json` (176 KB), six `STRIATUM_*_REVIEW_*.md` (this one included), four `STRIATUM_*_REMEDIATION_PLAN*.md`, `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. For a team-adoption target, the repo root is the first impression. *Fix*: move external-review artifacts into `docs/reviews/external/`. Delete or `.gitignore` the JSON dev-scratch files. Move comparison docs into `docs/research/`.
+**S6. Repo-root pollution.** `final_status.json` (256 KB), `status.json` (176 KB), six `STRIATUM_*_REVIEW_*.md` (this one included), four `STRIATUM_*_REMEDIATION_PLAN*.md`, `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. For a team-adoption target, the repo root is the first impression. *Fix*: move external-review artifacts into `docs/reviews/external/`. Delete or `.gitignore` the JSON dev-scratch files. Move comparison docs into `docs/records/_frozen/research/`.
 
 **S7. Workflow editor island is dead weight.** Per maintainer, workflow authoring is via `striatum workflow generate`, not the React Flow editor. `src/striatum/web/static/build/island-workflow-graph-editor.js` exists but isn't the primary surface. *Fix*: delete the `island-workflow-graph-editor.js` and `island-workflow-chooser.js` entry points and their backing React code. Reduce islands to the escalation-relevant ones (`island-recovery-panel`, plus whatever chat surface the human-principal inbox needs).
 
@@ -292,7 +292,7 @@ Only changes I would personally make. Effort is "back-of-envelope, single-operat
 
 ### Today (concrete first step, startable in the next hour)
 
-Move 11+ dev-scratch files out of the repo root: `final_status.json`, `status.json`, six `STRIATUM_*_REVIEW_*.md`, four `STRIATUM_*_REMEDIATION_PLAN*.md`, `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. Either move into `docs/reviews/external/` and `docs/research/` or delete. Then run `make ui-clean ui-build` and commit the result; the 277 stale `island-shared-*.js` files should drop. These are no-risk 30-minute changes that materially improve first-impression for an adopter.
+Move 11+ dev-scratch files out of the repo root: `final_status.json`, `status.json`, six `STRIATUM_*_REVIEW_*.md`, four `STRIATUM_*_REMEDIATION_PLAN*.md`, `ENGRAM_DEVELOPER_REQUEST.md`, `GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`, `CLAUDE_DESIGN_UI_REWORK_PROMPT.md`. Either move into `docs/reviews/external/` and `docs/records/_frozen/research/` or delete. Then run `make ui-clean ui-build` and commit the result; the 277 stale `island-shared-*.js` files should drop. These are no-risk 30-minute changes that materially improve first-impression for an adopter.
 
 ### Next week
 

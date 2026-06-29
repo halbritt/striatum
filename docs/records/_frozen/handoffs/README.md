@@ -1,9 +1,8 @@
-# Handoffs
-author: coordinator-codex-gpt-5.5-001
+# Frozen Handoffs
 
-This directory is historical provenance. New operator state belongs in
-[`docs/operator/BRIEF.md`](../../../operator/BRIEF.md) and the linked
-`docs/operator/plans/` files.
+This directory preserves handoff notes from earlier operator and migration work.
+They are retrieval handles for archaeology, not current state.
 
-Existing handoff files remain useful for archaeology, but they are not
-the current-state authority.
+Status: frozen provenance. Current operator state belongs in `docs/operator/BRIEF.md`
+and its linked plans, progress notes, and workflow fixtures. Keep these handoffs
+only as historical evidence of what a prior session knew or requested.

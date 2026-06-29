@@ -8,24 +8,24 @@ are listed by directory instead of file by file.
 
 | File | Audience | Summary |
 |---|---|---|
-| [using-striatum.md](tutorials/using-striatum.md) | New arrival (RFC 0054) | Day-zero usage guide: the operator + principal model, prerequisites, day-zero setup, first run, escalation surface. Read this first. |
-| [adopter-reading-path.md](tutorials/adopter-reading-path.md) | Team adopting striatum | Curated 6-RFC reading list explaining how the system thinks: DDD, lane attestation, multi-repo daemon, RPC envelope, PG substrate, human-principal role. Read after USING_STRIATUM. |
-| [getting-started.md](tutorials/getting-started.md) | New user | From a fresh target repo to a running workflow in ~15 minutes; leads with AI-operator setup and keeps operator-by-hand notes as a sidebar. Superseded by USING_STRIATUM.md for the role-aware walkthrough; retained for the deeper install / verify steps. |
+| [using-striatum.md](how-to/using-striatum.md) | New arrival (RFC 0054) | Day-zero usage guide: the operator + principal model, prerequisites, day-zero setup, first run, escalation surface. Read this first. |
+| [adopter-reading-path.md](how-to/adopter-reading-path.md) | Team adopting striatum | Curated 6-RFC reading list explaining how the system thinks: DDD, lane attestation, multi-repo daemon, RPC envelope, PG substrate, human-principal role. Read after USING_STRIATUM. |
+| [getting-started.md](how-to/getting-started.md) | New user | From a fresh target repo to a running workflow in ~15 minutes; leads with AI-operator setup and keeps operator-by-hand notes as a sidebar. Superseded by USING_STRIATUM.md for the role-aware walkthrough; retained for the deeper install / verify steps. |
 | [how-to-human.md](how-to/how-to-human.md) | Human principal | Escalation playbook for resolving blockers and decisions; retains the operator-by-hand walkthrough as reference. |
 | [consumer-repo-layout.md](reference/consumer-repo-layout.md) | Target-repo owner (RFC 0056) | Opinionated-but-non-mandatory directory layout recommendations: where the workflow file lives, where artifacts land, what to gitignore. |
 | [how-to-agent.md](how-to/how-to-agent.md) | Coding agent | Long-form companion to the RFC 0015 skill bundle; the workflow loop, work-packet shape, and what not to do. |
-| [context-hygiene.md](explanation/context-hygiene.md) | Operator / agent author | Why session quality is not a function of token budget; repo-side, session-side, and model-side practices for replicating high-taste sessions. |
+| [context-hygiene.md](agents/context-hygiene.md) | Operator / agent author | Why session quality is not a function of token budget; repo-side, session-side, and model-side practices for replicating high-taste sessions. |
 | [workflow-types.md](reference/workflow-types.md) | Workflow selector | Which workflow shape and lane set to choose; current starters, examples, defaults, and the roadmap toward a chooser UI. |
 | [workflow-catalog.md](reference/workflow-catalog.md) | Workflow selector | Generated reference for bundled workflow catalog shapes and lane sets, including Mermaid graph previews. |
 | [writing-workflows.md](how-to/writing-workflows.md) | Workflow author | How to author `workflow.json` from scratch: required fields, scaffold layout, common graph shapes, validation. |
 | [cli-reference.md](reference/cli-reference.md) | Anyone | Flat list of every CLI verb plus stable exit codes; `--help` is authoritative. |
 | [postgres-transition.md](how-to/postgres-transition.md) | Operator | The D094 / RFC 0043 PostgreSQL runbook: prerequisites, role setup, `daemon migrate-db`, `daemon owner-ddl apply`, daemon startup, `striatum repo add`, PostgreSQL verification, and exit codes 11 / 12. |
-| [blob-transition.md](explanation/blob-transition.md) | Operator | The RFC 0072 blob-storage runbook: configuring `striatumd` against an S3-compatible service, adopting repos with `--apply-blob-creation`, bulk-migrating `docs/dogfood/` into blob storage, and verifying the round trip. |
+| [blob-transition.md](how-to/blob-transition.md) | Operator | The RFC 0072 blob-storage runbook: configuring `striatumd` against an S3-compatible service, adopting repos with `--apply-blob-creation`, bulk-migrating `docs/dogfood/` into blob storage, and verifying the round trip. |
 | [daemon-runbook.md](how-to/daemon-runbook.md) | Operator | The RFC 0079 daemon operability runbook: `striatum daemon install/uninstall/status`, the portable systemd user unit, runtime layout (`daemon-go.sock`, `client-token`, `mcp-http-endpoint`, pidfile), `daemon.toml` DSN, `journalctl --user -u striatumd`, and troubleshooting. |
 | [daemonize-run-drive.md](how-to/daemonize-run-drive.md) | Operator | Run-drive daemonization notes for long-lived operator execution and restart behavior. |
 | [frontend-development.md](how-to/frontend-development.md) | Contributor | Local web UI development workflow, build/test commands, and generated asset expectations. |
 | [lane-sandbox.md](how-to/lane-sandbox.md) | Operator / maintainer | Lane sandbox setup and constraints for supervised lanes. |
-| [operator/INDEX.md](operator/INDEX.md) | Operator | RFC 0058 current-state surface: read `operator/BRIEF.md` first; it owns the live frontier and points to bounded plan links. Treat older roadmap/todo issue lists as secondary until they are refreshed. |
+| [operator/README.md](operator/README.md) | Operator | Entry point for the operator runtime surface: bootstrap first, then `BRIEF.md`, `rfc-roadmap.md`, plans, progress, workflow fixtures, and recovery records. |
 
 ## Specifications and decisions
 
@@ -33,7 +33,7 @@ are listed by directory instead of file by file.
 |---|---|---|
 | [../ARCHITECTURE.md](../ARCHITECTURE.md) | Fresh agent / human | One navigable map of the substrate: components, state ownership, surfaces, write boundary, run model, failure legibility (GH #161). |
 | [spec.md](reference/spec.md) | Anyone | The implementation contract for the V1 surface. The source of truth when this index and the runner disagree. |
-| [domain-driven-design.md](explanation/domain-driven-design.md) | Anyone curious about the framing | Why the vocabulary is the model, not bookkeeping; bounded context, aggregate roots, value objects, the events log, and the daemon-method write-boundary invariant. |
+| [domain-driven-design.md](reference/domain-driven-design.md) | Anyone curious about the framing | Why the vocabulary is the model, not bookkeeping; bounded context, aggregate roots, value objects, the events log, and the daemon-method write-boundary invariant. |
 | [doc-map.md](reference/doc-map.md) | Anyone editing the docs | The boundary contract: which doc owns what, what each doc deliberately does *not* contain, and the direction citations should flow. |
 | [prd.md](reference/prd.md) | Product reader | The product requirements that drove the V1 design. |
 | [decision-log.md](decisions/decision-log.md) | Product / architecture reader | Every product and architecture decision (`D###` rows) with reason, consequences, and revisit triggers. |
@@ -50,8 +50,8 @@ are listed by directory instead of file by file.
 
 | File | Audience | Summary |
 |---|---|---|
-| [mcp.md](explanation/mcp.md) | MCP integrator | Native Go daemon HTTP/SSE MCP endpoint discovery, authentication, tool discovery, tool calls, and agent-loop boundaries. |
-| [harness-friction-patterns.md](explanation/harness-friction-patterns.md) | Maintainer / RFC author | Long-form record of recurring dogfood friction shapes (036-039) and the V1 fixes that landed; companion to RFC 0040. |
+| [mcp.md](reference/mcp.md) | MCP integrator | Native Go daemon HTTP/SSE MCP endpoint discovery, authentication, tool discovery, tool calls, and agent-loop boundaries. |
+| [harness-friction-patterns.md](reference/harness-friction-patterns.md) | Maintainer / RFC author | Long-form record of recurring dogfood friction shapes (036-039) and the V1 fixes that landed; companion to RFC 0040. |
 | [readme.md](readme.md) | Doc tree reader | Pointer file for `docs/`. |
 
 ## Agent guidance
@@ -73,11 +73,13 @@ are listed by directory instead of file by file.
 |---|---|
 | [campaigns/](campaigns/) | Per-campaign workflow scaffolds (`<name>/workflow.json` plus `prompts/`, `roles/`, `artifacts/`) for multi-stage design and remediation runs (e.g. doctor-integrity-legibility, issue-290 fan-in design, RFC 0126–0128). |
 
-## Research and comparison material
+## Audits and records
 
 | Path | Summary |
 |---|---|
-| [research/](research/) | Background research and project comparisons: provenance/containment analyses (`PROVENANCE.md`, `TRUE_PROVENANCE_AND_CONTAINMENT.md`, `OPERATOR_BYPASS_DEFENSE_IN_DEPTH.md`), prior-art comparisons (`GASTOWN_COMPARISON.md`, `PROJECT_COMPARISON.md`), tool-harness profiles (`0010-tool-harness-profiles/`), and incubation requests. Frozen provenance — excluded from the doc-link check. |
+| [audits/](audits/) | Browseable audit, hygiene, reconciliation, and review reports. |
+| [records/](records/) | Frozen provenance and archived inputs that should stay discoverable without reading as current guidance. |
+| [records/_frozen/research/](records/_frozen/research/) | Retained research snapshots, including `PROVENANCE.md` and `TRUE_PROVENANCE_AND_CONTAINMENT.md`. |
 
 ## Historical (incubation provenance — not current product material)
 
@@ -89,8 +91,8 @@ are listed by directory instead of file by file.
 
 | File | Summary |
 |---|---|
-| [prior-art.md](explanation/prior-art.md) | Pre-PRD survey of orchestration tools that shaped early framing. Not a list of currently-tracked dependencies. |
-| [interview-log.md](explanation/interview-log.md) | The interview rounds that produced the original PRD and the early `D###` decision rows. |
+| [prior-art.md](records/_frozen/prior-art.md) | Pre-PRD survey of orchestration tools that shaped early framing. Not a list of currently-tracked dependencies. |
+| [interview-log.md](records/_frozen/interview-log.md) | The interview rounds that produced the original PRD and the early `D###` decision rows. |
 | [ENGRAM_INCUBATION_CONTEXT.md](records/_frozen/ENGRAM_INCUBATION_CONTEXT.md) | Engram-extraction provenance; striatum was extracted from a parent project. |
 | [RFC_0014_DOGFOOD_FIX_SPEC.md](records/_frozen/RFC_0014_DOGFOOD_FIX_SPEC.md) | Pre-RFC-0001 dogfood findings; everything actionable here landed in subsequent RFCs. |
 
