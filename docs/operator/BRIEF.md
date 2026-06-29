@@ -28,7 +28,10 @@ Codex env notice where the runtime token file exists but the current shell did
 not export `STRIATUM_MCP_TOKEN`. D276 now keeps those visible as top-level
 `notices`/`notice_records` and reserves top-level `warnings` for actionable
 operator work. The subsystem blocks still expose their local advisory counts for
-forensics.
+forensics. `job_stuck_no_live_session` now skips jobs that are already legible
+through an open blocker or unfinished dependency, so RFC 0143 Slice B's known
+write-scope blocker remains a status/why item instead of a duplicate doctor
+warning.
 
 ## 2026-06-29 delta - doctor artifact problems cleared
 

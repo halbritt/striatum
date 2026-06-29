@@ -42,6 +42,9 @@ const doctorStuckJobStatesSQL = `('running','claimed','stale_lease','blocked')`
 //   - a job with ANY active session on its run+role+lane is treated as live and
 //     skipped (a job whose lease owner session is active, or whose lane simply
 //     has a live session, is healthy);
+//   - a blocked job with an open blocker or unfinished dependency is already
+//     legible on status/why and is skipped; the stuck-job warning is for silent
+//     blocked jobs with no separate operator surface;
 //   - a job whose freshest progress signal (job started_at/ready_at, the current
 //     lease's last_heartbeat_at, or any heartbeat on a session for the job's
 //     run+role+lane) is within the bound is skipped;
@@ -89,7 +92,9 @@ func doctorStuckJobsNoLiveSession(ctx context.Context, runner db.Runner, reposit
 		       s.started_at,
 		       s.ready_at,
 		       live.live_session_count,
-		       live.last_session_progress_at
+		       live.last_session_progress_at,
+		       blockers.active_blocker_count,
+		       deps.unfinished_dependency_count
 		  FROM stuck s
 		  LEFT JOIN striatumd.leases lease
 		    ON lease.repository_id = $1
@@ -109,6 +114,23 @@ func doctorStuckJobsNoLiveSession(ctx context.Context, runner db.Runner, reposit
 		       AND sess.role_id = s.role_id
 		       AND sess.lane_id = s.lane_id
 		  ) live ON true
+		  LEFT JOIN LATERAL (
+		    SELECT COUNT(*) AS active_blocker_count
+		      FROM striatumd.blockers b
+		     WHERE b.repository_id = $1
+		       AND b.job_id = s.job_id
+		       AND b.state = 'open'
+		  ) blockers ON true
+		  LEFT JOIN LATERAL (
+		    SELECT COUNT(*) AS unfinished_dependency_count
+		      FROM striatumd.job_dependencies dep
+		      JOIN striatumd.jobs upstream
+		        ON upstream.repository_id = dep.repository_id
+		       AND upstream.job_id = dep.depends_on_job_id
+		     WHERE dep.repository_id = $1
+		       AND dep.job_id = s.job_id
+		       AND upstream.state <> 'completed'
+		  ) deps ON true
 		 ORDER BY s.run_id, s.workflow_job_id, s.job_id`,
 		repositoryID)
 	if err != nil {
@@ -132,6 +154,10 @@ func doctorStuckJobsNoLiveSession(ctx context.Context, runner db.Runner, reposit
 		// A live (active) session on the job's run+role+lane means the lane is
 		// alive — never flag it (guards against false positives on healthy jobs).
 		if intFrom(row, "live_session_count") > 0 {
+			continue
+		}
+		if stringFrom(row, "job_state") == "blocked" &&
+			(intFrom(row, "active_blocker_count") > 0 || intFrom(row, "unfinished_dependency_count") > 0) {
 			continue
 		}
 		quietSince, ok := stuckJobQuietSince(row)

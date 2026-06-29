@@ -112,6 +112,66 @@ func TestDoctorStuckJobNoFalsePositiveOnRecentProgress(t *testing.T) {
 	}
 }
 
+func TestDoctorStuckJobSkipsLegiblyBlockedJobs(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	old := now.Add(-30 * time.Minute)
+	runner := &doctorStuckJobFakeRunner{stuckRows: []map[string]any{
+		{
+			"job_id":                      "job_open_blocker",
+			"run_id":                      "run_legible",
+			"workflow_job_id":             "draft",
+			"role_id":                     "author",
+			"lane_id":                     "codex",
+			"job_state":                   "blocked",
+			"lease_last_heartbeat_at":     nil,
+			"started_at":                  old.Format(time.RFC3339),
+			"ready_at":                    old.Format(time.RFC3339),
+			"live_session_count":          int64(0),
+			"last_session_progress_at":    nil,
+			"active_blocker_count":        int64(1),
+			"unfinished_dependency_count": int64(0),
+		},
+		{
+			"job_id":                      "job_waiting_dependency",
+			"run_id":                      "run_legible",
+			"workflow_job_id":             "apply",
+			"role_id":                     "author",
+			"lane_id":                     "codex",
+			"job_state":                   "blocked",
+			"lease_last_heartbeat_at":     nil,
+			"started_at":                  nil,
+			"ready_at":                    old.Format(time.RFC3339),
+			"live_session_count":          int64(0),
+			"last_session_progress_at":    nil,
+			"active_blocker_count":        int64(0),
+			"unfinished_dependency_count": int64(1),
+		},
+		{
+			"job_id":                      "job_silent_blocked",
+			"run_id":                      "run_wedged",
+			"workflow_job_id":             "review",
+			"role_id":                     "reviewer",
+			"lane_id":                     "codex",
+			"job_state":                   "blocked",
+			"lease_last_heartbeat_at":     nil,
+			"started_at":                  old.Format(time.RFC3339),
+			"ready_at":                    old.Format(time.RFC3339),
+			"live_session_count":          int64(0),
+			"last_session_progress_at":    nil,
+			"active_blocker_count":        int64(0),
+			"unfinished_dependency_count": int64(0),
+		},
+	}}
+
+	block, warnings, records := doctorStuckJobsNoLiveSession(context.Background(), runner, "repo_1", now)
+	if block["stuck_count"] != 1 || len(warnings) != 1 || len(records) != 1 {
+		t.Fatalf("expected only silent blocked job to warn: block=%#v warnings=%#v records=%#v", block, warnings, records)
+	}
+	if records[0]["job_id"] != "job_silent_blocked" {
+		t.Fatalf("records = %#v, want only job_silent_blocked", records)
+	}
+}
+
 // TestDoctorStuckJobIsWarningNotHardRed: surfaced through HandleDoctor, the stuck
 // job lands in `warnings` (and verbose `warning_records`) but `ok` stays true.
 func TestDoctorStuckJobIsWarningNotHardRed(t *testing.T) {
