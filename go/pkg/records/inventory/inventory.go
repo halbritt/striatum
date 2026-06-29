@@ -141,6 +141,10 @@ func Classify(relPath string) (recordClass, proposedImportMode, classification s
 	}
 
 	switch {
+	case strings.HasPrefix(p, "docs/operator/artifacts/"):
+		return "historical_operator_artifact_doc", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
+	case strings.HasPrefix(p, "docs/operator/workflows/"):
+		return "historical_operator_workflow_doc", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
 	case strings.HasPrefix(p, "docs/records/audits/"):
 		return "audit_record", ClassificationSafeToBlobIndex, ClassificationSafeToBlobIndex
 	case strings.HasPrefix(p, "docs/records/_frozen/"):

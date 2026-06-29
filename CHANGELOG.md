@@ -35,6 +35,16 @@
 
 ### Removed
 
+- **RFC 0171 operator generated-doc bulk deletion.** Removed 1,755 historical
+  operator generated Markdown bodies from git after importing them into
+  daemon-indexed blob storage and proving byte-identical reconstruction:
+  500 `docs/operator/artifacts/**` records and 1,255
+  `docs/operator/workflows/**` records. The proof used import batches
+  `rfc0171-bulk-artifacts-20260629`, `rfc0171-bulk-workflows-a-20260629`,
+  and `rfc0171-bulk-workflows-b-20260629`; `records migration verify` checked
+  all 1,755 records with `problem_count=0`, materialization wrote all 1,755
+  records under ignored scratch, and a full SHA comparison found 0
+  source/manifest/materialized mismatches.
 - **RFC 0171 deletion pilot.** Removed five historical dogfood
   `OPERATOR_REPORT.md` bodies from git after import batch
   `inventory-d0c894978b26b00f` verified and materialized byte-identical

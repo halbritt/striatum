@@ -4,7 +4,7 @@ artifact_kind: "operator_brief"
 brief_id: "brief_2026-06-27_v2.39.0-release"
 supersedes: "brief_2026-06-25_v2.38.0-release"
 scope_links: ["docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
-context_budget_lines: 470
+context_budget_lines: 620
 retrieval_priority: "high"
 status: "current"
 ---
@@ -22,6 +22,26 @@ permission, and replay/done proof must be same-boundary fresh. No architecture
 is accepted and no daemon schema, RPC, UI, tracker backend, implementation
 ticket, workflow-launch authority, or build plan is authorized until the RFC is
 accepted and sequenced.
+
+## 2026-06-29 delta - RFC 0171 operator generated-doc bulk deletion shipped
+
+RFC 0171 now classifies historical Markdown under `docs/operator/artifacts/`
+and `docs/operator/workflows/` as daemon-indexable generated records. The
+authorized bulk deletion removed 1,755 tracked Markdown bodies from git after
+importing and proving byte-identical reconstruction through Garage-backed
+`generated_records`: 500 artifact docs and 1,255 workflow docs.
+
+Proof batches: `rfc0171-bulk-artifacts-20260629`,
+`rfc0171-bulk-workflows-a-20260629`, and
+`rfc0171-bulk-workflows-b-20260629`. Verification checked all 1,755 records with
+`problem_count=0`; materialization wrote all 1,755 under ignored scratch; SHA
+comparison found 0 source/manifest/materialized mismatches. Proof files live at
+`/tmp/striatum-rfc0171-bulk-deletion-manifest-2026-06-29T0255Z.json` and mismatch report
+`/tmp/striatum-rfc0171-bulk-sha-mismatches-2026-06-29T0255Z.tsv`.
+
+The earlier five-file dogfood `OPERATOR_REPORT.md` deletion pilot remains valid.
+Broad historical deletion outside explicitly scoped generated-record classes is
+still blocked until a future proof-backed operator scope names the next class.
 
 ## 2026-06-28 delta - RFC 0143 Slice B build run blocked
 
@@ -146,27 +166,6 @@ key/hash metadata, duplicate source rows, and missing blob metadata. This moves
 RFC 0171 from "inventory only" to "imported and reconstructable"; broad
 historical deletion remains blocked until a separately authorized pilot uses
 that proof to retire source files.
-
-## 2026-06-28 delta — RFC 0171 deletion pilot shipped
-
-A narrow RFC 0171 pilot removed five historical dogfood `OPERATOR_REPORT.md`
-bodies from git after the live import proof was refreshed. The proof used import
-batch `inventory-d0c894978b26b00f`; `records migration verify` checked 318
-records with `reconstructable=true` and `problem_count=0`, materialization
-rewrote the batch under ignored `.striatum/scratch`, and a full SHA comparison
-found 0 manifest/source/materialized mismatches. The pilot manifest is
-`/tmp/striatum-rfc0171-deletion-pilot-manifest-2026-06-28T2231Z.json`.
-
-The removed tracked paths are:
-
-- `dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-review/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`
-
-Broad historical deletion remains blocked; future deletion must repeat the
-proof gate and name an explicit operator-authorized scope.
 
 ## 2026-06-27 delta — v2.39.0 release
 

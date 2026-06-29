@@ -1,1 +1,0 @@
-Challenge the candidate synthesis from your assigned posture only (product / implementation / privacy / eval / operations or the configured override). Record findings[] rows with severity, the affected invariant, the closest acceptable answer, and the constraint shape you would require. An unanswered interrogation is evidence — record it.

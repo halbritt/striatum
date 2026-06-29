@@ -1,1 +1,0 @@
-Take the prior cycle's constraints[] as binding input. Discharge each row explicitly: answer / fold-in / reject-with-rationale / accept-as-risk / defer-with-successor. A high-severity challenge may only leave open via a recorded disposition. Republished artifacts use the cycle-templated logical name.

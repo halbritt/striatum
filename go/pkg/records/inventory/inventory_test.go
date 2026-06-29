@@ -67,6 +67,8 @@ func TestClassificationRulesAreConservative(t *testing.T) {
 		{"dogfoods/rfc-0101-l2-conformance/README.md", "dogfood_index", ClassificationKeepInGit},
 		{"docs/records/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW.md", "audit_record", ClassificationSafeToBlobIndex},
 		{"docs/records/_frozen/requests/ORIGINAL_REQUEST.md", "frozen_historical_record", ClassificationSafeToBlobIndex},
+		{"docs/operator/artifacts/rfc-0171/review/REVIEW.md", "historical_operator_artifact_doc", ClassificationSafeToBlobIndex},
+		{"docs/operator/workflows/rfc-0171/prompts/review.md", "historical_operator_workflow_doc", ClassificationSafeToBlobIndex},
 		{"docs/operator/plans/rfc-0078-remaining-work.md", "operator_work_plan", ClassificationSafeToBlobIndex},
 		{"dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md", "operator_report", ClassificationSafeToBlobIndex},
 		{"docs/operator/doctor-acknowledged-loss.json", "unknown", ClassificationManualReview},

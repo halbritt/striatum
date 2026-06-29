@@ -1,1 +1,0 @@
-Read the claim ledger and the minted receipts and publish the collaboration_ledger verdict. If ANY claim is stated above the status its receipt earns — VERIFIED over a missing/RED receipt, or completion language over an ASSERTED/DESIGNED row — record needs_revision and name the offending claims. Otherwise accept.

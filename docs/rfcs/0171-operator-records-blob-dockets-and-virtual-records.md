@@ -1,6 +1,6 @@
 # RFC 0171: Operator records blob dockets and virtual records
 
-Status: accepted (D273; partially implemented: import/materialize/verify and a dogfood operator-report deletion pilot shipped 2026-06-28)
+Status: accepted (D273; partially implemented: import/materialize/verify, generated-record integrity, and historical generated-doc deletion pilots shipped)
 Date: 2026-06-28
 Context: [RFC 0072](0072-blob-backed-artifact-storage.md),
 [RFC 0123](0123-blob-routed-lane-exhaust-and-git-publication-specs.md),
@@ -195,27 +195,33 @@ and other source-like records.
 11. Repo hygiene guard for newly tracked generated record bodies.
 12. Concise runbook/spec/brief updates.
 
-Implementation state as of 2026-06-28: slices 1, 2, 3, 5, 6, 7, 8, 9, 10, 11,
+Implementation state as of 2026-06-29: slices 1, 2, 3, 5, 6, 7, 8, 9, 10, 11,
 and the brief/changelog/reference-doc updates in slice 12 are implemented. Slice
 4 is implemented for imported generated records through
 `records.migration.materialize` into ignored `.striatum/scratch`; broader
-`striatum://record` documentation-link resolver coverage remains follow-up. A
-separately authorized deletion pilot removed five historical dogfood
-`OPERATOR_REPORT.md` bodies after `records migration verify`, materialization,
-and SHA comparison proved byte-identical reconstruction from import batch
-`inventory-d0c894978b26b00f`. The pilot manifest is
-`/tmp/striatum-rfc0171-deletion-pilot-manifest-2026-06-28T2231Z.json`; the
-tracked paths were:
+`striatum://record` documentation-link resolver coverage remains follow-up.
 
-- `dogfoods/rfc-0097-self-hosting/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0101-l2-conformance/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-floor/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-review/OPERATOR_REPORT.md`
-- `dogfoods/rfc-0103-w3-141-restart/OPERATOR_REPORT.md`
+Two separately authorized deletion pilots have retired historical generated
+Markdown bodies from git after daemon/blob reconstruction proof:
 
-Broad historical source deletion is still not authorized. Future deletion
-requires the same byte-identical reconstruction proof and an explicit operator
-decision or pilot scope.
+- 2026-06-28: five dogfood `OPERATOR_REPORT.md` bodies from import batch
+  `inventory-d0c894978b26b00f`; pilot manifest
+  `/tmp/striatum-rfc0171-deletion-pilot-manifest-2026-06-28T2231Z.json`.
+- 2026-06-29: 1,755 historical operator generated Markdown bodies, split as
+  500 `docs/operator/artifacts/**` records and 1,255
+  `docs/operator/workflows/**` records. Import batches
+  `rfc0171-bulk-artifacts-20260629`,
+  `rfc0171-bulk-workflows-a-20260629`, and
+  `rfc0171-bulk-workflows-b-20260629` verified and materialized with
+  `checked_count=1755`, `problem_count=0`, and 0 source/manifest/materialized
+  SHA mismatches. The proof manifest is
+  `/tmp/striatum-rfc0171-bulk-deletion-manifest-2026-06-29T0255Z.json`; the
+  mismatch report is
+  `/tmp/striatum-rfc0171-bulk-sha-mismatches-2026-06-29T0255Z.tsv`.
+
+Broad historical source deletion outside explicitly scoped generated-record
+classes is still not authorized. Future deletion requires the same byte-identical
+reconstruction proof and an explicit operator decision or pilot scope.
 
 ## Acceptance Criteria
 
@@ -239,8 +245,8 @@ decision or pilot scope.
 
 ## Open Questions
 
-1. Which historical directory or record class should be next eligible after the
-   five-file dogfood operator-report pilot?
+1. Which remaining historical record classes should be promoted after the
+   operator artifact/workflow Markdown batches?
 2. Should cloud S3 remain accepted but discouraged, or should the operator
    documentation explicitly prefer local MinIO/Garage-compatible storage?
 3. Should docket Merkle roots be anchored in a new table, an artifact row, or

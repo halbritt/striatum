@@ -1,1 +1,0 @@
-Publish the cleared release only after the collaboration ledger records an accepting verdict. Stamp every claim with its earned status and the receipt of record; no completion language survives above the receipted status.

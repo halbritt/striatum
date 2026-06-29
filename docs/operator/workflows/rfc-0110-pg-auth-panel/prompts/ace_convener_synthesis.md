@@ -1,1 +1,0 @@
-Publish the candidate synthesis. On a revision cycle, every prior constraints[] row must be discharged explicitly (answer / fold-in / reject-with-rationale / accept-as-risk / defer-with-successor). This artifact is cycle-templated so it republishes cleanly.
