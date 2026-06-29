@@ -15,7 +15,7 @@ import (
 const doctorSupervisorProbeTimeout = 5 * time.Second
 const doctorBlobProbeTimeout = 5 * time.Second
 const doctorGeneratedRecordIntegrityTimeout = 8 * time.Second
-const doctorArtifactAnchorIntegrityTimeout = 8 * time.Second
+const doctorArtifactAnchorIntegrityTimeout = 12 * time.Second
 const doctorRecoveryCursorWedgedAfter = 5 * time.Minute
 
 // HandleDoctor mirrors reads/doctor.py. Returns a flat health report of
