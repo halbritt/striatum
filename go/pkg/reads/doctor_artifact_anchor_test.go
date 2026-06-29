@@ -16,9 +16,11 @@ import (
 
 type doctorArtifactAnchorRunner struct {
 	doctorFakeRunner
-	repoRoot        string
-	artifactRows    []map[string]any
-	artifactQueried bool
+	repoRoot                   string
+	artifactRows               []map[string]any
+	artifactQueried            bool
+	generatedRecordTableExists bool
+	generatedRecordRows        []map[string]any
 	// requireWaitingHumanSelection simulates a waiting_human artifact row that a
 	// completed-only doctor query would miss before it reached classification.
 	requireWaitingHumanSelection bool
@@ -30,6 +32,13 @@ type doctorArtifactAnchorRunner struct {
 
 func (r *doctorArtifactAnchorRunner) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	switch {
+	case strings.Contains(sql, "to_regclass('striatumd.generated_records')"):
+		if !r.generatedRecordTableExists {
+			return dashboardAllRowsFromMaps(nil), nil
+		}
+		return dashboardAllRowsFromMaps([]map[string]any{{"table_name": "striatumd.generated_records"}}), nil
+	case strings.Contains(sql, "FROM striatumd.generated_records"):
+		return dashboardAllRowsFromMaps(r.generatedRecordRows), nil
 	case strings.Contains(sql, "FROM striatumd.events") && strings.Contains(sql, "artifact_id"):
 		rows := make([]map[string]any, 0, len(r.tombstonedIDs))
 		for _, id := range r.tombstonedIDs {
@@ -127,6 +136,56 @@ func TestDoctorArtifactAnchorIntegrityDoesNotGitCheckBlobExhaustArtifact(t *test
 	}
 }
 
+func TestDoctorArtifactAnchorIntegrityAcceptsGeneratedRecordBackedBlobExhaustArtifact(t *testing.T) {
+	contentSHA := testSHA256("blob body\n")
+	row := artifactAnchorRow("/tmp/repo", "art_blob_virtual", "run_blob", "job_blob", "main", "docs/operator/artifacts/blob/REPORT.md", contentSHA)
+	row["artifact_kind"] = "synthesis"
+	row["placement"] = "blob_exhaust"
+
+	block, problems, records, warnings, _ := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{
+		artifactRows:               []map[string]any{row},
+		generatedRecordTableExists: true,
+		generatedRecordRows: []map[string]any{{
+			"source_path":    "docs/operator/artifacts/blob/REPORT.md",
+			"artifact_id":    "art_blob_virtual",
+			"content_sha256": contentSHA,
+		}},
+	}, "repo_anchor", healthyBlobBlock())
+	if block["blob_exhaust_count"] != 1 || block["generated_record_backed_count"] != 1 {
+		t.Fatalf("block counts = %#v, want blob-exhaust row backed by generated record", block)
+	}
+	if len(problems) != 0 || len(records) != 0 || len(warnings) != 0 {
+		t.Fatalf("problems=%#v records=%#v warnings=%#v, want generated-record-backed blob artifact clean", problems, records, warnings)
+	}
+}
+
+func TestDoctorArtifactAnchorIntegrityWarnsOnGeneratedRecordPathForBlobExhaustArtifact(t *testing.T) {
+	row := artifactAnchorRow("/tmp/repo", "art_blob_revised", "run_blob", "job_blob", "main", "docs/operator/artifacts/blob/REPORT.md", testSHA256("draft body\n"))
+	row["artifact_kind"] = "synthesis"
+	row["placement"] = "blob_exhaust"
+
+	block, problems, records, warnings, warningRecords := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{
+		artifactRows:               []map[string]any{row},
+		generatedRecordTableExists: true,
+		generatedRecordRows: []map[string]any{{
+			"source_path":    "docs/operator/artifacts/blob/REPORT.md",
+			"content_sha256": testSHA256("final body\n"),
+		}},
+	}, "repo_anchor", healthyBlobBlock())
+	if block["blob_exhaust_count"] != 1 || block["generated_record_path_warning_count"] != 1 {
+		t.Fatalf("block counts = %#v, want blob-exhaust row warned from generated-record path", block)
+	}
+	if len(problems) != 0 || len(records) != 0 {
+		t.Fatalf("problems=%#v records=%#v, want no hard problem", problems, records)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), artifactSupersededOnDefaultBranch) {
+		t.Fatalf("warnings=%#v, want superseded generated-record warning", warnings)
+	}
+	if len(warningRecords) != 1 || warningRecords[0]["check"] != artifactSupersededOnDefaultBranch {
+		t.Fatalf("warning records=%#v, want superseded generated-record warning record", warningRecords)
+	}
+}
+
 func TestDoctorArtifactAnchorIntegrityGitChecksExplicitGitPublicationSynthesis(t *testing.T) {
 	repoRoot, runBranch, artifactPath, contentSHA := seedAnchoredArtifact(t, "git synthesis\n")
 	row := artifactAnchorRow(repoRoot, "art_git_synth", "run_git_synth", "job_git_synth", runBranch, artifactPath, contentSHA)
@@ -193,6 +252,61 @@ func TestDoctorArtifactAnchorIntegrityReportsMissingFile(t *testing.T) {
 	contextMap := records[0]["context"].(map[string]any)
 	if contextMap["reason"] != "path_not_present_in_checked_anchors" {
 		t.Fatalf("record context = %#v, want missing-file detail", contextMap)
+	}
+}
+
+func TestDoctorArtifactAnchorIntegrityAcceptsGeneratedRecordBackedMissingFile(t *testing.T) {
+	repoRoot := t.TempDir()
+	baseSHA := readsGitInit(t, repoRoot)
+	runBranch := "wf/missing-artifact"
+	readsGitRun(t, repoRoot, "branch", runBranch, baseSHA)
+	contentSHA := testSHA256("historical body\n")
+	repoPath := "docs/operator/artifacts/historical/REPORT.md"
+	row := artifactAnchorRow(repoRoot, "art_virtual", "run_virtual", "job_virtual", runBranch, repoPath, contentSHA)
+
+	block, problems, records, warnings, _ := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{
+		artifactRows:               []map[string]any{row},
+		generatedRecordTableExists: true,
+		generatedRecordRows: []map[string]any{{
+			"source_path":    repoPath,
+			"content_sha256": contentSHA,
+		}},
+	}, "repo_anchor", healthyBlobBlock())
+	if block["git_anchor_count"] != 1 || block["generated_record_backed_count"] != 1 {
+		t.Fatalf("block counts = %#v, want git-anchor row backed by generated record", block)
+	}
+	if len(problems) != 0 || len(records) != 0 || len(warnings) != 0 {
+		t.Fatalf("problems=%#v records=%#v warnings=%#v, want generated-record-backed anchor clean", problems, records, warnings)
+	}
+}
+
+func TestDoctorArtifactAnchorIntegrityWarnsOnGeneratedRecordPathForMissingFile(t *testing.T) {
+	repoRoot := t.TempDir()
+	baseSHA := readsGitInit(t, repoRoot)
+	runBranch := "wf/missing-artifact"
+	readsGitRun(t, repoRoot, "branch", runBranch, baseSHA)
+	repoPath := "docs/operator/artifacts/historical/REPORT.md"
+	row := artifactAnchorRow(repoRoot, "art_virtual_revised", "run_virtual", "job_virtual", runBranch, repoPath, testSHA256("draft body\n"))
+
+	block, problems, records, warnings, warningRecords := doctorArtifactAnchorIntegrity(context.Background(), &doctorArtifactAnchorRunner{
+		artifactRows:               []map[string]any{row},
+		generatedRecordTableExists: true,
+		generatedRecordRows: []map[string]any{{
+			"source_path":    repoPath,
+			"content_sha256": testSHA256("final body\n"),
+		}},
+	}, "repo_anchor", healthyBlobBlock())
+	if block["git_anchor_count"] != 1 || block["generated_record_path_warning_count"] != 1 {
+		t.Fatalf("block counts = %#v, want git-anchor row warned from generated-record path", block)
+	}
+	if len(problems) != 0 || len(records) != 0 {
+		t.Fatalf("problems=%#v records=%#v, want no hard problem", problems, records)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), artifactSupersededOnDefaultBranch) {
+		t.Fatalf("warnings=%#v, want superseded generated-record warning", warnings)
+	}
+	if len(warningRecords) != 1 || warningRecords[0]["check"] != artifactSupersededOnDefaultBranch {
+		t.Fatalf("warning records=%#v, want superseded generated-record warning record", warningRecords)
 	}
 }
 

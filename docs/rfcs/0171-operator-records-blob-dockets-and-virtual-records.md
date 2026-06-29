@@ -1,6 +1,6 @@
 # RFC 0171: Operator records blob dockets and virtual records
 
-Status: accepted (D273; partially implemented: import/materialize/verify, generated-record integrity, and historical generated-doc deletion pilots shipped)
+Status: accepted (D273; partially implemented: import/materialize/verify, generated-record integrity, generated-record-backed artifact-anchor doctor, and historical generated-doc deletion pilots shipped)
 Date: 2026-06-28
 Context: [RFC 0072](0072-blob-backed-artifact-storage.md),
 [RFC 0123](0123-blob-routed-lane-exhaust-and-git-publication-specs.md),
@@ -196,10 +196,14 @@ and other source-like records.
 12. Concise runbook/spec/brief updates.
 
 Implementation state as of 2026-06-29: slices 1, 2, 3, 5, 6, 7, 8, 9, 10, 11,
-and the brief/changelog/reference-doc updates in slice 12 are implemented. Slice
-4 is implemented for imported generated records through
-`records.migration.materialize` into ignored `.striatum/scratch`; broader
-`striatum://record` documentation-link resolver coverage remains follow-up.
+and the brief/changelog/reference-doc updates in slice 12 are implemented. The
+artifact-anchor doctor also accepts an indexed `generated_records` row at the
+same artifact path as a historical revised-form body, and accepts an exact
+path/hash match as clean, with blob health still enforced by
+`generated_record_integrity`. Slice 4 is implemented for imported generated
+records through `records.migration.materialize` into ignored
+`.striatum/scratch`; broader `striatum://record` documentation-link resolver
+coverage remains follow-up.
 
 Two separately authorized deletion pilots have retired historical generated
 Markdown bodies from git after daemon/blob reconstruction proof:
@@ -238,6 +242,10 @@ reconstruction proof and an explicit operator decision or pilot scope.
 - Doctor catches missing, corrupt, swapped, duplicate-source, and
   metadata-missing generated-record blob/index records with stable problem
   codes.
+- Doctor does not require a retired generated artifact body to remain in git
+  when the artifact path is indexed as a generated record; exact path/hash
+  matches are clean, while revised-form path matches are warnings. Broken
+  generated-record blobs still red through the generated-record integrity block.
 - `check-docs` validates `striatum://artifact/...` and `striatum://run/...`
   links through daemon or an explicit cached index.
 - New generated operator provenance bodies are rejected by hygiene checks when

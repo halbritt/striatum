@@ -39,6 +39,13 @@ comparison found 0 source/manifest/materialized mismatches. Proof files live at
 `/tmp/striatum-rfc0171-bulk-deletion-manifest-2026-06-29T0255Z.json` and mismatch report
 `/tmp/striatum-rfc0171-bulk-sha-mismatches-2026-06-29T0255Z.tsv`.
 
+Doctor now treats indexed `generated_records` rows at the same artifact path as
+the durable revised-form body for imported historical artifact records, with
+exact path/hash matches clean and revised-form path matches downgraded to
+warnings. The old artifact-anchor check no longer requires those retired
+Markdown bodies to stay in git; corrupted or missing generated-record blobs
+still red through `generated_record_integrity`.
+
 The earlier five-file dogfood `OPERATOR_REPORT.md` deletion pilot remains valid.
 Broad historical deletion outside explicitly scoped generated-record classes is
 still blocked until a future proof-backed operator scope names the next class.

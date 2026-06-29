@@ -33,6 +33,15 @@
   and resolving relative provider credential selectors against the lane launch
   root.
 
+### Fixed
+
+- **RFC 0171 generated-record-backed artifact anchors.** `striatum doctor` now
+  treats an indexed `generated_records` row at the same artifact path as the
+  durable revised-form body for imported historical artifacts, and an exact
+  path/hash match as clean. Authorized deletion pilots therefore do not leave
+  stale `artifact_anchor_missing_file` or legacy `artifact_blob_metadata_missing`
+  problems after the generated-record integrity block has verified the blob.
+
 ### Removed
 
 - **RFC 0171 operator generated-doc bulk deletion.** Removed 1,755 historical

@@ -42,18 +42,26 @@ const (
 // history hits are memoized by (root|ref|path|sha), and the curated
 // acknowledged-loss baseline is loaded once per repo root.
 type artifactAnchorPass struct {
-	defaultRefByRoot      map[string]string
-	localDefaultRefByRoot map[string]string
-	historyByKey          map[string]bool
-	ackByRoot             map[string]acknowledgedLossSet
+	defaultRefByRoot       map[string]string
+	localDefaultRefByRoot  map[string]string
+	historyByKey           map[string]bool
+	ackByRoot              map[string]acknowledgedLossSet
+	generatedPathPresent   map[string]bool
+	generatedByPathSHA     map[string]bool
+	generatedByArtifactSHA map[string]bool
+	generatedBackedCount   int
+	generatedPathOnlyCount int
 }
 
 func newArtifactAnchorPass() *artifactAnchorPass {
 	return &artifactAnchorPass{
-		defaultRefByRoot:      map[string]string{},
-		localDefaultRefByRoot: map[string]string{},
-		historyByKey:          map[string]bool{},
-		ackByRoot:             map[string]acknowledgedLossSet{},
+		defaultRefByRoot:       map[string]string{},
+		localDefaultRefByRoot:  map[string]string{},
+		historyByKey:           map[string]bool{},
+		ackByRoot:              map[string]acknowledgedLossSet{},
+		generatedPathPresent:   map[string]bool{},
+		generatedByPathSHA:     map[string]bool{},
+		generatedByArtifactSHA: map[string]bool{},
 	}
 }
 
@@ -95,6 +103,82 @@ func (p *artifactAnchorPass) ackSet(repoRoot string) acknowledgedLossSet {
 	set := loadAcknowledgedLossSet(repoRoot)
 	p.ackByRoot[repoRoot] = set
 	return set
+}
+
+func loadGeneratedRecordBackings(ctx context.Context, runner db.Runner, repositoryID string, pass *artifactAnchorPass) error {
+	if pass == nil {
+		return nil
+	}
+	probeRows, err := collectRows(ctx, runner, `SELECT to_regclass('striatumd.generated_records')::text AS table_name`)
+	if err != nil {
+		return err
+	}
+	if len(probeRows) == 0 || stringFrom(probeRows[0], "table_name") == "" {
+		return nil
+	}
+	rows, err := collectRows(ctx, runner, `
+		SELECT source_path, COALESCE(artifact_id, '') AS artifact_id, content_sha256
+		  FROM striatumd.generated_records
+		 WHERE repository_id = $1
+		   AND status = 'indexed'`,
+		repositoryID,
+	)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		sha := strings.ToLower(strings.TrimSpace(stringFrom(row, "content_sha256")))
+		if sha == "" {
+			continue
+		}
+		if sourcePath, ok := cleanArtifactAnchorPath(stringFrom(row, "source_path")); ok {
+			pass.generatedPathPresent[sourcePath] = true
+			pass.generatedByPathSHA[generatedRecordPathKey(sourcePath, sha)] = true
+		}
+		if artifactID := strings.TrimSpace(stringFrom(row, "artifact_id")); artifactID != "" {
+			pass.generatedByArtifactSHA[generatedRecordArtifactKey(artifactID, sha)] = true
+		}
+	}
+	return nil
+}
+
+func generatedRecordBacksArtifact(row map[string]any, pass *artifactAnchorPass) bool {
+	if pass == nil {
+		return false
+	}
+	sha := strings.ToLower(strings.TrimSpace(stringFrom(row, "content_sha256")))
+	if sha == "" {
+		return false
+	}
+	if repoPath, ok := cleanArtifactAnchorPath(stringFrom(row, "repo_path")); ok && pass.generatedByPathSHA[generatedRecordPathKey(repoPath, sha)] {
+		pass.generatedBackedCount++
+		return true
+	}
+	if artifactID := strings.TrimSpace(stringFrom(row, "artifact_id")); artifactID != "" && pass.generatedByArtifactSHA[generatedRecordArtifactKey(artifactID, sha)] {
+		pass.generatedBackedCount++
+		return true
+	}
+	return false
+}
+
+func generatedRecordHasArtifactPath(row map[string]any, pass *artifactAnchorPass) bool {
+	if pass == nil {
+		return false
+	}
+	repoPath, ok := cleanArtifactAnchorPath(stringFrom(row, "repo_path"))
+	if !ok || !pass.generatedPathPresent[repoPath] {
+		return false
+	}
+	pass.generatedPathOnlyCount++
+	return true
+}
+
+func generatedRecordPathKey(path, sha string) string {
+	return strings.TrimSpace(path) + "|" + strings.ToLower(strings.TrimSpace(sha))
+}
+
+func generatedRecordArtifactKey(artifactID, sha string) string {
+	return strings.TrimSpace(artifactID) + "|" + strings.ToLower(strings.TrimSpace(sha))
 }
 
 func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, repositoryID string, blobBlock map[string]any) (map[string]any, []string, []map[string]any, []string, []map[string]any) {
@@ -162,6 +246,10 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, reposi
 		}
 	}
 	pass := newArtifactAnchorPass()
+	if err := loadGeneratedRecordBackings(ctx, runner, repositoryID, pass); err != nil {
+		block["error"] = err.Error()
+		return block, nil, nil, nil, nil
+	}
 	for _, row := range rows {
 		// #303: a tombstoned (operator-pruned) artifact is recorded debris; skip
 		// it entirely so it neither reds nor degrades the report.
@@ -193,6 +281,8 @@ func doctorArtifactAnchorIntegrity(ctx context.Context, runner db.Runner, reposi
 	}
 	block["git_anchor_count"] = gitChecked
 	block["blob_exhaust_count"] = blobChecked
+	block["generated_record_backed_count"] = pass.generatedBackedCount
+	block["generated_record_path_warning_count"] = pass.generatedPathOnlyCount
 	block["problem_count"] = len(problems)
 	block["warning_count"] = len(warnings)
 	// Surface the curated acknowledged-loss baseline status (Rule C) so verbose
@@ -212,6 +302,9 @@ func checkBlobExhaustArtifact(ctx context.Context, row map[string]any, bucket, d
 	expected := strings.TrimSpace(stringFrom(row, "blob_sha256"))
 	if expected == "" {
 		expected = strings.TrimSpace(stringFrom(row, "content_sha256"))
+	}
+	if generatedRecordBacksArtifact(row, pass) {
+		return "", nil, "", nil
 	}
 	if blobKey == "" {
 		// Legibility rule 3 (D-doctor-integrity-legibility): an empty blob_key is
@@ -240,6 +333,10 @@ func checkBlobExhaustArtifact(ctx context.Context, row map[string]any, bucket, d
 					return "", nil, warning, record
 				}
 			}
+		}
+		if generatedRecordHasArtifactPath(row, pass) {
+			warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_content_sha_unverifiable_path_indexed_in_generated_records", "generated_records")
+			return "", nil, warning, record
 		}
 		// D205 Rule C: a curated, sha-bound acknowledged immaterial loss -> warning.
 		if entry, ok := pass.ackSet(repoRoot).honor(stringFrom(row, "artifact_id"), expected); ok {
@@ -301,6 +398,9 @@ func checkArtifactAnchor(ctx context.Context, row map[string]any, defaultRef str
 	}
 	expected := strings.TrimSpace(stringFrom(row, "content_sha256"))
 	repoRoot := strings.TrimSpace(stringFrom(row, "repo_root"))
+	if generatedRecordBacksArtifact(row, pass) {
+		return "", nil, "", nil
+	}
 	refs := durableWorktreeProbeRefs(ctx, repoRoot, row)
 	if repoRoot == "" || expected == "" || len(refs) == 0 {
 		return "", nil, "", nil
@@ -395,6 +495,10 @@ func checkArtifactAnchor(ctx context.Context, row map[string]any, defaultRef str
 			warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_draft_sha_unverifiable_path_live_on_default", ref)
 			return "", nil, warning, record
 		}
+	}
+	if generatedRecordHasArtifactPath(row, pass) {
+		warning, record := artifactWarning(artifactSupersededOnDefaultBranch, row, "recorded_draft_sha_unverifiable_path_indexed_in_generated_records", "generated_records")
+		return "", nil, warning, record
 	}
 
 	// D205 Rule C: a genuinely lost artifact (path absent from the default branch,
