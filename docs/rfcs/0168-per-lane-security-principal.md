@@ -92,8 +92,13 @@ Rationale:
 
 - **RFC 0143 Slice B** (`CapabilityReseal` authority) is gated on this RFC
   landing. With the per-lane uid in place, Slice B becomes RFC 0143 option 2 in
-  its safe form: a durable, **lane-uid-owned `0600`** session-scoped reseal
-  token, invalidated on session close, bounded by the session TTL.
+  its safe form: reseal authority must be bound to the concrete lane uid lease
+  and generation. The reviewed RFC 0143 Slice B build keeps the `reseal`
+  capability daemon-internal and uses the active `lane_uid_leases` row plus
+  supervisor metadata to reject stale generations, sibling-lane replays, and
+  foreign-run replays. A future lane-readable file/socket would need a separate
+  design and must be lane-uid-owned `0600`, session-scoped, invalidated on
+  session close, and bounded by the session TTL.
 - **RFC 0143 Slice A** (the legible `session_unrecoverable_across_rotation`
   typed-exit floor, option 4) **does NOT depend on this RFC** and ships
   independently — its predicate is computed entirely from daemon-side durable
@@ -154,9 +159,9 @@ Rationale:
 
 ## Acceptance / next steps
 
-The maintainer has ratified the **direction** (per-lane OS uid, pooled). The
-**spec** — pool size, lease lifecycle, provisioning ownership, ACL and
-attestation interaction — goes through a `falsification_gate` design run before
-any build slice touches host provisioning or credential code. RFC 0143 Slice B
-build is blocked on this RFC reaching `accepted` + at least its P0 provisioning
-slice landing (tracked blocker: #585).
+The maintainer ratified the **direction** (per-lane OS uid, pooled), and the P0
+provisioning slice has landed as runtime schema 47 plus owner bundle 0023. RFC
+0143 Slice B is no longer blocked on RFC 0168; its reviewed build binds reseal
+to the active lane UID lease row instead of introducing a lane-readable
+credential. Live PostgreSQL-backed recovery verification remains an operator
+deploy/check step.
