@@ -15,7 +15,14 @@ changes only the three carry-forward points the v4 ledger bound:
   launch bypass; it fails closed before any side effect.
 - **C2 ordering** - same-user Claude OAuth refusal runs before the generic
   provider-auth gate, so `auto`, `off`, and `required` all return the typed
-  `provider_credential_same_user_unsupported` floor.
+  `provider_credential_same_user_unsupported` floor when no higher-priority
+  credential-domain violation exists.
+
+This revision also addresses the cycle-2 adjudicator finding: for self-driving
+Claude launches, missing, unknown, or unmodeled credential kind is treated as
+`OAUTH_COPIED` / Claude OAuth for RFC 0165 admission. A projection-disabled
+launch can use a non-OAuth diagnostic exception only after positive pre-launch
+proof that no Claude OAuth resolver surface is in play.
 
 The provider-agnostic RFC 0169 spine remains separate. This SPEC names the seam
 where the Claude assurance class can plug into RFC 0169 later, but it does not
@@ -129,13 +136,23 @@ incident-shape whole credential with a `refreshToken`, projection-off can skip
 the B1/B2 access-token-only placement and start a Claude process that can read
 the old raw refresh token.
 
-**v5 fix.** For Claude OAuth self-driving lanes,
+**v5 fix.** Before any self-driving Claude launch side effect, Striatum
+classifies the RFC 0165 credential assurance shape. For `adapter == claude` and
+`agent_loop_mode == self_driving`, a missing, unknown, or unmodeled credential
+kind is treated as `OAUTH_COPIED` / Claude OAuth for admission. Absence of an
+explicit kind field, resolver roster entry, or diagnostic label is not proof
+that Claude OAuth discovery is impossible.
+
+For Claude OAuth or unproven self-driving lanes,
 `provider_credential_projection=off` fails closed as a typed launch
-precondition. It is diagnostic-only for non-Claude or non-OAuth paths. The
+precondition. A non-OAuth diagnostic exception may launch only after positive
+pre-launch proof that the launch cannot use `$HOME/.claude`,
+`CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, helper settings,
+inherited credential paths, or any other Claude OAuth resolver surface. The
 refusal happens after the same-user precondition and before the generic
 provider-auth gate, scratch creation, FIFO/ACL work, session-token minting,
-supervisor rows, helper/tmux setup, or provider process launch. The typed error
-is:
+supervisor rows, projection receipt creation, helper/tmux setup, or provider
+process launch. The typed error is:
 
 ```text
 provider_credential_projection_disabled_unsupported
@@ -145,8 +162,8 @@ The remediation is private-safe:
 
 ```text
 Claude OAuth self-driving lanes require Striatum's access-token-only projection.
-Remove provider_credential_projection=off or use a non-Claude/non-OAuth
-diagnostic lane. No lane process was started.
+Remove provider_credential_projection=off or use a positively proven
+non-Claude/non-OAuth diagnostic lane. No lane process was started.
 ```
 
 Because the launch is refused, the lane never gets an opportunity to resolve
@@ -154,30 +171,44 @@ Because the launch is refused, the lane never gets an opportunity to resolve
 credential-bearing env entry, a helper setting, or an inherited credential path
 as a raw-token source. The existing all-surfaces `refresh_token_absent` scan
 still applies to the normal distinct-UID projection path. The projection-off
-tests seed the raw-token surfaces anyway and assert that the typed refusal wins
-before a process can read them.
+tests seed the raw-token surfaces anyway, omit any explicit credential kind for
+the unknown-kind cases, and assert that the typed refusal wins before a process
+can read them.
 
 **Falsifiable assertions.**
 
 | Assertion | Refuting observation | Required test |
 |---|---|---|
-| `provider_credential_projection=off` cannot launch a Claude OAuth self-driving lane. | A Claude OAuth lane with projection disabled reaches scratch, token minting, supervisor rows, helper/tmux, or a provider process. | `TestProjectionOffCannotLaunchWithRefreshTokenCredentialSurface` |
-| `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` do not become projection-off raw-token routes. | Projection disabled plus a lane-readable config dir containing a whole credential starts a Claude process or reports success. | `TestProjectionOffStillValidatesClaudeConfigDir` |
+| `provider_credential_projection=off` cannot launch a Claude OAuth or unproven self-driving Claude lane. | A Claude lane with projection disabled and missing, unknown, or unmodeled credential kind reaches scratch, FIFO/ACL, token minting, supervisor rows, projection receipt creation, helper/tmux, or a provider process. | `TestProjectionOffUnknownKindFailsClosedBeforeSideEffects`, `TestProjectionOffCannotLaunchWithRefreshTokenCredentialSurface` |
+| `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` do not become projection-off raw-token routes. | Projection disabled plus a lane-readable config dir containing a whole credential starts a Claude process or reports success because no explicit kind was present. | `TestProjectionOffStillValidatesClaudeConfigDir`, `TestProjectionOffSecureStorageConfigDirUnknownKindFailsClosed` |
+| A projection-disabled non-OAuth diagnostic launch needs positive proof. | A Claude self-driving launch falls through to diagnostic non-OAuth because the kind field or resolver roster entry is absent. | `TestProjectionOffNonOAuthDiagnosticRequiresPositiveProof` |
 | The normal distinct-UID access-token-only projection still launches. | The projection-off closure breaks a distinct-UID Claude lane whose projection is enabled and whose source is fresh. | `TestDistinctUIDAccessTokenProjectionStillLaunches` |
 | `provider_auth_gate=off` does not imply or bypass `provider_credential_projection=off`. | `provider_auth_gate=off` skips projection or same-user/projection-off preconditions. | `TestProviderAuthGateOffDoesNotBypassProjection`, `TestProviderAuthGateOffDoesNotBypassSameUserRefusal` |
 
-### C2 ordering - same-user refusal is the first Claude credential floor
+### C2 ordering - same-user precedes provider-auth, credential-domain outranks it
 
 **v4 caveat.** The v4 policy was sound on custody, but the placement after
 `runSuperviseProviderAuthGate` meant `provider_auth_gate=required` could return
 a generic unsupported-provider error before the intended same-user remediation.
 
-**v5 fix.** `HandleSuperviseStart` runs the Claude same-user precondition after
-`loadSupervisionStartConfig` and `enforceLaneCredentialDomain`, but before
-`runSuperviseProviderAuthGate`. This ordering is independent of
+**v5 fix.** `HandleSuperviseStart` runs `enforceLaneCredentialDomain` after
+`loadSupervisionStartConfig` and before the Claude same-user precondition. That
+is intentional: a credential selector resolving inside the target repository, or
+an uncovered provider credential selector inside the repository, is a
+higher-priority fail-closed precondition because it protects the repository
+boundary. A same-user Claude OAuth launch with repo-inside `CLAUDE_CONFIG_DIR` or
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` may therefore return
+`lane_credential_cache_inside_repo` or
+`lane_uncovered_credential_selector_inside_repo` before
+`provider_credential_same_user_unsupported`; all of those errors occur before
+scratch, FIFO/ACL work, session-token minting, supervisor rows, projection files,
+custody receipts, helper/tmux setup, or provider process launch.
+
+When no credential-domain violation is present, the same-user precondition runs
+before `runSuperviseProviderAuthGate`. This ordering is independent of
 `provider_auth_gate`. If the lane is Claude OAuth and the resolved lane identity
 is the daemon/operator identity, the launch returns
-`provider_credential_same_user_unsupported` in all modes.
+`provider_credential_same_user_unsupported` in `auto`, `off`, and `required`.
 
 The same-user condition is:
 
@@ -191,8 +222,9 @@ AND (trim(config.RunAsUser) == "" OR lookup(config.RunAsUser).uid == daemon_uid)
 The empty `RunAsUser` case covers the current collapse where an unset or
 same-as-daemon `STRIATUM_LANE_OS_USER` executes the command directly as the
 operator uid. The uid lookup backstop covers aliases and shared-uid usernames.
-Same-user is refused before projection-off so the operator gets the strongest
-custody remediation first when both conditions are present.
+Same-user is refused before projection-off when no credential-domain violation is
+present, so the operator gets the strongest custody remediation first when both
+conditions are present.
 
 **Falsifiable assertions.**
 
@@ -200,6 +232,7 @@ custody remediation first when both conditions are present.
 |---|---|---|
 | Same-user Claude OAuth refusal precedes the generic provider-auth gate in `auto`, `off`, and `required`. | Any same-user Claude lane returns `lane_provider_auth_failed`, `lane_provider_preflight_unsupported`, or another generic provider-auth error before the typed same-user error. | `TestSameUserClaudeLaneRefusedBeforeSideEffects` parameterized over `provider_auth_gate=auto,off,required` |
 | Same-user refusal has no side effects. | Scratch, FIFO/ACL, session token, supervisor row, helper/tmux state, projection file, custody receipt, or Claude process exists after refusal. | `TestSameUserClaudeLaneRefusedBeforeSideEffects` |
+| Credential-domain violations intentionally outrank same-user remediation. | A same-user Claude lane with repo-inside `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` returns `provider_credential_same_user_unsupported` or performs a side effect before the declared credential-domain refusal. | `TestSameUserCredentialDomainViolationPrecedesSameUserRefusal` |
 | The uid backstop catches aliases. | A username alias resolving to the daemon uid launches a Claude OAuth lane. | `TestSameUserRefusalByResolvedUid` |
 
 ---
@@ -408,11 +441,19 @@ This design lane does not modify those files.
   distinct-UID lane home with a whole Claude credential containing a fixture
   `refreshToken`, set `provider_credential_projection=off`, and assert
   `provider_credential_projection_disabled_unsupported` before scratch,
-  session-token minting, supervisor rows, helper/tmux, or process launch.
+  FIFO/ACL, session-token minting, supervisor rows, projection receipt creation,
+  helper/tmux, or process launch.
+- `TestProjectionOffUnknownKindFailsClosedBeforeSideEffects`: omit the explicit
+  credential kind, set `provider_credential_projection=off`, seed a whole Claude
+  credential in lane `$HOME/.claude/.credentials.json`, and assert the same
+  typed refusal before any launch side effect.
 - `TestProjectionOffStillValidatesClaudeConfigDir`: set projection off and point
   `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` at a lane-readable
   credential dir containing a whole credential; assert the same typed refusal,
   no process, no raw path or token in durable payloads.
+- `TestProjectionOffNonOAuthDiagnosticRequiresPositiveProof`: assert that a
+  self-driving Claude launch cannot use the non-OAuth diagnostic exception from
+  absent kind, absent resolver roster entry, or an unmodeled credential selector.
 - `TestDistinctUIDAccessTokenProjectionStillLaunches`: with projection enabled,
   fresh operator source, and distinct lane uid, assert B1 or B2 launches and the
   lane-readable surfaces contain no `refreshToken`.
@@ -426,6 +467,11 @@ This design lane does not modify those files.
   Claude process.
 - `TestSameUserRefusalByResolvedUid`: username alias/shared uid resolving to the
   daemon uid refuses; a genuinely distinct uid proceeds to the projection gate.
+- `TestSameUserCredentialDomainViolationPrecedesSameUserRefusal`: same-user
+  Claude OAuth with repo-inside `CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` returns the declared credential-domain
+  refusal before scratch, token, supervisor row, projection file, custody receipt,
+  helper/tmux, or Claude process.
 
 **Carry-forward regression tests**
 
