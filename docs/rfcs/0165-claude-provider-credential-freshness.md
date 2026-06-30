@@ -1,6 +1,6 @@
 # RFC 0165: Claude provider credential freshness and spawn-time projection
 
-Status: proposed
+Status: proposed (design v5 accepted with findings; build pending)
 Date: 2026-06-23
 Context: [#583](https://github.com/halbritt/striatum/issues/583); RFC 0096
 (supervised-lane trust boundary); RFC 0121 (lane provider-auth preflight gate);

@@ -12,29 +12,48 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
-## 2026-06-30 delta - RFC 0165 v5 checkpoint and reseal repair
+## 2026-06-30 delta - RFC 0165 v5 design accepted and integrated
 
-RFC 0165 design v5 is live as
+RFC 0165 design v5 completed as
 `run_efde0bcac1a8712b90c94e22e9f5db97` from
-`docs/operator/workflows/rfc-0165-design-v5/`. The run is not accepted and has
-no final proposal, summary, or decision. The adjudicator is parked at the
-revision-routing checkpoint `blk_85998f9a8f5fd45b7f358617912cf99c`
-(`waiting_human`) after a `needs_revision` verdict.
+`docs/operator/workflows/rfc-0165-design-v5/` and was integrated to `main`
+through `run.integrate` at `0fe4f398`. The revision-routing checkpoint
+`blk_85998f9a8f5fd45b7f358617912cf99c` was resolved with `continue`; no human
+checkpoint remains.
 
-The v5 verdict clears C1 recovery freshness and clears the original C2
-provider-auth ordering caveat with a remaining non-blocking credential-domain
-precedence/test constraint. C3 remains blocking: with
-`provider_credential_projection=off`, a self-driving Claude launch with missing,
-unknown, or unmodeled credential kind must fail closed before side effects
-unless the design proves before launch that no Claude OAuth resolver surface is
-reachable.
+The cycle-3 ledger
+`docs/operator/artifacts/rfc-0165-design-v5/dialogue/adjudicator/COLLABORATION_LEDGER_cycle_3.md`
+returned `accept_with_findings`. The downstream proposal is
+`docs/operator/artifacts/rfc-0165-design-v5/commit/proposal/PROPOSAL.md`; the
+final summary is
+`docs/operator/artifacts/rfc-0165-design-v5/commit/final/FINAL_SUMMARY.md`.
+C1 launch-generation-bound recovery freshness, C3 projection-off unknown-kind
+closure, and C2 same-user/provider-auth ordering are all discharged with
+carry-forward constraints. The successor build must preserve the C3
+fail-closed classifier for missing, unknown, or unmodeled Claude credential
+kinds; preserve the C2 rule that credential-domain violations outrank same-user
+remediation while same-user refusal outranks the generic provider-auth gate
+when no credential-domain violation exists; and open explicit source, SQL,
+generated-contract or authority-map, test, and product-doc write scope.
 
-The run exposed and repaired a runner durability gap: review checkpoints now
+This design run is not source-build authorization. The next legitimate step for
+GH #583 is a successor `rfc-0165-build` workflow that implements the accepted
+access-token-only projection, launch credential binding, provider-auth debt, and
+redaction/custody invariants on `main`.
+
+The run also exposed two runner frictions. The checkpoint/reseal durability gap
+was repaired on `main` before the revision: review checkpoints now
 porter-commit and anchor published repo-write artifacts before entering
-`waiting_human`; `recovery reseal` can repair uncommitted published bodies and,
-when a human checkpoint is already open, restore the checkpoint instead of
-requeueing into a same-attempt immutable-artifact conflict. Live `doctor` is
-green after reseal, with artifact-anchor `problem_count=0`.
+`waiting_human`, and `recovery reseal` can restore an already-open checkpoint
+instead of requeueing into a same-attempt immutable-artifact conflict. During
+the final revision, an adjudicator worktree reset hit lane-owned directory ACLs;
+a targeted ACL repair of that daemon scratch worktree unblocked the supported
+checkpoint continuation path. `final_summary` published its artifact but exited
+unsealed, then was accepted through `recovery accept-quarantined`; the run state
+is completed. After `run.integrate`, `doctor` surfaced five older completed
+worktrees whose HEAD had followed the newly advanced mainline without a durable
+job anchor; each was repaired through the daemon-supported `worktree anchor`
+path. Live `doctor` is green again with `problem_count=0`.
 
 ## 2026-06-29 delta - doctor warning channel bounded
 
