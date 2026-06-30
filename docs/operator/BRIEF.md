@@ -12,6 +12,30 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-06-30 delta - RFC 0165 v5 checkpoint and reseal repair
+
+RFC 0165 design v5 is live as
+`run_efde0bcac1a8712b90c94e22e9f5db97` from
+`docs/operator/workflows/rfc-0165-design-v5/`. The run is not accepted and has
+no final proposal, summary, or decision. The adjudicator is parked at the
+revision-routing checkpoint `blk_85998f9a8f5fd45b7f358617912cf99c`
+(`waiting_human`) after a `needs_revision` verdict.
+
+The v5 verdict clears C1 recovery freshness and clears the original C2
+provider-auth ordering caveat with a remaining non-blocking credential-domain
+precedence/test constraint. C3 remains blocking: with
+`provider_credential_projection=off`, a self-driving Claude launch with missing,
+unknown, or unmodeled credential kind must fail closed before side effects
+unless the design proves before launch that no Claude OAuth resolver surface is
+reachable.
+
+The run exposed and repaired a runner durability gap: review checkpoints now
+porter-commit and anchor published repo-write artifacts before entering
+`waiting_human`; `recovery reseal` can repair uncommitted published bodies and,
+when a human checkpoint is already open, restore the checkpoint instead of
+requeueing into a same-attempt immutable-artifact conflict. Live `doctor` is
+green after reseal, with artifact-anchor `problem_count=0`.
+
 ## 2026-06-29 delta - doctor warning channel bounded
 
 Live warning cleanup ran through daemon recovery rather than manual worktree or

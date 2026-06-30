@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/pgtest"
@@ -101,30 +102,195 @@ func TestRecoveryResealRequeuesSameAttemptWhenBodyDurable(t *testing.T) {
 	}
 }
 
-// TestRecoveryResealRefusesWhenBodyStillNotDurable asserts the gate: when the
-// durability probe still reports problems (the published body is NOT committed
-// to HEAD), recovery.reseal REFUSES with an invalid_transition listing the
-// undurable artifacts rather than silently completing, and it leaves the job's
-// attempt untouched.
-func TestRecoveryResealRefusesWhenBodyStillNotDurable(t *testing.T) {
+// TestRecoveryResealPorterCommitsUndurableBody asserts the recovery path can
+// repair the common same-attempt case: the lane wrote the artifact body into the
+// worktree but never committed it. recovery.reseal must porter-commit, anchor,
+// and requeue the same attempt.
+func TestRecoveryResealPorterCommitsUndurableBody(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git not on PATH: %v", err)
 	}
 	ctx := context.Background()
 	runner := pgtest.Pool(t).Runner
 	repoRoot := t.TempDir()
-	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "reseal_undurable", true)
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "reseal_uncommitted", true)
 
 	payload := []byte("uncommitted artifact body\n")
-	// Write the file into the worktree but do NOT commit it: the body is not
-	// reconstructable from HEAD, so the durability probe must still flag it.
+	// Write the file into the worktree but do NOT commit it: recovery.reseal must
+	// use the same daemon-porter path as work.complete/review.verdict.
 	if err := os.MkdirAll(filepath.Join(ids.worktreeRoot, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(ids.worktreeRoot, "docs", "out.txt"), payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	seedPublishedArtifact(t, ctx, runner, ids, "art_reseal_undurable", "out", "docs/out.txt", payload, nil)
+	seedPublishedArtifact(t, ctx, runner, ids, "art_reseal_uncommitted", "out", "docs/out.txt", payload, nil)
+
+	if mustGitExit(t, repoRoot, "cat-file", "-e", "refs/heads/"+ids.runBranch+":docs/out.txt") == 0 {
+		t.Fatalf("precondition failed: run branch %s already contains docs/out.txt", ids.runBranch)
+	}
+
+	attemptBefore := intField(t, ctx, runner, ids, "attempt")
+
+	result, err := HandleRecoveryReseal(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"run_id": ids.runID,
+		"job_id": ids.jobID,
+	}))
+	if err != nil {
+		t.Fatalf("HandleRecoveryReseal (uncommitted body): %v", err)
+	}
+	if result["status"] != "resealed" {
+		t.Fatalf("reseal status = %#v, want resealed", result["status"])
+	}
+
+	got := gitRun(t, repoRoot, "show", "refs/heads/"+ids.runBranch+":docs/out.txt")
+	if string(payload) != got {
+		t.Fatalf("refs/heads/%s:docs/out.txt = %q, want %q", ids.runBranch, got, string(payload))
+	}
+	attemptAfter := intField(t, ctx, runner, ids, "attempt")
+	if attemptAfter != attemptBefore {
+		t.Fatalf("attempt bumped %d -> %d; reseal must not bump the attempt", attemptBefore, attemptAfter)
+	}
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got != "queued" {
+		t.Fatalf("job state after reseal = %q, want queued", got)
+	}
+}
+
+func TestRecoveryResealPreservesOpenHumanCheckpoint(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "reseal_checkpoint", true)
+
+	payload := []byte("checkpoint ledger body\n")
+	repoPath := "docs/ledger.md"
+	if err := os.MkdirAll(filepath.Join(ids.worktreeRoot, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ids.worktreeRoot, repoPath), payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedPublishedArtifact(t, ctx, runner, ids, "art_reseal_checkpoint", "collaboration_ledger_cycle_2", repoPath, payload, nil)
+
+	job, err := rowByID(ctx, runner, ids.repoID, "jobs", "job_id", ids.jobID, false)
+	if err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	checkpointID, err := openHumanCheckpoint(ctx, runner, ids.repoID, job, ids.sessionID, ids.leaseID, "needs revision")
+	if err != nil {
+		t.Fatalf("open checkpoint: %v", err)
+	}
+
+	// Simulate the bad same-attempt rerun observed in the live recovery: the
+	// re-executed lane cannot publish the same logical artifact again, so it
+	// blocks with an immutable_artifact_conflict while the real checkpoint is
+	// still open.
+	now := time.Now().UTC()
+	rerunLeaseID := ids.leaseID + "_rerun"
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.leases (
+		  repository_id, lease_id, run_id, resource_type, resource_id, owner_session_id,
+		  state, acquired_at, expires_at
+		) VALUES ($1,$2,$3,'job',$4,$5,'active',$6,$7)`,
+		ids.repoID, rerunLeaseID, ids.runID, ids.jobID, ids.sessionID, now, now.Add(time.Hour)); err != nil {
+		t.Fatalf("insert rerun lease: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs
+		   SET state = 'blocked', current_lease_id = $1
+		 WHERE repository_id = $2 AND job_id = $3`,
+		rerunLeaseID, ids.repoID, ids.jobID); err != nil {
+		t.Fatalf("mark job blocked: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.queue_messages
+		   SET state = 'acked', current_lease_id = $1, updated_at = $2
+		 WHERE repository_id = $3 AND message_id = $4`,
+		rerunLeaseID, now, ids.repoID, ids.messageID); err != nil {
+		t.Fatalf("mark message acked: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.blockers (
+		  repository_id, blocker_id, run_id, job_id, session_id, severity,
+		  blocker_kind, description, state, created_at
+		) VALUES ($1,'blk_reseal_conflict',$2,$3,$4,'blocked',
+		  'immutable_artifact_conflict','duplicate same-attempt publish','open',$5)`,
+		ids.repoID, ids.runID, ids.jobID, ids.sessionID, now); err != nil {
+		t.Fatalf("insert conflict blocker: %v", err)
+	}
+
+	attemptBefore := intField(t, ctx, runner, ids, "attempt")
+	result, err := HandleRecoveryReseal(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"run_id": ids.runID,
+		"job_id": ids.jobID,
+	}))
+	if err != nil {
+		t.Fatalf("HandleRecoveryReseal (checkpoint): %v", err)
+	}
+	if result["status"] != "resealed_checkpoint" {
+		t.Fatalf("reseal status = %#v, want resealed_checkpoint", result["status"])
+	}
+	if result["new_state"] != "waiting_human" {
+		t.Fatalf("reseal new_state = %#v, want waiting_human", result["new_state"])
+	}
+	if result["blocker_id"] != checkpointID {
+		t.Fatalf("reseal blocker_id = %#v, want %s", result["blocker_id"], checkpointID)
+	}
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got != "waiting_human" {
+		t.Fatalf("job state after reseal = %q, want waiting_human", got)
+	}
+	if got := blockerState(t, ctx, runner, ids.repoID, checkpointID); got != "open" {
+		t.Fatalf("checkpoint blocker state = %q, want open", got)
+	}
+	if got := blockerState(t, ctx, runner, ids.repoID, "blk_reseal_conflict"); got != "resolved" {
+		t.Fatalf("conflict blocker state = %q, want resolved", got)
+	}
+	if attemptAfter := intField(t, ctx, runner, ids, "attempt"); attemptAfter != attemptBefore {
+		t.Fatalf("attempt bumped %d -> %d; checkpoint reseal must not bump", attemptBefore, attemptAfter)
+	}
+	if active := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.leases
+		 WHERE repository_id = $1 AND resource_id = $2 AND state = 'active'`,
+		ids.repoID, ids.jobID); active != 0 {
+		t.Fatalf("active leases after checkpoint reseal = %d, want 0", active)
+	}
+	message, err := oneRow(ctx, runner, `
+		SELECT state, current_lease_id
+		  FROM striatumd.queue_messages
+		 WHERE repository_id = $1 AND message_id = $2`, ids.repoID, ids.messageID)
+	if err != nil {
+		t.Fatalf("read message: %v", err)
+	}
+	if message["state"] != "blocked" || nullable(message["current_lease_id"]) != nil {
+		t.Fatalf("message after checkpoint reseal = %#v, want blocked with no lease", message)
+	}
+	if resealed := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND job_id = $3
+		   AND event_type = 'recovery.resealed'
+		   AND payload_json->>'checkpoint_restored' = 'true'`,
+		ids.repoID, ids.runID, ids.jobID); resealed != 1 {
+		t.Fatalf("checkpoint recovery.resealed events = %d, want exactly 1", resealed)
+	}
+}
+
+// TestRecoveryResealRefusesWhenBodyAbsent asserts the gate: when no file exists
+// for the published artifact body, the porter cannot reconstruct it and
+// recovery.reseal refuses rather than silently completing.
+func TestRecoveryResealRefusesWhenBodyAbsent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "reseal_absent", true)
+
+	payload := []byte("absent artifact body\n")
+	seedPublishedArtifact(t, ctx, runner, ids, "art_reseal_absent", "out", "docs/out.txt", payload, nil)
 
 	attemptBefore := intField(t, ctx, runner, ids, "attempt")
 
@@ -133,7 +299,7 @@ func TestRecoveryResealRefusesWhenBodyStillNotDurable(t *testing.T) {
 		"job_id": ids.jobID,
 	}))
 	if err == nil {
-		t.Fatalf("reseal succeeded with an undurable body; want refusal")
+		t.Fatalf("reseal succeeded with an absent body; want refusal")
 	}
 	rpcErr, ok := err.(*rpc.Error)
 	if !ok {

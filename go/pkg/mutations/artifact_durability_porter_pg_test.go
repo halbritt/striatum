@@ -145,6 +145,72 @@ func TestCompleteReviewJobAnchorsPublishedArtifactToRunBranch(t *testing.T) {
 	}
 }
 
+func TestOpenHumanCheckpointAnchorsPublishedReviewArtifactToRunBranch(t *testing.T) {
+	if !haveGit(t) {
+		return
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoRoot := t.TempDir()
+	ids := seedWorktreeRequiredJob(t, ctx, runner, repoRoot, "review_checkpoint_anchor_584", true)
+
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.jobs
+		   SET job_type = 'review', workflow_job_id = 'adjudicate', role_id = 'adjudicator'
+		 WHERE repository_id = $1 AND job_id = $2`, ids.repoID, ids.jobID); err != nil {
+		t.Fatalf("mark seeded job as review: %v", err)
+	}
+
+	payload := []byte("collaboration_ledger: verdict needs_revision (cycle 2)")
+	repoPath := "docs/COLLABORATION_LEDGER_cycle_2.md"
+	abs := filepath.Join(ids.worktreeRoot, filepath.FromSlash(repoPath))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedPublishedArtifact(t, ctx, runner, ids, "art_checkpoint_584", "collaboration_ledger_cycle_2", repoPath, payload, nil)
+	if err := runner.Exec(ctx, `
+		UPDATE striatumd.artifacts
+		   SET artifact_kind = 'collaboration_ledger'
+		 WHERE repository_id = $1 AND artifact_id = 'art_checkpoint_584'`, ids.repoID); err != nil {
+		t.Fatalf("mark artifact as collaboration ledger: %v", err)
+	}
+
+	if mustGitExit(t, repoRoot, "cat-file", "-e", "refs/heads/"+ids.runBranch+":"+repoPath) == 0 {
+		t.Fatalf("precondition failed: run branch %s already contains %s", ids.runBranch, repoPath)
+	}
+
+	job, err := rowByID(ctx, runner, ids.repoID, "jobs", "job_id", ids.jobID, false)
+	if err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	blockerID, err := openHumanCheckpoint(ctx, runner, ids.repoID, job, ids.sessionID, ids.leaseID, "needs revision")
+	if err != nil {
+		t.Fatalf("openHumanCheckpoint: %v", err)
+	}
+	if blockerID == "" {
+		t.Fatal("openHumanCheckpoint returned empty blocker id")
+	}
+
+	got := gitRun(t, repoRoot, "show", "refs/heads/"+ids.runBranch+":"+repoPath)
+	if strings.TrimSpace(got) != strings.TrimSpace(string(payload)) {
+		t.Fatalf("refs/heads/%s:%s = %q, want %q", ids.runBranch, repoPath, got, payload)
+	}
+	anchoredEvents := scalarInt(t, ctx, runner, `
+		SELECT count(*) FROM striatumd.events
+		 WHERE repository_id = $1 AND run_id = $2 AND job_id = $3
+		   AND event_type = 'job.commits_anchored'`,
+		ids.repoID, ids.runID, ids.jobID)
+	if anchoredEvents != 1 {
+		t.Fatalf("job.commits_anchored events = %d, want exactly 1", anchoredEvents)
+	}
+	if got := jobState(t, ctx, runner, ids.repoID, ids.jobID); got != "waiting_human" {
+		t.Fatalf("review state after checkpoint = %q, want waiting_human", got)
+	}
+}
+
 func haveGit(t *testing.T) bool {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

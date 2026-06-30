@@ -50,6 +50,12 @@
 
 ### Fixed
 
+- **Review checkpoint artifact durability.** Review verdict and checkpoint
+  paths now porter-commit and anchor repo-write artifacts before terminal
+  review state. `recovery reseal` can repair uncommitted published bodies,
+  preserves an already-open human checkpoint instead of requeueing into a
+  same-attempt immutable-artifact conflict, and resolves derivative duplicate
+  publish blockers created by the bad rerun.
 - **RFC 0171 generated-record-backed artifact anchors.** `striatum doctor` now
   treats an indexed `generated_records` row at the same artifact path as the
   durable revised-form body for imported historical artifacts, and an exact

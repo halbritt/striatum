@@ -661,12 +661,18 @@ Common recovery paths are:
   case (it would exceed `max_attempts`), and `run drive` reports
   `cannot advance <job> (cannot_advance_blocked): …` rather than idling
   silently.
+  If `recovery reseal` repairs a job that already has an open
+  `human_checkpoint`, it does not requeue the same attempt. It anchors the
+  already-published artifact, releases any stray work lease, restores the job to
+  `waiting_human`, and resolves derivative `immutable_artifact_conflict`
+  blockers caused by a failed duplicate rerun. Continue through
+  `checkpoint resolve`; its `continue` path opens the fresh attempt.
 
 | Visible symptom | Inspect with | Recovery command |
 |---|---|---|
 | Stale lease or no heartbeat. | `recovery stale-leases --run-id <run_id> --json` | `recovery requeue-stale` only for review-safe or force-justified work. |
 | Process exited, outputs missing, or supervisor mismatch. | `recovery process-reconcile --run-id <run_id> --json` | `recovery resume --blocker-id <id>` after the artifact/verdict issue is fixed. |
-| Lane finished but the seal/publish failed (job `blocked`, work durable on disk; `run drive` says `cannot advance`). | `doctor --run-id <run_id> --verbose --json` (look for `job_stuck_no_live_session`); `why <blocker_id>`. | `recovery reseal --run-id <run_id> --job-id <job_id>` (re-seal, same attempt). For a dangling blocker no completion cleared, `recovery resolve-blocker <blocker_id>`. |
+| Lane finished but the seal/publish failed (job `blocked`, work durable on disk; `run drive` says `cannot advance`). | `doctor --run-id <run_id> --verbose --json` (look for `job_stuck_no_live_session`); `why <blocker_id>`. | `recovery reseal --run-id <run_id> --job-id <job_id>` (re-seal same attempt, or restore an already-open checkpoint). For a dangling blocker no completion cleared, `recovery resolve-blocker <blocker_id>`. |
 | Human checkpoint or revision-routing blocker. | `why <blocker_id> --run-id <run_id>` plus artifacts. | `decision record`, then `checkpoint resolve --blocker-id <id> --action continue\|cancel`. For a `revision_routing` checkpoint you can instead `--action override --decision-id <id>` to accept the verdict as superseded without re-running the review. |
 | Escalation artifact or principal inbox item. | `inbox --json` and `escalation show --escalation-id <id> --json`. | `decision record`, then `escalation resolve --escalation-id <id> --decision-id <decision_id>`. |
 | Terminal run with active sessions. | `doctor --run-id <run_id> --verbose --json`. | `session close --session-id <session_id> --reason terminal-run-cleanup`. |
