@@ -1,4 +1,4 @@
-# RFC 0165: Claude provider credential freshness and spawn-time hydration
+# RFC 0165: Claude provider credential freshness and spawn-time projection
 
 Status: proposed
 Date: 2026-06-23
@@ -78,32 +78,41 @@ freshness deadline, and admission gate.
 
 ## Proposal
 
-Adopt a three-part design:
+Adopt a four-part design:
 
-1. **Spawn-time Claude credential hydration**: before every Claude lane
+1. **Spawn-time Claude credential projection**: before every Claude lane
    `supervise.start` launch, respawn, or recovery requeue launch, the daemon
-   invokes a narrow host-local hydrator that copies the current operator Claude
-   credential into the lane's resolved Claude credential path.
-2. **Generation and custody gate**: the copy is accepted only if non-secret
-   source and destination observations prove that the lane credential was
-   hydrated from the current operator credential generation.
-3. **Provider-auth circuit breaker**: if Claude provider credentials are stale
+   invokes a narrow host-local projector. The projector reads the current
+   operator Claude OAuth credential but gives the lane only access-token
+   material that cannot refresh or rotate the operator credential family.
+2. **Generation, custody, and launch binding gate**: the projection is accepted
+   only if non-secret source and destination observations prove that the lane
+   credential was projected from the current operator credential generation.
+   The daemon also records which generation was bound to the launched
+   job/session/supervisor so recovery cannot prove an older stalled process
+   fresh with a newer lane-user row.
+3. **Projection-off fail-closed classifier**: disabling provider credential
+   projection is not a Claude OAuth bypass. A self-driving Claude launch with
+   missing, unknown, or unmodeled credential kind is treated as Claude OAuth for
+   RFC 0165 admission unless Striatum has positive pre-launch proof that no
+   Claude OAuth resolver surface is in play.
+4. **Provider-auth circuit breaker**: if Claude provider credentials are stale
    or unverifiable, recovery classifies the failure as provider-auth readiness
-   debt and blocks repeated requeues until hydration succeeds.
+   debt and blocks repeated requeues until projection succeeds.
 
 The load-bearing distinction is that provider OAuth material and Striatum
 control-plane credentials remain separate. The lane may receive a Claude
-provider credential file because Claude needs it to start; the lane may not
-receive operator paths, daemon runtime tokens, admin tokens, or refresh
-authority over Striatum's own control plane.
+provider access token because Claude needs it to start; the lane may not
+receive a refresh token, operator credential path, daemon runtime token, admin
+token, or refresh authority over Striatum's own control plane.
 
-### 1. Claude Credential Hydrator
+### 1. Claude Credential Projector
 
-Add a provider-specific hydrator for Claude. Its job is small and deliberately
+Add a provider-specific projector for Claude. Its job is small and deliberately
 boring:
 
 ```text
-HydrateClaudeCredential(source, destination, lane_user) -> HydrationReceipt
+ProjectClaudeCredential(source, destination, lane_user) -> ProjectionReceipt
 ```
 
 Inputs are resolved by Striatum, not by workflow-authored shell:
@@ -111,27 +120,36 @@ Inputs are resolved by Striatum, not by workflow-authored shell:
 - source: the operator-side Claude credential file, resolved with the same
   precedence the operator Claude CLI uses: `$CLAUDE_CONFIG_DIR/.credentials.json`
   when set, otherwise `$HOME/.claude/.credentials.json`.
-- destination: the lane-side Claude credential file, resolved with the launch
+- destination: the lane-side Claude projection target, resolved with the launch
   environment the lane will actually receive: `$CLAUDE_CONFIG_DIR/.credentials.json`
   when set, otherwise `$HOME/.claude/.credentials.json` for `striatum-lane`.
 - lane_user: the configured `STRIATUM_LANE_OS_USER` after owner-same-user
   collapse.
 
-The hydrator writes by temp file plus rename, then verifies:
+The projector writes by temp file plus rename, then verifies:
 
 - destination parent exists and is not a symlink escape;
 - destination owner is the lane user;
 - destination mode is `0600`;
-- destination bytes parse as Claude OAuth credentials;
+- destination bytes parse as the lane projection shape expected by Claude;
 - destination expiry is outside a configured minimum lead time;
 - destination non-secret generation matches the source generation observed for
-  this copy.
+  this projection;
+- every lane-readable credential surface named by the launch environment is
+  `refresh_token_absent`.
 
-The source and destination are read twice around the copy. If the source
-generation changes between pre-copy and post-copy observation, the hydrator
-retries once and then refuses with `provider_credential_source_unstable`. This
-closes the rotation-race where the operator credential refreshes while the lane
-copy is being made.
+The source may contain the operator refresh token because it is the operator's
+Claude credential. The destination must not contain `refreshToken`, `idToken`,
+or any other credential capable of refreshing the operator OAuth family. A B1
+file projection writes only access-token material and expiry. A later B2 broker
+mode may serve access tokens over a daemon-owned local channel after peer-uid
+verification, but it still never gives the lane the refresh source.
+
+The source and destination are read around the projection. If the source
+generation changes between pre-projection and post-projection observation, the
+projector retries once and then refuses with
+`provider_credential_source_unstable`. This closes the rotation race where the
+operator credential refreshes while the lane projection is being made.
 
 ### 2. Non-Secret Generation and Custody Records
 
@@ -149,7 +167,7 @@ token. It is a privacy-safe observation such as:
 - observed file owner, mode, size, and mtime;
 - observed_at.
 
-For each hydration, record a custody receipt:
+For each projection, record a custody receipt:
 
 - repository_id;
 - run_id and session_id when available;
@@ -157,45 +175,95 @@ For each hydration, record a custody receipt:
 - provider and kind;
 - source generation id;
 - destination generation id;
-- hydration_started_at and hydration_completed_at;
+- projection_started_at and projection_completed_at;
 - destination owner and mode verification result;
 - verifier result: passed, source_unstable, source_missing, destination_write_failed,
-  destination_unparseable, expiry_too_near, owner_mode_invalid, resolver_mismatch.
+  destination_unparseable, expiry_too_near, owner_mode_invalid,
+  resolver_mismatch, refresh_token_present.
 
 No raw credential bytes, OAuth access tokens, refresh tokens, id tokens, full
 operator credential path, provider stdout/stderr, or Claude transcript content
 is persisted.
+
+Each successful launch also records a launch credential binding tied to the
+launched owner, not merely to the latest lane-user readiness row:
+
+```text
+provider_credential_launch_binding
+  repository_id, run_id, job_id, session_id, supervisor_id
+  lane_id, lane_user, provider, kind, destination_selector
+  delivery_mode, receipt_id
+  source_generation_id, destination_generation_id
+  destination_expires_at, min_freshness_seconds
+  state, bound_at
+```
+
+Recovery uses this binding as the positive freshness authority for the stalled
+process. A newer successful projection for the same lane user may prove that a
+fresh relaunch is possible; it does not prove that an older running process has
+adopted the newer generation.
 
 ### 3. Launch Gate Integration
 
 Claude lane launch crosses this gate before the provider CLI starts real work.
 For `supervise.start`, the order is:
 
-1. Resolve the lane config and provider adapter.
-2. If the provider is Claude and a distinct lane OS user is configured, hydrate
-   the lane Claude credential and record a custody receipt.
-3. Refuse launch if hydration or generation verification fails.
-4. Run any supported provider-auth preflight.
-5. Mint and inject the Striatum session-bound capability token.
-6. Create supervisor rows, scratch, tmux/helper state, and launch the lane.
+1. Resolve the lane config, provider adapter, launch environment, and Claude
+   credential assurance kind.
+2. Enforce the lane credential-domain guard. A credential selector that resolves
+   inside the target repository, or an unmodeled provider credential selector
+   that resolves inside the target repository, is a higher-priority fail-closed
+   precondition than same-user remediation because it protects the repository
+   boundary.
+3. If there is no credential-domain violation, enforce the same-user Claude
+   OAuth precondition before the generic provider-auth preflight. A self-driving
+   Claude OAuth lane whose resolved lane uid is the daemon/operator uid refuses
+   with `provider_credential_same_user_unsupported`.
+4. If `provider_credential_projection=off`, run the projection-off classifier.
+   For `adapter == claude` and self-driving launches, missing, unknown, or
+   unmodeled credential kind is treated as `OAUTH_COPIED` / Claude OAuth for
+   RFC 0165 admission. The launch refuses with
+   `provider_credential_projection_disabled_unsupported` unless Striatum has
+   positive pre-launch proof that no Claude OAuth resolver surface is in play.
+   Absence of a kind field, resolver roster entry, or diagnostic label is not
+   proof.
+5. If projection is enabled and the provider is Claude, project the lane Claude
+   credential, record a custody receipt, record the launch binding, and verify
+   that every lane-readable credential surface is `refresh_token_absent`.
+6. Refuse launch if projection, generation verification, same-user policy, or
+   projection-off classification fails.
+7. Run any supported provider-auth preflight.
+8. Mint and inject the Striatum session-bound capability token.
+9. Create supervisor rows, scratch, FIFO/ACL state, tmux/helper state, and
+   launch the lane.
 
 The exact placement may vary in implementation, but the invariant must not:
-Claude credential hydration and verification happen before the real Claude
-process can enter MCP discovery and before recovery can spend a work retry on
-that process.
+Claude credential projection and verification happen before scratch creation,
+FIFO/ACL work, session-token minting, supervisor rows, projection receipt
+creation, helper/tmux setup, or provider process launch, and before recovery can
+spend a work retry on that process.
 
 Refusal errors use typed vocabulary:
 
 ```text
-provider_credential_hydration_failed
+provider_credential_projection_failed
 provider_credential_generation_stale
 provider_credential_source_unstable
 provider_credential_expiry_too_near
 provider_credential_owner_mode_invalid
 provider_credential_resolver_mismatch
+provider_credential_same_user_unsupported
+provider_credential_projection_disabled_unsupported
+provider_credential_refresh_token_present
 ```
 
 These are launch-precondition failures, not lane execution failures.
+
+A non-OAuth diagnostic exception to projection-off may launch only after
+positive pre-launch proof that the launch cannot use `$HOME/.claude`,
+`CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, helper settings,
+inherited credential paths, or any other Claude OAuth resolver surface. If
+Striatum cannot model the surface, it fails closed.
 
 ### 4. Provider-Auth Dependency and Circuit Breaker
 
@@ -211,28 +279,38 @@ unverifiable
 disabled
 ```
 
-When a Claude launch fails because the hydrated lane generation is stale,
+When a Claude launch fails because the projected lane generation is stale,
 missing, expired, or unverifiable, recovery must not keep requeueing the same
 job as though the agent were flaky. It sets provider state to
 `reseed_required`, records the affected runs and sessions, and emits one
 operator-facing remediation:
 
 ```text
-refresh or re-authorize the operator Claude credential, then retry hydration
+refresh or re-authorize the operator Claude credential, then retry projection
 ```
 
-Once hydration succeeds for a newer source generation, recovery may requeue only
+Once projection succeeds for a newer source generation, recovery may requeue only
 jobs whose failure was classified against the stale generation. This preserves
 provenance and avoids turning one host auth problem into many unrelated
 `agent_mcp_discovery_stall` recoveries.
+
+For an already-running Claude lane that stalls in MCP discovery, recovery must
+load the stalled job/session/supervisor's launch credential binding. The binding
+is positively fresh only when it exists for that owner, is `active`, has matching
+receipt/source/destination generation ids, expires after the minimum lead time,
+and the receipt verifier passed. Lane-readable file samples may downgrade this
+classification; they may not upgrade a stale or missing binding. Missing,
+stale, owner-mismatched, or inconsistent binding evidence records provider-auth
+debt for that binding and does not increment generic requeue or transfer
+budget.
 
 ### 5. Relationship To RFC 0162
 
 RFC 0162 remains the alerting and metrics layer. This RFC supplies the behavior
 that turns the alert into prevention:
 
-- RFC 0162 `seconds_to_expiry` can page before hydration would fail.
-- This RFC's custody records explain which generation was hydrated into which
+- RFC 0162 `seconds_to_expiry` can page before projection would fail.
+- This RFC's custody records explain which generation was projected into which
   lane.
 - Doctor can join both surfaces: "alert says expiry is near" plus "launch gate
   refused generation N because operator generation N+1 exists."
@@ -244,23 +322,42 @@ refusal before the lane consumes a work packet.
 ### 6. Host Timer Is Optional
 
 A host-level `systemd` timer in `halbritt/proximal` may pre-warm the lane
-credential copy every 20 to 30 minutes. That improves readiness latency and
+credential projection every 20 to 30 minutes. That improves readiness latency and
 operator ergonomics, but it is not the correctness mechanism. The launch path
-must hydrate or verify synchronously every time, because timers can be disabled,
+must project or verify synchronously every time, because timers can be disabled,
 delayed, or run against the wrong boot/user environment.
 
-The timer should call the same hydrator path or a thin CLI wrapper around it,
+The timer should call the same projector path or a thin CLI wrapper around it,
 not duplicate copy/chown/chmod logic in shell.
 
 ## Acceptance Criteria
 
 - A dogfood spanning longer than the Claude OAuth access-token TTL completes
   without a Claude `agent_mcp_discovery_stall` caused by stale lane credentials.
-- A stale lane `~/.claude/.credentials.json` is overwritten or refused before a
-  real Claude lane process starts.
-- If the operator credential rotates during hydration, launch fails with
+- A stale lane `~/.claude/.credentials.json` is replaced by an access-token-only
+  projection or refused before a real Claude lane process starts.
+- If the operator credential rotates during projection, launch fails with
   `provider_credential_source_unstable` or retries into a current generation; it
-  never blesses a mixed-generation copy.
+  never blesses a mixed-generation projection.
+- The normal distinct-UID path never gives the lane a `refreshToken`, `idToken`,
+  raw operator credential JSON, or refresh authority.
+- `provider_credential_projection=off` plus a self-driving Claude launch with
+  missing, unknown, or unmodeled credential kind refuses with
+  `provider_credential_projection_disabled_unsupported` before scratch, FIFO/ACL
+  work, session-token minting, supervisor rows, projection receipt creation,
+  helper/tmux setup, or provider process launch.
+- Projection-off tests cover whole-credential fixtures with a `refreshToken` in
+  lane `$HOME/.claude`, `CLAUDE_CONFIG_DIR`, and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR`.
+- Same-user Claude OAuth lanes without a credential-domain violation return
+  `provider_credential_same_user_unsupported` before side effects for
+  `provider_auth_gate=auto`, `off`, and `required`.
+- Same-user Claude OAuth lanes with repo-inside `CLAUDE_CONFIG_DIR` or
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` return the declared credential-domain error
+  before side effects.
+- Recovery classifies an expired launch generation against the stalled
+  job/session/supervisor binding even when a newer projection exists for the
+  same lane user.
 - No daemon bootstrap admin token, runtime `client-token`, session-bound
   Striatum token, OAuth access token, OAuth refresh token, or provider stdout is
   written to repo artifacts, metrics, events, or doctor output.
@@ -268,9 +365,10 @@ not duplicate copy/chown/chmod logic in shell.
   surfaces one provider-auth remediation action.
 - Doctor and dashboard can show the latest Claude provider dependency state and
   the redacted custody reason for a launch refusal.
-- `make test` covers: happy-path hydration, stale lane generation refusal,
+- `make test` covers: happy-path projection, stale lane generation refusal,
   source-rotation race, wrong owner/mode refusal, unparseable Claude credential
-  refusal, and recovery circuit-breaker behavior.
+  refusal, projection-off unknown-kind refusal, same-user refusal precedence,
+  credential-domain precedence, and recovery circuit-breaker behavior.
 
 ## Implementation Plan
 
@@ -280,54 +378,68 @@ Add tests before behavior changes:
 
 - stale lane credential generation refuses Claude launch before supervisor rows
   and process launch;
-- source rotates during hydration and does not pass;
+- source rotates during projection and does not pass;
 - recovery classifies repeated stale-provider-auth launch attempts as a single
   provider-auth readiness problem;
-- custody output redacts credential bytes and private path material.
+- custody output redacts credential bytes and private path material;
+- projection disabled with unknown or missing Claude credential kind refuses
+  before scratch, supervisor rows, helper/tmux, token mint, custody receipt, or
+  provider process;
+- same-user Claude OAuth refuses before the generic provider-auth gate when no
+  credential-domain violation exists;
+- credential-domain violations intentionally precede same-user remediation when
+  a same-user Claude OAuth selector resolves inside the target repository;
+- recovery uses the stalled launch credential binding rather than a latest
+  lane-user dependency row.
 
-### P1 - Claude hydrator
+### P1 - Claude projector
 
-Implement the provider-specific resolver and atomic copy/verify helper. Reuse
+Implement the provider-specific resolver and atomic write/verify helper. Reuse
 the existing RFC 0162 Claude credential resolver and expiry parser where possible
 so launch, metrics, and doctor agree on where Claude credentials live.
+The destination projection must omit refresh tokens and id tokens.
 
 ### P2 - Launch gate and custody receipt
 
-Wire hydration into the Claude `supervise.start` path before real provider
-launch. Persist redacted custody receipts in daemon-owned PostgreSQL or another
-daemon-owned local state surface; do not commit receipts as repo artifacts.
+Wire projection, same-user refusal, projection-off classification, and launch
+credential binding into the Claude `supervise.start` path before real provider
+launch. Persist redacted custody receipts and launch bindings in daemon-owned
+PostgreSQL or another daemon-owned local state surface; do not commit receipts
+as repo artifacts.
 
 ### P3 - Recovery classification
 
 Teach recovery and liveness classification to prefer provider-auth custody
-evidence when a Claude MCP discovery stall follows a stale or unverifiable
-generation. Add `reseed_required` state and suppress duplicate requeues until a
-fresh generation is available.
+evidence bound to the stalled launch when a Claude MCP discovery stall follows
+a stale or unverifiable generation. Add `reseed_required` state and suppress
+duplicate requeues until a fresh generation is available.
 
 ### P4 - Host integration
 
 Add the optional `proximal` timer or host unit as a pre-warm caller of the same
-hydrator. The timer is deploy hygiene, not a substitute for P2.
+projector. The timer is deploy hygiene, not a substitute for P2.
 
 ## Security And Privacy
 
-The hydrator is an intentional privilege boundary. It copies provider OAuth
-material from the operator account into the lane account, so its authority must
-be narrow:
+The projector is an intentional privilege boundary. It reads provider OAuth
+material from the operator account and writes only lane-safe projection material
+into the lane account, so its authority must be narrow:
 
 - source and destination paths come from provider resolvers, not user-supplied
   arbitrary paths;
 - only the configured lane OS user can be the destination owner;
 - only Claude credentials are handled in V1;
-- copy output is exactly one credential file with mode `0600`;
+- projection output is exactly one credential file with mode `0600`, or a
+  daemon-owned broker response, and neither contains refresh authority;
 - no shell interpolation is needed;
 - receipt data is redacted and token-free;
 - the lane receives no Striatum admin or daemon runtime token.
 
 The first implementation should be conservative: if ownership, path resolution,
-source stability, credential parsing, or expiry extraction cannot be proven, the
-gate refuses. A refused launch is cheaper and safer than a green-but-doomed
-Claude lane.
+source stability, credential parsing, expiry extraction, credential kind, or
+absence of lane-readable refresh-token surfaces cannot be proven, the gate
+refuses. A refused launch is cheaper and safer than a green-but-doomed Claude
+lane.
 
 ## Open Questions
 
@@ -335,13 +447,14 @@ Claude lane.
    how should it rotate without invalidating useful custody history?
 2. Should custody receipts be a new table, a structured event stream, or a
    provider-auth dependency table with last-N receipt retention?
-3. Should `provider_auth_gate=off` bypass Claude hydration, or should hydration
-   have a separate emergency flag because it moves credentials rather than
-   probing the provider?
+3. `provider_auth_gate=off` does not bypass Claude projection, same-user
+   refusal, projection-off classification, or recovery freshness binding. It
+   disables only the provider-auth smoke/preflight, not credential custody
+   admission.
 4. What is the minimum freshness lead time for Claude OAuth credentials before
    launch: 10 minutes, 30 minutes, or a fraction of observed TTL?
 5. How should multi-provider use under one lane OS user be keyed if future
-   providers add similar hydrators?
+   providers add similar projectors?
 
 ## Domain Modeling
 
@@ -361,8 +474,9 @@ the behavior should be named in the ubiquitous language and exposed through
 typed domain events such as:
 
 ```text
-provider_credential.hydrated
-provider_credential.hydration_refused
+provider_credential.projected
+provider_credential.projection_refused
+provider_credential.launch_bound
 provider_auth.reseed_required
 provider_auth.reseed_cleared
 ```
