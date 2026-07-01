@@ -3,7 +3,7 @@ schema_version: "striatum.operator_brief.v1"
 artifact_kind: "operator_brief"
 brief_id: "brief_2026-06-27_v2.39.0-release"
 supersedes: "brief_2026-06-25_v2.38.0-release"
-scope_links: ["docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
+scope_links: ["docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md", "docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
 context_budget_lines: 620
 retrieval_priority: "high"
 status: "current"
@@ -11,6 +11,20 @@ status: "current"
 
 # Operator Brief
 author: operator-claude-opus-4-8-001
+
+## 2026-07-01 delta - architecture-review remediation campaign planned
+
+The 2026-07-01 deep architecture review and the immediately prior 2026-06-28
+deep architecture review have been triaged into
+`docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md`.
+No source behavior lands with this planning delta. The campaign's first
+execution barrier is to land the migration-hash-mismatch typed exit-79 park
+before any follow-up that adds runtime migrations or owner bundles.
+
+Live preflight for the plan was green: `operator bootstrap` reported daemon
+reachable/authorized on `main`, `status --json --run-limit 0` reported no
+active runs, and `doctor` reported `ok=true` with advisory worktree warnings.
+Use isolated worktrees and Plane work items for fanout; do not strand branches.
 
 ## 2026-07-01 delta - RFC 0165 accepted; RFC 0173 build RFC proposed
 
