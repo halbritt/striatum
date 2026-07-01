@@ -3,7 +3,7 @@ schema_version: "striatum.operator_brief.v1"
 artifact_kind: "operator_brief"
 brief_id: "brief_2026-06-27_v2.39.0-release"
 supersedes: "brief_2026-06-25_v2.38.0-release"
-scope_links: ["docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md", "docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/rfcs/0126-multi-reviewer-revision-coherence.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
+scope_links: ["docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md", "docs/operator/plans/provenance-durability-campaign-2026-06-14.md", "docs/operator/plans/rfc-0126-0128-implementation-campaign-2026-06-14.md", "docs/decisions/decision-log.md", "CHANGELOG.md"]
 context_budget_lines: 620
 retrieval_priority: "high"
 status: "current"

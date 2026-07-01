@@ -207,46 +207,10 @@ func main() {
 			DaemonVersion: daemonVersion,
 		}, migrate)
 		if err != nil {
-			// RFC 0142 Layer 2: a watermark shortfall is a CLEAN, deterministic
-			// halt, not a crash. CheckOwnerBundleWatermark left the database
-			// untouched (no runtime migration ran); a bare restart cannot fix it —
-			// the operator must apply the pending owner bundle out-of-band first.
-			// Exit the dedicated non-restartable code so the unit's
-			// RestartPreventExitStatus parks the daemon in `failed` with the
-			// remediation message instead of force-committing a half-applied deploy
-			// and thrashing (apoptosis, not necrosis).
-			var awaitingOwnerDDL *db.AwaitingOwnerDDLError
-			if errors.As(err, &awaitingOwnerDDL) {
-				releaseDaemonRuntime()
-				log.Printf("striatumd refusing to start: %v", awaitingOwnerDDL)
-				log.Printf("striatumd will NOT auto-restart this condition (exit %d); apply the pending owner bundle, then restart", exitAwaitingOwnerDDL)
-				os.Exit(exitAwaitingOwnerDDL)
-			}
-			// RFC 0142 Layer 3 part 1 (P3): a schema_drift halt only reaches here when
-			// the operator opted enforcement on (STRIATUM_SCHEMA_DRIFT_REFUSE=1); the
-			// DEFAULT shadow mode logs a warning and continues, never returning this
-			// error. Like the watermark shortfall it is a deterministic, bare-restart-
-			// can't-fix condition (the applied schema does not match this binary) — so
-			// reuse the same non-restartable exit code: the operator must reconcile the
-			// database to the binary (or vice versa) before restarting.
-			var schemaDrift *db.SchemaDriftError
-			if errors.As(err, &schemaDrift) {
-				releaseDaemonRuntime()
-				log.Printf("striatumd refusing to start: %v", schemaDrift)
-				log.Printf("striatumd will NOT auto-restart this condition (exit %d); reconcile the schema to the binary (or unset %s for shadow mode), then restart", exitAwaitingOwnerDDL, db.EnvSchemaDriftRefuse)
-				os.Exit(exitAwaitingOwnerDDL)
-			}
-			// RFC 0142 P4 deploy activation halts (awaiting_deploy / awaiting_deploy_config /
-			// deploy_plan_binary_mismatch / deploy_plan_db_stamp_mismatch). Like the
-			// watermark shortfall and the schema_drift refusal these are deterministic,
-			// bare-restart-can't-fix conditions — the operator must run `striatum daemon
-			// deploy`, set STRIATUM_DEPLOY_DECOUPLED, or resume with the authoring binary —
-			// so they reuse the same non-restartable exit, DB left untouched.
-			if errors.Is(err, db.ErrAwaitingDeploy) || errors.Is(err, db.ErrAwaitingDeployConfig) ||
-				errors.Is(err, db.ErrDeployPlanBinaryMismatch) || errors.Is(err, db.ErrDeployPlanDBStampMismatch) {
+			if remediation, ok := bootstrapNonRestartableRemediation(err); ok {
 				releaseDaemonRuntime()
 				log.Printf("striatumd refusing to start: %v", err)
-				log.Printf("striatumd will NOT auto-restart this condition (exit %d); resolve the deploy state, then restart", exitAwaitingOwnerDDL)
+				log.Printf("striatumd will NOT auto-restart this condition (exit %d); %s", exitAwaitingOwnerDDL, remediation)
 				os.Exit(exitAwaitingOwnerDDL)
 			}
 			fatalf("daemon db connect/bootstrap failed: %v", err)
@@ -453,6 +417,39 @@ func main() {
 			fatalf("auto_spawn scheduler: %v", err)
 		}
 	}
+}
+
+func bootstrapNonRestartableRemediation(err error) (string, bool) {
+	// RFC 0142 Layer 2: a watermark shortfall is a CLEAN, deterministic halt,
+	// not a crash. CheckOwnerBundleWatermark left the database untouched (no
+	// runtime migration ran); a bare restart cannot fix it.
+	var awaitingOwnerDDL *db.AwaitingOwnerDDLError
+	if errors.As(err, &awaitingOwnerDDL) {
+		return "apply the pending owner bundle, then restart", true
+	}
+	// RFC 0142 Layer 3 part 1 (P3): schema_drift is deterministic when the
+	// operator opts enforcement on; the applied schema does not match this
+	// binary.
+	var schemaDrift *db.SchemaDriftError
+	if errors.As(err, &schemaDrift) {
+		return fmt.Sprintf("reconcile the schema to the binary (or unset %s for shadow mode), then restart", db.EnvSchemaDriftRefuse), true
+	}
+	// A migration hash mismatch is the same restart-won't-fix shape: the
+	// database recorded a different migration body, or the binary's embedded SQL
+	// and source SQL disagree. Keep it on the parked exit rather than
+	// crash-looping the writer.
+	var migrationHashMismatch *db.MigrationHashMismatchError
+	if errors.As(err, &migrationHashMismatch) {
+		return "reconcile the migration bytes and recorded schema_migrations hash, then restart", true
+	}
+	// RFC 0142 P4 deploy activation halts are deterministic, DB-left-untouched
+	// conditions: run deploy, fix decoupled config, or resume with the authoring
+	// binary.
+	if errors.Is(err, db.ErrAwaitingDeploy) || errors.Is(err, db.ErrAwaitingDeployConfig) ||
+		errors.Is(err, db.ErrDeployPlanBinaryMismatch) || errors.Is(err, db.ErrDeployPlanDBStampMismatch) {
+		return "resolve the deploy state, then restart", true
+	}
+	return "", false
 }
 
 // staleEpochRecorder is the RFC 0143 Slice A (#512) daemon-side observation backend.

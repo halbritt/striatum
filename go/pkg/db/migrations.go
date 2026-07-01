@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,37 @@ const (
 	LatestDaemonDBVersion = 47
 	MigrationLockKey      = 332933
 )
+
+// ErrMigrationHashMismatch is the typed halt for a migration byte mismatch.
+// A bare restart cannot repair it: either the database has recorded a SHA for a
+// different migration body, or the running binary's embedded SQL does not match
+// the source SQL it was asked to verify.
+var ErrMigrationHashMismatch = errors.New("migration_hash_mismatch")
+
+// MigrationHashMismatchError carries enough detail for callers to route the
+// deterministic mismatch to a non-restartable halt while still rendering the
+// operator-facing hash evidence.
+type MigrationHashMismatchError struct {
+	Version  int
+	Name     string
+	Expected string
+	Actual   string
+	Source   string
+}
+
+func (e *MigrationHashMismatchError) Error() string {
+	name := e.Name
+	if name == "" && e.Version > 0 {
+		name = fmt.Sprintf("%04d", e.Version)
+	}
+	source := e.Source
+	if source == "" {
+		source = "recorded"
+	}
+	return fmt.Sprintf("daemon PostgreSQL migration %s hash mismatch: expected=%s actual=%s source=%s", name, e.Expected, e.Actual, source)
+}
+
+func (e *MigrationHashMismatchError) Unwrap() error { return ErrMigrationHashMismatch }
 
 //go:embed sql/*.sql
 var migrationFS embed.FS
@@ -242,7 +274,13 @@ func VerifyMigrationsSHASource(path string) error {
 			return fmt.Errorf("source migration %s is missing", name)
 		}
 		if actual != embeddedSHA {
-			return fmt.Errorf("migration %s sha mismatch: embedded=%s source=%s", name, embeddedSHA, actual)
+			return &MigrationHashMismatchError{
+				Version:  migrationVersionFromFilename(name),
+				Name:     name,
+				Expected: embeddedSHA,
+				Actual:   actual,
+				Source:   "source",
+			}
 		}
 	}
 	for name := range source {
@@ -251,6 +289,14 @@ func VerifyMigrationsSHASource(path string) error {
 		}
 	}
 	return nil
+}
+
+func migrationVersionFromFilename(name string) int {
+	version, err := strconv.Atoi(strings.SplitN(name, "_", 2)[0])
+	if err != nil {
+		return 0
+	}
+	return version
 }
 
 func ensureMetaTable(ctx context.Context, runner Runner) error {
@@ -281,7 +327,13 @@ func verifyRecordedHashTx(ctx context.Context, q scalarQuerier, migration Migrat
 		return nil
 	}
 	if strings.TrimSpace(value) != migration.SHA256() {
-		return fmt.Errorf("daemon PostgreSQL migration %d hash mismatch", migration.Version)
+		return &MigrationHashMismatchError{
+			Version:  migration.Version,
+			Name:     filepath.Base(migration.Path),
+			Expected: migration.SHA256(),
+			Actual:   strings.TrimSpace(value),
+			Source:   "recorded",
+		}
 	}
 	return nil
 }

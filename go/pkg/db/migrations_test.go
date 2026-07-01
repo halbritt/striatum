@@ -196,6 +196,47 @@ func TestVerifyMigrationsSHASourceRejectsExtraSourceMigration(t *testing.T) {
 	}
 }
 
+func TestVerifyMigrationsSHASourceHashMismatchIsTyped(t *testing.T) {
+	tmp := t.TempDir()
+	entries, err := migrationFS.ReadDir("sql")
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
+	mutated := ""
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		body, err := migrationFS.ReadFile(filepath.Join("sql", entry.Name()))
+		if err != nil {
+			t.Fatalf("read embedded migration: %v", err)
+		}
+		if mutated == "" {
+			body = append(append([]byte{}, body...), []byte("\n-- mutate source hash for typed mismatch test\n")...)
+			mutated = entry.Name()
+		}
+		if err := os.WriteFile(filepath.Join(tmp, entry.Name()), body, 0o644); err != nil {
+			t.Fatalf("write copied migration: %v", err)
+		}
+	}
+	if mutated == "" {
+		t.Fatal("no embedded migration copied")
+	}
+
+	err = VerifyMigrationsSHASource(tmp)
+
+	var typed *MigrationHashMismatchError
+	if !errors.As(err, &typed) {
+		t.Fatalf("source hash mismatch must classify as *MigrationHashMismatchError, got %T: %v", err, err)
+	}
+	if typed.Name != mutated {
+		t.Fatalf("typed mismatch name = %q, want %q", typed.Name, mutated)
+	}
+	if typed.Source != "source" {
+		t.Fatalf("typed mismatch source = %q, want source", typed.Source)
+	}
+}
+
 func TestMigrationFiveCarriesRepoLocalWorkflowTables(t *testing.T) {
 	migrations, err := Migrations()
 	if err != nil {
@@ -1266,6 +1307,16 @@ func TestApplyOneVerifiesInProgressVersionHash(t *testing.T) {
 	err := applyOne(context.Background(), runner, migration, "test")
 	if err == nil {
 		t.Fatal("applyOne should fail when the in-progress version's recorded hash mismatches")
+	}
+	var typed *MigrationHashMismatchError
+	if !errors.As(err, &typed) {
+		t.Fatalf("recorded hash mismatch must classify as *MigrationHashMismatchError, got %T: %v", err, err)
+	}
+	if typed.Version != migration.Version {
+		t.Fatalf("typed mismatch version = %d, want %d", typed.Version, migration.Version)
+	}
+	if typed.Source != "recorded" {
+		t.Fatalf("typed mismatch source = %q, want recorded", typed.Source)
 	}
 	if !strings.Contains(err.Error(), "hash mismatch") {
 		t.Fatalf("expected hash mismatch error, got: %v", err)

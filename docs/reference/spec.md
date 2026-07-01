@@ -1195,7 +1195,7 @@ V1 schemas:
   `schema_version`, `artifact_kind: operator_brief`, `brief_id`,
   `supersedes` (string or null), `scope_links` (list of repo-relative
   strings), `context_budget_lines` (non-negative integer),
-  `retrieval_priority` (one of `low`, `normal`, `high`), and `status`
+  `retrieval_priority` (one of `low`, `medium`, `high`), and `status`
   (one of `current`, `superseded`); optional `author`.
 - `striatum.work_plan.v1` (kind `work_plan`): required `schema_version`,
   `artifact_kind: work_plan`, `plan_id`, `scope_kind` (one of `rfc`, `phase`,
