@@ -18,7 +18,10 @@ author: proposer-claude-opus-4-8
 > `run_992bd797fc136f1e3d782f443f9fb2ad` built and verified it on `main`
 > (`02a15e83`): runtime migration 0045 adds `cullable_entity`, and
 > `DecayTickSweep` now nominates/withdraws Tier-1 candidates without deletion,
-> paging, or run-admission effects. P1+ remain future work.
+> paging, or run-admission effects. The #618 citation-exactness hardening is
+> closed: `status: frozen` Markdown records outside `docs/records/_frozen/` are
+> non-live citation sources. The #619 cull-slot liveness fence and broader P1+
+> work remain future work.
 
 ## Problem
 

@@ -185,12 +185,9 @@ func TestDecayTickKnownSetCorpus(t *testing.T) {
 
 	assertNominated(t, evaluations, cullableKey{kind: "decision", ref: "decision:D267"})
 
-	d081 := assertWithheld(t, evaluations, cullableKey{kind: "decision", ref: "decision:D081"})
-	if d081.withheldBy != "clause_4" {
-		t.Fatalf("D081 withheldBy = %q, want clause_4 (#618 documented audit citation)", d081.withheldBy)
-	}
-	if !hitPathContains(d081.countedHits, "docs/audits/STRIATUM_DECISION_RECORD_AUDIT_OPUS_4_8_2026-06-16.md") {
-		t.Fatalf("D081 counted hits do not include the documented #618 audit citation: %#v", d081.countedHits)
+	d081 := assertNominated(t, evaluations, cullableKey{kind: "decision", ref: "decision:D081"})
+	if hitPathContains(d081.countedHits, "docs/audits/STRIATUM_DECISION_RECORD_AUDIT_OPUS_4_8_2026-06-16.md") {
+		t.Fatalf("D081 counted the frozen #618 audit citation: %#v", d081.countedHits)
 	}
 
 	for _, key := range []cullableKey{
@@ -209,6 +206,38 @@ func TestDecayTickKnownSetCorpus(t *testing.T) {
 		if key.kind == "branch" && evaluation.nominated {
 			t.Fatalf("branch candidacy appeared in P0 known-set scan: %#v", evaluation)
 		}
+	}
+}
+
+func TestDecayTickFrozenStatusRecordOutsideFrozenTreeIsNotLiveCitationSource(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "docs/rfcs/0001-old-superseded.md", `# RFC 0001: Old superseded RFC
+Status: superseded by RFC 0002
+
+Old content.
+`)
+	writeTestFile(t, root, "docs/rfcs/0002-live-successor.md", `# RFC 0002: Live successor
+Status: accepted
+
+Replacement content.
+`)
+	writeTestFile(t, root, "docs/audits/frozen-record.md", `---
+status: frozen
+---
+
+# Frozen Audit Record
+
+This frozen provenance record mentions RFC 0001, but it is not a live citation source.
+`)
+
+	evaluations, err := scanRepositoryCullableEvaluations(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan repository cullable evaluations: %v", err)
+	}
+
+	oldRFC := assertNominated(t, evaluations, cullableKey{kind: "rfc", ref: "rfc:0001"})
+	if len(oldRFC.countedHits) != 0 {
+		t.Fatalf("frozen record citation was counted as live: %#v", oldRFC.countedHits)
 	}
 }
 
@@ -355,7 +384,7 @@ func repoRootForTest(t *testing.T) string {
 	}
 }
 
-func assertNominated(t *testing.T, evaluations map[cullableKey]cullableEvaluation, key cullableKey) {
+func assertNominated(t *testing.T, evaluations map[cullableKey]cullableEvaluation, key cullableKey) cullableEvaluation {
 	t.Helper()
 	evaluation, ok := evaluations[key]
 	if !ok {
@@ -364,6 +393,7 @@ func assertNominated(t *testing.T, evaluations map[cullableKey]cullableEvaluatio
 	if !evaluation.nominated {
 		t.Fatalf("%#v not nominated; withheldBy=%s hits=%#v successors=%#v", key, evaluation.withheldBy, evaluation.countedHits, evaluation.successors)
 	}
+	return evaluation
 }
 
 func assertWithheld(t *testing.T, evaluations map[cullableKey]cullableEvaluation, key cullableKey) cullableEvaluation {
@@ -394,4 +424,15 @@ func readPackageFile(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	return string(body)
+}
+
+func writeTestFile(t *testing.T, root string, rel string, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent directory for %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
 }

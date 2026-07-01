@@ -505,7 +505,7 @@ func sourceLive(rel string, status string) bool {
 			return false
 		}
 	}
-	return !statusBeginsAny(status, "superseded", "tombstoned", "withdrawn", "deprecated")
+	return !statusBeginsAny(status, "frozen", "superseded", "tombstoned", "withdrawn", "deprecated")
 }
 
 func (c *tier1Corpus) sourceKeyForPath(rel string) *cullableKey {
