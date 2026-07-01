@@ -1,5 +1,9 @@
 {
   "schema_version": 1,
+  "route_budget_guard": {
+    "legacy_no_route_budget_methods_count": 145,
+    "legacy_no_route_budget_methods_sha256": "sha256:fc33f588fed7d1339a9eb0ec3f2dbbc989f93d9caae4efce2a7795c9474635e4"
+  },
   "cli_routes": [
     {"command": "status", "subcommand": null, "method": "status", "params": "status"},
     {"command": "why", "subcommand": null, "method": "why", "params": "why"},
@@ -1244,7 +1248,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "recovery.auto_publish_stale_artifacts",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting recovery.auto."
+      }
     },
     {
       "method": "recovery.auto_publish_stale_artifacts",
@@ -1424,7 +1433,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.ack",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting ack."
+      }
     },
     {
       "method": "heartbeat",
@@ -1433,7 +1447,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.heartbeat",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting heartbeat."
+      }
     },
     {
       "method": "release",
@@ -1442,7 +1461,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.release",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting release."
+      }
     },
     {
       "method": "block",
@@ -1451,7 +1475,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.block",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting block."
+      }
     },
     {
       "method": "complete",
@@ -1460,7 +1489,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.complete",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting complete."
+      }
     },
     {
       "method": "publish_artifact",
@@ -1469,7 +1503,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "artifact.publish",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting publish_artifact."
+      }
     },
     {
       "method": "claim_next",
@@ -1478,7 +1517,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "work.claim_next",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting claim_next."
+      }
     },
     {
       "method": "verdict",
@@ -1487,7 +1531,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "review.verdict",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting verdict."
+      }
     },
     {
       "method": "submit_review",
@@ -1496,7 +1545,12 @@
       "params_schema_version": 1,
       "audit_class": "metadata",
       "min_envelope": 1,
-      "deprecated": true
+      "deprecated": true,
+      "route_budget": {
+        "kind": "deprecated_alias",
+        "canonical_method": "review.submit",
+        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting submit_review."
+      }
     }
   ]
 }

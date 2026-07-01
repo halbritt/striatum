@@ -13,9 +13,8 @@ mutation path. It is transition scaffolding for the architecture remediation
 plan. Contract metadata and CLI route reference tables are generated in
 `docs/reference/daemon-method-tables.md`; authority classification,
 historical SQLite-dependency notes, and Go authority status still live here.
-Every new RPC
-method or handwritten route map must update this file. Per D108, executable
-guardrails keep this matrix aligned with the daemon contract/runtime while it
+Every new RPC method or handwritten route map must update this file. Per D108,
+executable guardrails keep this matrix aligned with the daemon contract/runtime while it
 remains curated for authority and status classification; the retired Python
 `tests/architecture/test_authority_guardrails.py` (RFC 0078) is superseded by
 the live Go guards: `go/pkg/rpc/registry_contract_test.go` (registry ↔
@@ -25,6 +24,21 @@ error-code catalog below ↔ source literals ↔ this doc). Go daemon handler co
 `go/cmd/striatumd/handler_coverage_test.go`, which fails if active contract
 methods are missing Go handlers or regress to generic `not_implemented`
 placeholders.
+
+Route budget gate: every new non-deprecated daemon RPC method must carry
+`route_budget` metadata in `contracts/daemon_methods.json` before it is added
+to the contract. The metadata must classify the route as one of:
+`replaces_existing_method`, `extends_existing_transition`,
+`new_daemon_transition`, or `one_shot_backfill`. Replacement routes must name
+the existing method they replace; extension routes must name the existing state
+transition they extend; new daemon-owned transitions and one-shot backfills must
+name the accepted decision/RFC that authorizes the new surface. One-shot
+backfills must also carry a retirement plan. Deprecated aliases are not counted
+as new surface, but each alias must carry `route_budget.kind=deprecated_alias`,
+its canonical method, and a retirement plan. Existing non-deprecated methods
+that predate this rule are grandfathered by the compact baseline hash in the
+contract; `go/pkg/rpc/registry_contract_test.go` fails when that baseline
+changes without route-budget metadata.
 
 D107 / RFC 0068 supersedes D105. The Go columns below are no longer
 D105-bounded reference material; they are the production-port backlog. Any

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,33 @@ type contractMethod struct {
 
 type contractMethodsDocument struct {
 	Methods []contractMethod `json:"methods"`
+}
+
+type routeBudgetContractDocument struct {
+	RouteBudgetGuard routeBudgetGuard            `json:"route_budget_guard"`
+	Methods          []routeBudgetContractMethod `json:"methods"`
+}
+
+type routeBudgetGuard struct {
+	LegacyNoRouteBudgetMethodsCount  int    `json:"legacy_no_route_budget_methods_count"`
+	LegacyNoRouteBudgetMethodsSHA256 string `json:"legacy_no_route_budget_methods_sha256"`
+}
+
+type routeBudgetContractMethod struct {
+	Method      string               `json:"method"`
+	Deprecated  bool                 `json:"deprecated"`
+	RouteBudget *routeBudgetMetadata `json:"route_budget"`
+}
+
+type routeBudgetMetadata struct {
+	Kind              string `json:"kind"`
+	ReplacesMethod    string `json:"replaces_method"`
+	ExtendsTransition string `json:"extends_transition"`
+	Transition        string `json:"transition"`
+	DecisionRef       string `json:"decision_ref"`
+	CanonicalMethod   string `json:"canonical_method"`
+	RetirementPlan    string `json:"retirement_plan"`
+	Rationale         string `json:"rationale"`
 }
 
 func TestRegistryMatchesDaemonMethodsContract(t *testing.T) {
@@ -89,6 +117,52 @@ func TestMethodsETagMatchesDaemonMethodsContract(t *testing.T) {
 	}
 }
 
+func TestDaemonMethodsContractRouteBudgetGate(t *testing.T) {
+	contractPath := filepath.Join(findRepositoryRoot(t), "contracts", "daemon_methods.json")
+	payload, err := os.ReadFile(contractPath)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("contracts/daemon_methods.json is not present in this checkout")
+	}
+	if err != nil {
+		t.Fatalf("read contract: %v", err)
+	}
+
+	var document routeBudgetContractDocument
+	if err := json.Unmarshal(payload, &document); err != nil {
+		t.Fatalf("decode daemon method contract route-budget metadata: %v", err)
+	}
+	if document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsCount == 0 {
+		t.Fatal("route_budget_guard.legacy_no_route_budget_methods_count is required")
+	}
+	if !strings.HasPrefix(document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsSHA256, "sha256:") {
+		t.Fatalf("route_budget_guard.legacy_no_route_budget_methods_sha256 = %q, want sha256:<hex>", document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsSHA256)
+	}
+
+	legacyWithoutBudget := make([]string, 0)
+	for _, method := range document.Methods {
+		if method.RouteBudget == nil {
+			if method.Deprecated {
+				t.Errorf("deprecated method %s must declare route_budget.kind=deprecated_alias with a retirement plan", method.Method)
+				continue
+			}
+			legacyWithoutBudget = append(legacyWithoutBudget, method.Method)
+			continue
+		}
+		validateRouteBudgetMetadata(t, method)
+	}
+
+	legacyHash := routeBudgetMethodSetSHA256(t, legacyWithoutBudget)
+	if len(legacyWithoutBudget) != document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsCount ||
+		legacyHash != document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsSHA256 {
+		t.Fatalf("non-deprecated methods without route_budget changed; add route_budget metadata to new methods or update the grandfathered baseline with review evidence. got count=%d sha=%s want count=%d sha=%s",
+			len(legacyWithoutBudget),
+			legacyHash,
+			document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsCount,
+			document.RouteBudgetGuard.LegacyNoRouteBudgetMethodsSHA256,
+		)
+	}
+}
+
 func decodeContractMethods(t *testing.T, payload []byte) []contractMethod {
 	t.Helper()
 	var document contractMethodsDocument
@@ -132,6 +206,63 @@ func normalizeContractMethods(methods []contractMethod) []contractMethod {
 		normalized = append(normalized, method)
 	}
 	return normalized
+}
+
+func validateRouteBudgetMetadata(t *testing.T, method routeBudgetContractMethod) {
+	t.Helper()
+	budget := method.RouteBudget
+	kind := strings.TrimSpace(budget.Kind)
+	if kind == "" {
+		t.Fatalf("%s route_budget.kind is required", method.Method)
+	}
+	switch kind {
+	case "replaces_existing_method":
+		requireRouteBudgetField(t, method.Method, "replaces_method", budget.ReplacesMethod)
+		requireRouteBudgetField(t, method.Method, "decision_ref", budget.DecisionRef)
+		requireRouteBudgetField(t, method.Method, "rationale", budget.Rationale)
+	case "extends_existing_transition":
+		requireRouteBudgetField(t, method.Method, "extends_transition", budget.ExtendsTransition)
+		requireRouteBudgetField(t, method.Method, "decision_ref", budget.DecisionRef)
+		requireRouteBudgetField(t, method.Method, "rationale", budget.Rationale)
+	case "new_daemon_transition":
+		requireRouteBudgetField(t, method.Method, "transition", budget.Transition)
+		requireRouteBudgetField(t, method.Method, "decision_ref", budget.DecisionRef)
+		requireRouteBudgetField(t, method.Method, "rationale", budget.Rationale)
+	case "one_shot_backfill":
+		requireRouteBudgetField(t, method.Method, "transition", budget.Transition)
+		requireRouteBudgetField(t, method.Method, "decision_ref", budget.DecisionRef)
+		requireRouteBudgetField(t, method.Method, "retirement_plan", budget.RetirementPlan)
+		requireRouteBudgetField(t, method.Method, "rationale", budget.Rationale)
+	case "deprecated_alias":
+		if !method.Deprecated {
+			t.Fatalf("%s declares route_budget.kind=deprecated_alias but deprecated=false", method.Method)
+		}
+		requireRouteBudgetField(t, method.Method, "canonical_method", budget.CanonicalMethod)
+		requireRouteBudgetField(t, method.Method, "retirement_plan", budget.RetirementPlan)
+	default:
+		t.Fatalf("%s route_budget.kind = %q, want replaces_existing_method, extends_existing_transition, new_daemon_transition, one_shot_backfill, or deprecated_alias", method.Method, kind)
+	}
+	if method.Deprecated && kind != "deprecated_alias" {
+		t.Fatalf("%s is deprecated and must use route_budget.kind=deprecated_alias", method.Method)
+	}
+}
+
+func requireRouteBudgetField(t *testing.T, method, field, value string) {
+	t.Helper()
+	if strings.TrimSpace(value) == "" {
+		t.Fatalf("%s route_budget.%s is required", method, field)
+	}
+}
+
+func routeBudgetMethodSetSHA256(t *testing.T, methods []string) string {
+	t.Helper()
+	sort.Strings(methods)
+	payload, err := json.Marshal(methods)
+	if err != nil {
+		t.Fatalf("marshal route-budget method set: %v", err)
+	}
+	sum := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func registryContractView() []contractMethod {
