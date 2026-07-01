@@ -150,20 +150,22 @@ func trackSpec(spec Spec, phaseID, trackID, trackShape string, track map[string]
 		}
 	}
 	return Spec{
-		SchemaVersion: spec.SchemaVersion,
-		Shape:         trackShape,
-		LaneSet:       spec.LaneSet,
-		WorkflowID:    fmt.Sprintf("%s-%s-%s", spec.WorkflowID, phaseID, trackID),
-		Name:          fmt.Sprintf("%s %s %s", spec.Name, phaseID, trackID),
-		WorkflowVer:   spec.WorkflowVer,
-		Branch:        cloneMap(spec.Branch),
-		ScaffoldRoot:  spec.ScaffoldRoot,
-		ArtifactRoot:  fmt.Sprintf("%s/%s/%s", spec.ArtifactRoot, phaseID, trackID),
-		Lanes:         lanes,
-		Options:       options,
-		LaneModifiers: append([]string(nil), spec.LaneModifiers...),
-		ContextDocs:   append([]any(nil), spec.ContextDocs...),
-		Parallelism:   spec.Parallelism,
+		SchemaVersion:    spec.SchemaVersion,
+		Shape:            trackShape,
+		LaneSet:          spec.LaneSet,
+		WorkflowID:       fmt.Sprintf("%s-%s-%s", spec.WorkflowID, phaseID, trackID),
+		Name:             fmt.Sprintf("%s %s %s", spec.Name, phaseID, trackID),
+		WorkflowVer:      spec.WorkflowVer,
+		Branch:           cloneMap(spec.Branch),
+		ScaffoldRoot:     spec.ScaffoldRoot,
+		ArtifactRoot:     fmt.Sprintf("%s/%s/%s", spec.ArtifactRoot, phaseID, trackID),
+		Lanes:            lanes,
+		Options:          options,
+		LaneModifiers:    append([]string(nil), spec.LaneModifiers...),
+		ContextDocs:      append([]any(nil), spec.ContextDocs...),
+		Parallelism:      spec.Parallelism,
+		PlacementPosture: spec.PlacementPosture,
+		BlobConfigured:   spec.BlobConfigured,
 	}, nil
 }
 

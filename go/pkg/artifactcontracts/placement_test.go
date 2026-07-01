@@ -50,3 +50,25 @@ func TestBlobRequiredPostureDeclared(t *testing.T) {
 		t.Fatal("compatibility posture must not require blob storage")
 	}
 }
+
+func TestNormalizePlacementPosture(t *testing.T) {
+	cases := []struct {
+		value any
+		want  string
+		ok    bool
+	}{
+		{BlobPreferredPosture, BlobPreferredPosture, true},
+		{"preferred", BlobPreferredPosture, true},
+		{"required", BlobRequiredPosture, true},
+		{"compatibility", GitCompatiblePosture, true},
+		{"git", GitCompatiblePosture, true},
+		{"unknown", "", false},
+		{true, "", false},
+	}
+	for _, tc := range cases {
+		got, ok := NormalizePlacementPosture(tc.value)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("NormalizePlacementPosture(%#v) = %q, %v; want %q, %v", tc.value, got, ok, tc.want, tc.ok)
+		}
+	}
+}

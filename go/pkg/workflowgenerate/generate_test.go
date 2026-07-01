@@ -653,8 +653,8 @@ func TestGeneratedMultiLaneDesignReviewBuildPlacementDefaults(t *testing.T) {
 			spec: multiPhaseGeneratorSpec(),
 			want: map[string]string{
 				"phase_1_design__docs__review": artifactcontracts.PlacementBlobExhaust,
-				"phase_1_design__docs__apply":  artifactcontracts.PlacementBlobExhaust,
-				"phase_1_design__synthesis":    artifactcontracts.PlacementBlobExhaust,
+				"phase_1_design__docs__apply":  artifactcontracts.PlacementGitPublication,
+				"phase_1_design__synthesis":    artifactcontracts.PlacementGitPublication,
 			},
 		},
 		{
@@ -662,7 +662,7 @@ func TestGeneratedMultiLaneDesignReviewBuildPlacementDefaults(t *testing.T) {
 			spec: implementationPanelGeneratorSpec(),
 			want: map[string]string{
 				"compile_tradeoffs": artifactcontracts.PlacementBlobExhaust,
-				"arbitrate":         artifactcontracts.PlacementBlobExhaust,
+				"arbitrate":         artifactcontracts.PlacementGitPublication,
 				"review_dissent":    artifactcontracts.PlacementBlobExhaust,
 				"record_decision":   artifactcontracts.PlacementGitPublication,
 			},
@@ -687,10 +687,11 @@ func TestGeneratedCollaborationPlacementDefaults(t *testing.T) {
 	assertEveryExpectedArtifactHasPlacement(t, generated.Workflow)
 
 	jobs := jobsByID(generated.Workflow["jobs"])
+	assertArtifactPlacement(t, jobs, "holder", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "scribe_note", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "adjudicate", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "commit_proposal", artifactcontracts.PlacementGitPublication)
-	assertArtifactPlacement(t, jobs, "final_summary", artifactcontracts.PlacementBlobExhaust)
+	assertArtifactPlacement(t, jobs, "final_summary", artifactcontracts.PlacementGitPublication)
 }
 
 func TestGeneratedAdjudicatedConstraintExtractionPlacementDefaults(t *testing.T) {
@@ -702,7 +703,7 @@ func TestGeneratedAdjudicatedConstraintExtractionPlacementDefaults(t *testing.T)
 	assertArtifactPlacement(t, jobs, "adjudicate", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "spec_publication", artifactcontracts.PlacementGitPublication)
 	assertArtifactPlacement(t, jobs, "final_discharge_check", artifactcontracts.PlacementBlobExhaust)
-	assertArtifactPlacement(t, jobs, "final_review_synthesis", artifactcontracts.PlacementBlobExhaust)
+	assertArtifactPlacement(t, jobs, "final_review_synthesis", artifactcontracts.PlacementGitPublication)
 }
 
 func TestGeneratedVerificationGatePlacementDefaults(t *testing.T) {
@@ -714,7 +715,113 @@ func TestGeneratedVerificationGatePlacementDefaults(t *testing.T) {
 	assertArtifactPlacement(t, jobs, "verify", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "adjudicate", artifactcontracts.PlacementBlobExhaust)
 	assertArtifactPlacement(t, jobs, "commit_verified", artifactcontracts.PlacementGitPublication)
-	assertArtifactPlacement(t, jobs, "final_summary", artifactcontracts.PlacementBlobExhaust)
+	assertArtifactPlacement(t, jobs, "final_summary", artifactcontracts.PlacementGitPublication)
+}
+
+func TestBlobConfiguredGeneratedMultiLaneWorkflowPlacementAdoption(t *testing.T) {
+	spec := implementationPanelGeneratorSpec()
+	mapFrom(spec["options"])["blob_configured"] = true
+	generated := mustGenerate(t, spec)
+
+	if generated.Workflow["artifact_placement_posture"] != artifactcontracts.BlobPreferredPosture {
+		t.Fatalf("workflow artifact_placement_posture = %#v", generated.Workflow["artifact_placement_posture"])
+	}
+	jobs := jobsByID(generated.Workflow["jobs"])
+	assertArtifactPlacement(t, jobs, "compile_tradeoffs", artifactcontracts.PlacementBlobExhaust)
+	assertArtifactPlacement(t, jobs, "review_dissent", artifactcontracts.PlacementBlobExhaust)
+	assertArtifactPlacement(t, jobs, "arbitrate", artifactcontracts.PlacementGitPublication)
+	assertArtifactPlacement(t, jobs, "record_decision", artifactcontracts.PlacementGitPublication)
+}
+
+func TestNoBlobGeneratedWorkflowUsesGitCompatiblePlacement(t *testing.T) {
+	spec := implementationPanelGeneratorSpec()
+	mapFrom(spec["options"])["blob_configured"] = false
+	generated := mustGenerate(t, spec)
+
+	if generated.Workflow["artifact_placement_posture"] != artifactcontracts.GitCompatiblePosture {
+		t.Fatalf("workflow artifact_placement_posture = %#v", generated.Workflow["artifact_placement_posture"])
+	}
+	for _, jobItem := range listFrom(generated.Workflow["jobs"]) {
+		job := mapFrom(jobItem)
+		for _, artifactItem := range listFrom(job["expected_artifacts"]) {
+			artifact := mapFrom(artifactItem)
+			if artifact["placement"] == artifactcontracts.PlacementBlobExhaust {
+				t.Fatalf("no-blob workflow emitted blob_exhaust for job %s: %#v", job["id"], artifact)
+			}
+		}
+	}
+	jobs := jobsByID(generated.Workflow["jobs"])
+	assertArtifactPlacement(t, jobs, "compile_tradeoffs", artifactcontracts.PlacementGitPublication)
+	assertArtifactPlacement(t, jobs, "review_dissent", artifactcontracts.PlacementGitPublication)
+}
+
+func TestBlobRequiredGeneratedWorkflowRefusesWhenBlobNotConfigured(t *testing.T) {
+	spec := implementationPanelGeneratorSpec()
+	options := mapFrom(spec["options"])
+	options["artifact_placement_posture"] = artifactcontracts.BlobRequiredPosture
+	options["blob_configured"] = false
+
+	_, err := GenerateFromMap(spec)
+	if err == nil {
+		t.Fatal("GenerateFromMap should refuse blob_required with blob_configured=false")
+	}
+	var genError *Error
+	if !errors.As(err, &genError) {
+		t.Fatalf("error type = %T, %v", err, err)
+	}
+	if genError.FieldPath != "spec.options.blob_configured" || !strings.Contains(genError.Message, "requires blob_configured=true") {
+		t.Fatalf("error = %#v", genError)
+	}
+}
+
+func TestBlobRequiredGeneratedWorkflowMarksBlobArtifacts(t *testing.T) {
+	spec := implementationPanelGeneratorSpec()
+	options := mapFrom(spec["options"])
+	options["artifact_placement_posture"] = artifactcontracts.BlobRequiredPosture
+	options["blob_configured"] = true
+	generated := mustGenerate(t, spec)
+
+	if generated.Workflow["artifact_placement_posture"] != artifactcontracts.BlobRequiredPosture {
+		t.Fatalf("workflow artifact_placement_posture = %#v", generated.Workflow["artifact_placement_posture"])
+	}
+	artifact := mapFrom(listFrom(jobsByID(generated.Workflow["jobs"])["review_dissent"]["expected_artifacts"])[0])
+	if artifact["placement"] != artifactcontracts.PlacementBlobExhaust || artifact["artifact_placement_posture"] != artifactcontracts.BlobRequiredPosture {
+		t.Fatalf("review_dissent artifact = %#v", artifact)
+	}
+}
+
+func TestReviewerInputsUseArtifactGetContentForBlobRoutedUpstreamArtifacts(t *testing.T) {
+	generated := mustGenerate(t, map[string]any{
+		"schema_version":   GeneratorSchemaVersion,
+		"shape":            "evidence_backed",
+		"lane_set":         "author_reviewer",
+		"workflow_id":      "evidence-context",
+		"name":             "Evidence Context",
+		"workflow_version": "2026-07-01",
+		"branch":           map[string]any{"mode": "confirm", "suggested_name": "striatum/evidence-context", "allow_dirty": false},
+		"scaffold_root":    "workflows/evidence-context",
+		"artifact_root":    "striatum/evidence-context",
+		"lanes": map[string]any{
+			"author":   map[string]any{"command": []any{"author", "run"}, "display_model": "Author"},
+			"reviewer": map[string]any{"command": []any{"reviewer", "run"}, "display_model": "Reviewer"},
+		},
+		"options": map[string]any{"blob_configured": true},
+	})
+	jobs := jobsByID(generated.Workflow["jobs"])
+	assertArtifactPlacement(t, jobs, "support_ledger", artifactcontracts.PlacementBlobExhaust)
+	audit := jobs["evidence_audit"]
+	if audit == nil || audit["type"] != "review" {
+		t.Fatalf("evidence_audit job = %#v", audit)
+	}
+	if !containsMap(listFrom(audit["inputs"]), map[string]any{
+		"from":           "support_ledger",
+		"logical_name":   "support_ledger",
+		"kind":           "support_ledger",
+		"placement":      artifactcontracts.PlacementBlobExhaust,
+		"content_access": "artifact.get_content",
+	}) {
+		t.Fatalf("evidence_audit inputs do not seed artifact.get_content for support_ledger: %#v", audit["inputs"])
+	}
 }
 
 func TestGenerateUsesSharedAuthoringLintPayload(t *testing.T) {

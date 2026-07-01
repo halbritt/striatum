@@ -169,6 +169,45 @@ curl -H "Authorization: Bearer ${TOKEN}" \
   "${BASE_URL}/v1/artifacts/<artifact_id>/raw" > /tmp/artifact-body
 ```
 
+## Workflow generation posture
+
+For generated workflows, declare the repository's blob posture in generator
+options rather than editing each expected artifact by hand:
+
+- Blob-configured repositories: set `blob_configured=true`. Generated multi-lane
+  workflows keep final syntheses, decisions, specs, and compact publication
+  artifacts on `git_publication`, while review findings, dialogue handoffs, and
+  working ledgers use `blob_exhaust`.
+- Blob-required repositories: set both
+  `artifact_placement_posture=blob_required` and `blob_configured=true`. The
+  generated workflow carries `artifact_placement_posture: blob_required`, and
+  blob-routed expected artifacts carry the same requirement so publish refuses
+  precisely if the daemon or repository bucket is unavailable.
+- No-blob repositories: set `blob_configured=false` or
+  `artifact_placement_posture=git_compatible`. The generator emits
+  `git_publication` for artifacts that would otherwise be blob exhaust. If an
+  operator requests `blob_required` while declaring `blob_configured=false`,
+  generation refuses with a field-scoped `spec.options.blob_configured` error.
+
+The CLI `--option` path accepts the same keys, for example:
+
+```bash
+striatum workflow generate \
+  --shape implementation_panel \
+  --lane-set multi_review \
+  --workflow-id example-placement \
+  --option blob_configured=true \
+  --option artifact_placement_posture=blob_required \
+  --scaffold-root workflows/example \
+  --artifact-root striatum/example
+```
+
+Generated downstream jobs that depend on blob-routed upstream artifacts receive
+`inputs[]` entries with `content_access: artifact.get_content` plus an
+`artifact_lookup` hint. Reviewers and synthesizers should use those packet
+inputs to fetch the artifact body; do not assume a `blob_exhaust` body exists on
+the run branch.
+
 ## Step 5 — Bulk-migrate `docs/dogfood/`
 
 The current Go daemon registers the per-file

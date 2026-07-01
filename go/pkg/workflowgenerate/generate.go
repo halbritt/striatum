@@ -46,6 +46,8 @@ var (
 		"frame_packs", "score_weights", "problem_shape", "convergence_lane_id",
 		"reconstructor_count", "participant_count",
 		"gate_floor", "checks",
+		"artifact_placement_posture", "artifact_blob_posture", "blob_posture",
+		"blob_configured", "blob_required",
 	)
 	blockKinds = set(
 		"draft", "review", "synthesis", "implementation", "test",
@@ -79,21 +81,23 @@ func (e *Error) Error() string {
 }
 
 type Spec struct {
-	SchemaVersion string
-	Shape         string
-	LaneSet       string
-	WorkflowID    string
-	Name          string
-	WorkflowVer   string
-	Branch        map[string]any
-	ScaffoldRoot  string
-	ArtifactRoot  string
-	Lanes         map[string]map[string]any
-	Options       map[string]any
-	LaneModifiers []string
-	Plan          map[string]any
-	ContextDocs   []any
-	Parallelism   map[string]any
+	SchemaVersion    string
+	Shape            string
+	LaneSet          string
+	WorkflowID       string
+	Name             string
+	WorkflowVer      string
+	Branch           map[string]any
+	ScaffoldRoot     string
+	ArtifactRoot     string
+	Lanes            map[string]map[string]any
+	Options          map[string]any
+	LaneModifiers    []string
+	Plan             map[string]any
+	ContextDocs      []any
+	Parallelism      map[string]any
+	PlacementPosture string
+	BlobConfigured   *bool
 }
 
 type Generated struct {
@@ -211,6 +215,14 @@ func SpecFromMap(raw map[string]any) (Spec, error) {
 			return Spec{}, genErr("unknown generator option: "+key, "spec.options."+key)
 		}
 	}
+	placementPosture, err := placementPostureOption(options)
+	if err != nil {
+		return Spec{}, err
+	}
+	blobConfigured, err := optionalBoolOption(options, "blob_configured")
+	if err != nil {
+		return Spec{}, err
+	}
 	modifiers, err := stringList(defaultAny(raw["lane_modifiers"], []any{}), "spec.lane_modifiers")
 	if err != nil {
 		return Spec{}, err
@@ -258,6 +270,7 @@ func SpecFromMap(raw map[string]any) (Spec, error) {
 		Name: name, WorkflowVer: version, Branch: branch, ScaffoldRoot: scaffold,
 		ArtifactRoot: artifact, Lanes: lanes, Options: options, LaneModifiers: modifiers,
 		Plan: plan, ContextDocs: contextDocs, Parallelism: parallelism,
+		PlacementPosture: placementPosture, BlobConfigured: blobConfigured,
 	}, nil
 }
 
@@ -349,6 +362,14 @@ func Generate(spec Spec) (Generated, error) {
 	if phases == nil {
 		phases = []map[string]any{}
 	}
+	placementPolicy, err := placementPolicyForSpec(spec)
+	if err != nil {
+		return Generated{}, err
+	}
+	applyGeneratedPlacementPolicy(jobs, edges, placementPolicy)
+	if placementPolicy.FallbackToGit {
+		warnings = append(warnings, "blob_configured=false: generated workflow uses git_compatible placement for blob-routable exhaust.")
+	}
 	// #301: reconcile lane worktree isolation against the jobs that were actually
 	// compiled. compileLanes applies the #242 per-job isolation default using a
 	// lane-name heuristic (every non-`*reviewer*` lane is repo-write), but in
@@ -396,6 +417,9 @@ func Generate(spec Spec) (Generated, error) {
 		"jobs":             jobs,
 		"edges":            edges,
 		"cycles":           cycles,
+	}
+	if placementPolicy.Posture != "" {
+		workflow["artifact_placement_posture"] = placementPolicy.Posture
 	}
 	if isPhasedShape(spec.Shape) {
 		workflow["phases"] = phases
@@ -456,13 +480,17 @@ func Generate(spec Spec) (Generated, error) {
 		files = append(files, extras...)
 	}
 	metadata := map[string]any{
-		"shape":             spec.Shape,
-		"lane_set":          spec.LaneSet,
-		"lane_modifiers":    append([]string(nil), spec.LaneModifiers...),
-		"graph":             graph,
-		"catalog_templates": []string{spec.Shape, spec.LaneSet},
-		"scaffold_root":     spec.ScaffoldRoot,
-		"workflow_path":     spec.ScaffoldRoot + "/workflow.json",
+		"shape":                      spec.Shape,
+		"lane_set":                   spec.LaneSet,
+		"lane_modifiers":             append([]string(nil), spec.LaneModifiers...),
+		"graph":                      graph,
+		"catalog_templates":          []string{spec.Shape, spec.LaneSet},
+		"scaffold_root":              spec.ScaffoldRoot,
+		"workflow_path":              spec.ScaffoldRoot + "/workflow.json",
+		"artifact_placement_posture": placementPolicy.Posture,
+	}
+	if placementPolicy.BlobConfigured != nil {
+		metadata["blob_configured"] = *placementPolicy.BlobConfigured
 	}
 	if spec.Shape == "implementation_panel" {
 		rolePacks, err := panelRolePacks(spec)
@@ -805,6 +833,9 @@ func generatedArtifactPlacement(jobID, jobType, artifactKind, logicalName, artif
 	if generatedGitPublicationArtifact(jobID, jobType, artifactKind, logicalName, artifactPath) {
 		return artifactcontracts.PlacementGitPublication
 	}
+	if generatedDialogueExhaustArtifact(artifactKind, artifactPath) {
+		return artifactcontracts.PlacementBlobExhaust
+	}
 	if generatedBlobExhaustArtifact(artifactKind) {
 		return artifactcontracts.PlacementBlobExhaust
 	}
@@ -820,6 +851,9 @@ func generatedGitPublicationArtifact(jobID, jobType, artifactKind, logicalName, 
 	kind := strings.TrimSpace(artifactKind)
 	if kind == "decision" || kind == "commit_request" || kind == "pr_request" ||
 		kind == "operator_brief" || kind == "work_plan" || kind == "escalation" {
+		return true
+	}
+	if kind == "synthesis" {
 		return true
 	}
 	text := strings.ToLower(strings.Join([]string{jobID, jobType, logicalName, artifactPath}, " "))
@@ -985,7 +1019,7 @@ func roleStub(role string) string {
 		return content
 	}
 	if role == "reviewer" {
-		return "# Reviewer Role\n\nYou are the reviewer for this workflow. Read the upstream draft and write a single review-only finding artifact at the declared path; do not modify other files.\n"
+		return "# Reviewer Role\n\nYou are the reviewer for this workflow. Read the upstream artifact through the work packet inputs. If an input is blob-routed, use artifact.get_content or the packet-provided artifact context; do not assume the body is present on the run branch. Write a single review-only finding artifact at the declared path; do not modify other files.\n"
 	}
 	return "# Author Role\n\nYou are the author for this workflow. Produce the expected handoff artifact at the path declared in the workflow. Stay inside the declared write scope.\n"
 }
@@ -995,7 +1029,7 @@ func promptStub(prompt string) string {
 	case "draft.md":
 		return "Draft the initial artifact described by the workflow. Replace this stub with the concrete authoring instructions for your team.\n"
 	case "review.md":
-		return "Review the upstream draft and record a finding with one of the supported verdicts. Replace this stub with reviewer guidance.\n"
+		return "Review the upstream draft and record a finding with one of the supported verdicts. Use the work packet inputs for upstream artifacts; blob-routed inputs must be read through artifact.get_content or explicit packet context, not by assuming the body is on the run branch. Replace this stub with reviewer guidance.\n"
 	case "apply.md":
 		return "Apply the accepted review by producing the final synthesis artifact. Replace this stub with concrete apply instructions.\n"
 	case "collaboration_holder.md":

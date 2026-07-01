@@ -7,13 +7,21 @@ const (
 	PlacementGitPublication     = "git_publication"
 	PlacementGitPointerManifest = "git_pointer_manifest"
 
-	BlobRequiredPosture = "blob_required"
+	BlobPreferredPosture = "blob_preferred"
+	BlobRequiredPosture  = "blob_required"
+	GitCompatiblePosture = "git_compatible"
 )
 
 var allowedPlacements = map[string]bool{
 	PlacementBlobExhaust:        true,
 	PlacementGitPublication:     true,
 	PlacementGitPointerManifest: true,
+}
+
+var allowedPlacementPostures = map[string]bool{
+	BlobPreferredPosture: true,
+	BlobRequiredPosture:  true,
+	GitCompatiblePosture: true,
 }
 
 var legacyBlobExhaustKinds = map[string]bool{
@@ -39,8 +47,33 @@ func AllowedPlacementList() []string {
 	return []string{PlacementBlobExhaust, PlacementGitPublication, PlacementGitPointerManifest}
 }
 
+func AllowedPlacementPostureList() []string {
+	return []string{BlobPreferredPosture, BlobRequiredPosture, GitCompatiblePosture}
+}
+
 func IsAllowedPlacement(placement string) bool {
 	return allowedPlacements[strings.TrimSpace(placement)]
+}
+
+func IsAllowedPlacementPosture(posture string) bool {
+	return allowedPlacementPostures[strings.TrimSpace(posture)]
+}
+
+func NormalizePlacementPosture(value any) (string, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case BlobPreferredPosture, "preferred":
+		return BlobPreferredPosture, true
+	case BlobRequiredPosture, "required":
+		return BlobRequiredPosture, true
+	case GitCompatiblePosture, "compatibility", "compatible", "git", "git_publication":
+		return GitCompatiblePosture, true
+	default:
+		return "", false
+	}
 }
 
 func LegacyBlobExhaustKindSet() map[string]bool {
@@ -108,14 +141,6 @@ func boolish(value any) bool {
 }
 
 func blobRequiredToken(value any) bool {
-	text, ok := value.(string)
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(text)) {
-	case BlobRequiredPosture, "required":
-		return true
-	default:
-		return false
-	}
+	posture, ok := NormalizePlacementPosture(value)
+	return ok && posture == BlobRequiredPosture
 }
