@@ -1060,7 +1060,6 @@ func registerHandlers(server *rpc.Server, runner db.Runner, opts ...handlerOptio
 		"run.pause", "run.resume", "run.cancel", "run.retry_job", "repo.init",
 		"recovery.stale_leases", "recovery.requeue_stale",
 		"recovery.cancel_job", "recovery.process_reconcile", "recovery.resume",
-		"recovery.auto",
 		"repo.add", "repo.remove", "daemon.token.create", "daemon.token.revoke",
 		"daemon.token.rotate", "daemon.key.rotate", "daemon.shutdown",
 		"daemon.migrate", "ack", "heartbeat",

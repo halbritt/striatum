@@ -2036,9 +2036,10 @@ daemon-owned PostgreSQL scheduler cursors.
 `recovery auto-publish --run-id <id> [--dry-run]` emits the explicit
 `recovery.auto_publish_stale_artifacts` daemon method. It is the
 stale-lease auto-publish path for declared on-disk expected artifacts.
-The deprecated `recovery.auto` daemon method remains only as a
-compatibility alias for older clients and is not emitted by the current
-CLI.
+The deprecated `recovery.auto` daemon method is retired; stale direct RPC or
+MCP calls audit as `method_unknown`. Use `recovery.sweep` for the one-shot
+recovery sweep or `recovery.auto_publish_stale_artifacts` for the explicit
+stale-artifact auto-publish path.
 
 `recovery watch --run-id <id>` (RFC 0020 step 3) is the long-lived
 counterpart for operators who want one foreground command instead of

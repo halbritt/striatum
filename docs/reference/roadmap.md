@@ -816,15 +816,16 @@ workflow-file metadata a live authority.
   auto-from-artifact reconciliation, and PG evidence artifact summaries expose
   `publish_origin=auto_from_artifact`.
 - CLI routing and the shared daemon method contract include the split
-  `recovery.auto_finalize` method instead of overloading `recovery.auto`.
+  `recovery.auto_finalize` method instead of the former overloaded
+  `recovery.auto` shape.
 - Status/dashboard projections now include an `auto_finalize_dry_run` preview
   with eligible candidates and refusal reasons, and the web recovery panel can
   render the same read-only preview while live auto-finalize is globally
   allowed by policy.
 - The recovery method surface is split: `recovery.sweep` is the canonical
   daemon RPC for `striatum recovery auto`, `recovery auto-publish` emits
-  `recovery.auto_publish_stale_artifacts`, and deprecated `recovery.auto`
-  remains only as a compatibility alias for stale-artifact auto-publish.
+  `recovery.auto_publish_stale_artifacts`, and the former deprecated
+  `recovery.auto` alias is retired as `method_unknown`.
 - The sweep invokes live auto-finalize before lazy lease expiry unless the
   workflow explicitly opts out and never supplies the standalone force override.
 - PostgreSQL sweep executes configured checkpoint-timeout escalation hooks in

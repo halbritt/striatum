@@ -93,7 +93,7 @@ func (s *Server) handle(ctx context.Context, envelope Envelope, connectionID str
 		err = NewError("version_incompatible", "daemon.hello must run before ordinary RPC routes", nil)
 		auth = deniedAuth(auth, "version_incompatible")
 	} else if !known {
-		err = NewError("method_unknown", fmt.Sprintf("unknown daemon RPC method: %s", envelope.Method), nil)
+		err = unknownMethodError(envelope.Method)
 		auth = deniedAuth(auth, "method_unknown")
 	} else if entry.RepositoryScope && repositoryID(envelope.Params) == "" {
 		err = NewError("repo_not_registered", "daemon RPC route requires repository_id", nil)
@@ -163,6 +163,22 @@ func (s *Server) handle(ctx context.Context, envelope Envelope, connectionID str
 		}
 	}
 	return response
+}
+
+var retiredMethodReplacements = map[string]string{
+	"recovery.auto": "recovery.sweep",
+}
+
+func unknownMethodError(method string) *Error {
+	if replacement, ok := retiredMethodReplacements[method]; ok {
+		err := NewError("method_unknown", fmt.Sprintf("retired daemon RPC method: %s; use %s", method, replacement), map[string]any{
+			"retired_method":     method,
+			"replacement_method": replacement,
+		})
+		err.Suggestion = fmt.Sprintf("Use %s or the current CLI route documented in docs/reference/command-authority-matrix.md.", replacement)
+		return err
+	}
+	return NewError("method_unknown", fmt.Sprintf("unknown daemon RPC method: %s", method), nil)
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {

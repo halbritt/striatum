@@ -129,7 +129,6 @@ var methodEntries = []MethodEntry{
 	{Method: "recovery.process_reconcile", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "recovery.resume", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "recovery.sweep", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
-	{Method: "recovery.auto", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1, Deprecated: true},
 	{Method: "recovery.auto_publish_stale_artifacts", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "recovery.auto_finalize", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},
 	{Method: "recovery.invalidate_job", RequiredCapability: CapPtr(CapabilityRecovery), RepositoryScope: true, RepositoryScopeMode: ScopeSingleRepo, ParamsSchemaVersion: 1, AuditClass: "metadata", MinEnvelope: 1},

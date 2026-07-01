@@ -208,7 +208,6 @@ delivery bridge or the supervisor is restarted.
 | `recovery.resume` | `recovery resume` | recovery | single_repo | pg | real | no | no | stable |
 | `recovery.sweep` | `recovery auto` | recovery | single_repo | pg | real | no | no | canonical one-shot recovery sweep; runs workflow-opt-in auto-finalize before lazy lease expiry; `retry_quarantined_lane_uids=true` explicitly reruns RFC 0168 uid scrub proof for quarantined uid leases and returns them only on clean P1-P5 proof. RFC 0143 Slice B uses daemon-internal `CapabilityReseal` here only for exact rotation-lockout jobs whose same-run lane UID lease id/generation/session/supervisor/uid still matches active daemon state; there is no public `reseal` route or grantable bearer. |
 | `recovery.auto_publish_stale_artifacts` | `recovery auto-publish` | recovery | single_repo | pg | real | no | no | explicit stale-artifact auto-publish |
-| `recovery.auto` | deprecated alias | recovery | single_repo | pg alias | real | no | no | deprecated compatibility alias for stale-artifact auto-publish; current CLI does not emit it |
 | `recovery.auto_finalize` | `recovery auto-finalize` | recovery | single_repo | pg | real | no | no | dry-run by default; Go handler registered; live mode requires workflow opt-in or force |
 | `recovery.invalidate_job` | `recovery invalidate-job` | recovery | single_repo | pg | real | no | no | RFC 0118 P1-6 per-job invalidate; supersedes a compromised verdict under a scoped decision and reopens the job on a fresh attempt |
 | `recovery.reseal` | `recovery reseal` | recovery | single_repo | pg | real | no | no | RFC 0125 P1-2 (D192); re-probes worktree-durability for a (run_id, job_id) and, on pass, requeues the SAME attempt (no attempt bump) so a remediated durability blocker completes without duplicating provenance |
@@ -276,10 +275,10 @@ calling daemon RPC methods.
 2. `recovery.sweep` is now the canonical RFC 0020 one-shot recovery
    sweep emitted by `striatum recovery auto`. `recovery auto-publish`
    emits the explicit `recovery.auto_publish_stale_artifacts` method.
-   `recovery.auto` remains only as a deprecated compatibility alias for
-   older stale-artifact auto-publish clients. `striatum recovery watch`
-   is CLI-local scheduler glue over `recovery.sweep`, not a registered
-   `recovery.watch` RPC method.
+   The former deprecated `recovery.auto` daemon RPC alias is retired; stale
+   direct calls audit as `method_unknown` and should use `recovery.sweep`.
+   `striatum recovery watch` is CLI-local scheduler glue over
+   `recovery.sweep`, not a registered `recovery.watch` RPC method.
 3. `repo.add`, `repo.list`, and `repo.remove` now route through daemon RPC
    and register against `striatumd.repositories` without opening or creating
    `.striatum/retired-local-state`; `--init` creates only operational scratch.

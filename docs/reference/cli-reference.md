@@ -713,8 +713,8 @@ rows, `STRIATUM_ESCALATION_NOTIFY_URL` opts into a best-effort post-commit JSON
 POST to loopback or tailnet HTTP(S) targets only. Dry-runs do not notify, and
 notification success or failure is not authoritative. `recovery auto-publish`
 emits the explicit
-`recovery.auto_publish_stale_artifacts` method; the deprecated `recovery.auto`
-alias is not emitted by the current CLI.
+`recovery.auto_publish_stale_artifacts` method. The deprecated `recovery.auto`
+daemon RPC alias is retired; stale direct RPC calls audit as `method_unknown`.
 D184 allows the sweep to auto-cancel an abandoned running run after the default
 24h threshold when there are no live sessions, no live supervisors or supervised
 processes, no active leases, and no progress or durable events in the threshold

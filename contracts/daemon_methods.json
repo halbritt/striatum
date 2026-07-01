@@ -1242,20 +1242,6 @@
       "deprecated": false
     },
     {
-      "method": "recovery.auto",
-      "required_capability": "recovery",
-      "repository_scope_mode": "single_repo",
-      "params_schema_version": 1,
-      "audit_class": "metadata",
-      "min_envelope": 1,
-      "deprecated": true,
-      "route_budget": {
-        "kind": "deprecated_alias",
-        "canonical_method": "recovery.auto_publish_stale_artifacts",
-        "retirement_plan": "Retire under P1-DEPRECATED-ROUTES in docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md once compatibility clients stop emitting recovery.auto."
-      }
-    },
-    {
       "method": "recovery.auto_publish_stale_artifacts",
       "required_capability": "recovery",
       "repository_scope_mode": "single_repo",

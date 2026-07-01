@@ -102,7 +102,6 @@ func TestRegisterInstallsInitialMutationHandlers(t *testing.T) {
 		"recovery.resume",
 		"recovery.sweep",
 		"recovery.auto_publish_stale_artifacts",
-		"recovery.auto",
 		"recovery.auto_finalize",
 		"recovery.invalidate_job",
 		"supervise.report",
@@ -122,6 +121,9 @@ func TestRegisterInstallsInitialMutationHandlers(t *testing.T) {
 		if !errors.As(err, &rpcErr) || rpcErr.Code != "repo_not_registered" {
 			t.Fatalf("%s handler did not run expected repo-scope validation: %v", method, err)
 		}
+	}
+	if _, ok := server.Handlers["recovery.auto"]; ok {
+		t.Fatal("retired recovery.auto alias must not remain registered")
 	}
 }
 
@@ -399,31 +401,30 @@ func TestRunPrepareUsesWorkflowAuthoringLoaderForRejectedPaths(t *testing.T) {
 	}
 }
 
-func TestRecoveryAutoPublishCanonicalAndDeprecatedAliasRequireRunID(t *testing.T) {
+func TestRecoveryAutoPublishRequiresRunID(t *testing.T) {
 	server := rpc.NewServer()
 	Register(server, inertRunner{})
 
-	for _, method := range []string{"recovery.auto_publish_stale_artifacts", "recovery.auto"} {
-		handler := server.Handlers[method]
-		if handler == nil {
-			t.Fatalf("%s was not registered", method)
-		}
-		_, err := handler(context.Background(), rpc.Envelope{
-			SchemaVersion: rpc.SupportedEnvelopeVersion,
-			RequestID:     "req_" + method,
-			Method:        method,
-			Params:        map[string]any{"repository_id": "repo_1"},
-		})
-		rpcErr := &rpc.Error{}
-		if !errors.As(err, &rpcErr) {
-			t.Fatalf("%s returned non-rpc error: %v", method, err)
-		}
-		if rpcErr.Code != "schema_invalid" {
-			t.Fatalf("%s error code = %q", method, rpcErr.Code)
-		}
-		if rpcErr.Message != "recovery.auto_publish_stale_artifacts requires run_id" {
-			t.Fatalf("%s error message = %q", method, rpcErr.Message)
-		}
+	method := "recovery.auto_publish_stale_artifacts"
+	handler := server.Handlers[method]
+	if handler == nil {
+		t.Fatalf("%s was not registered", method)
+	}
+	_, err := handler(context.Background(), rpc.Envelope{
+		SchemaVersion: rpc.SupportedEnvelopeVersion,
+		RequestID:     "req_" + method,
+		Method:        method,
+		Params:        map[string]any{"repository_id": "repo_1"},
+	})
+	rpcErr := &rpc.Error{}
+	if !errors.As(err, &rpcErr) {
+		t.Fatalf("%s returned non-rpc error: %v", method, err)
+	}
+	if rpcErr.Code != "schema_invalid" {
+		t.Fatalf("%s error code = %q", method, rpcErr.Code)
+	}
+	if rpcErr.Message != "recovery.auto_publish_stale_artifacts requires run_id" {
+		t.Fatalf("%s error message = %q", method, rpcErr.Message)
 	}
 }
 

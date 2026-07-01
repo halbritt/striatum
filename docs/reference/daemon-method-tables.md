@@ -132,7 +132,6 @@
 | `recovery.process_reconcile` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.resume` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.sweep` | `recovery` | `single_repo` | 1 | 1 | no |
-| `recovery.auto` | `recovery` | `single_repo` | 1 | 1 | yes |
 | `recovery.auto_publish_stale_artifacts` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.auto_finalize` | `recovery` | `single_repo` | 1 | 1 | no |
 | `recovery.invalidate_job` | `recovery` | `single_repo` | 1 | 1 | no |

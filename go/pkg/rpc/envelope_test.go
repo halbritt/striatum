@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,33 @@ func TestHelloThenDescribe(t *testing.T) {
 	}
 	if response.Data["methods_etag"] == "" {
 		t.Fatalf("missing methods etag: %#v", response.Data)
+	}
+}
+
+func TestRetiredDeprecatedRouteReturnsMethodUnknownWithReplacement(t *testing.T) {
+	server := NewServer()
+	response := server.HandleWithoutHandshake(context.Background(), Envelope{
+		SchemaVersion: SupportedEnvelopeVersion,
+		RequestID:     "req_retired_recovery_auto",
+		Method:        "recovery.auto",
+		Params:        map[string]any{"repository_id": "repo_1"},
+	}, "mcp")
+
+	if response.OK {
+		t.Fatalf("retired recovery.auto unexpectedly succeeded: %#v", response.Data)
+	}
+	if response.Data["code"] != "method_unknown" {
+		t.Fatalf("retired recovery.auto code = %#v, want method_unknown; data=%#v", response.Data["code"], response.Data)
+	}
+	details, ok := response.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("retired recovery.auto missing details: %#v", response.Data)
+	}
+	if details["retired_method"] != "recovery.auto" || details["replacement_method"] != "recovery.sweep" {
+		t.Fatalf("retired recovery.auto details = %#v", details)
+	}
+	if suggestion, _ := response.Data["suggestion"].(string); !strings.Contains(suggestion, "recovery.sweep") {
+		t.Fatalf("retired recovery.auto suggestion = %q, want replacement method", suggestion)
 	}
 }
 

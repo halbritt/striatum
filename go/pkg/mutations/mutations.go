@@ -168,7 +168,6 @@ func Register(server *rpc.Server, runner db.Runner, opts ...Options) {
 	server.Register("recovery.resume", makeHandler(runner, HandleRecoveryResume))
 	server.Register("recovery.sweep", makeHandler(runner, HandleRecoveryAuto))
 	server.Register("recovery.auto_publish_stale_artifacts", makeHandler(runner, HandleRecoveryAuto))
-	server.Register("recovery.auto", makeHandler(runner, HandleRecoveryAuto))
 	server.Register("recovery.auto_finalize", makeHandler(runner, HandleRecoveryAutoFinalize))
 	server.Register("recovery.invalidate_job", makeHandler(runner, HandleRecoveryInvalidateJob))
 	server.Register("recovery.reseal", makeHandler(runner, HandleRecoveryReseal))
