@@ -42,8 +42,8 @@ changes without route-budget metadata.
 
 D107 / RFC 0068 supersedes D105. The Go columns below are no longer
 D105-bounded reference material; they are the production-port backlog. Any
-`placeholder` or SQLite-backed row is active debt before the Python daemon can
-retire. D110 removed the SQLite-bound `daemon.migrate_repo_local`,
+`placeholder` or SQLite-backed production row is active debt against the
+Go-only contract. D110 removed the SQLite-bound `daemon.migrate_repo_local`,
 `dogfood.publish_on_behalf`, and `dogfood.surgical_recovery` RPC names from
 the production contract; D112 removed `apply.reviewed_patch` as well. These
 names no longer appear as registered methods, and stale calls audit as
@@ -54,18 +54,18 @@ pre-RFC-0078 rows; it is not a current implementation surface.
 
 Legend:
 
-- **python authority**: `pg` means a native Python Postgres handler is
-  registered. `direct` means `DaemonRpcRouter` handles the method without
-  `CLI_ROUTES`.
+- **python authority**: retirement-provenance classification. `pg` means a
+  native Python Postgres handler existed before RFC 0078. `direct` means
+  `DaemonRpcRouter` handled the method without `CLI_ROUTES`.
   `local_file_authoring` means the CLI implements a repository-file helper
   directly and daemon RPC fails closed instead of falling back.
 - **go authority**: `real` means a production Go handler is registered.
   `placeholder` means the Go fixture returns `not_implemented`.
   Removed unsupported methods are absent from this table and audit as
   `method_unknown`.
-- **sqlite dependency** names whether production execution can still open
-  repo-local SQLite through dogfood compatibility helpers, local legacy
-  service surfaces, or migration-only paths.
+- **sqlite dependency** records whether the historical row could open
+  repo-local SQLite through dogfood compatibility helpers, local legacy service
+  surfaces, or migration-only paths.
 
 ## Direct PostgreSQL Bootstrap/Admin Plane
 

@@ -1,8 +1,7 @@
-// Package installers ports the RFC 0015 skill bundle and RFC 0025 plugin
-// bundle install pipelines from Python (src/striatum/skills, src/striatum/plugins)
-// to Go. Template files are embedded as Go assets (mirroring go/pkg/webassets)
-// so the binary is self-contained; the rendered bundles match the curated
-// context tables the Python installer used (verbs, boundaries, artifact kinds).
+// Package installers renders the RFC 0015 skill bundle and RFC 0025 plugin
+// bundle install pipelines from embedded Go assets. The rendered bundles keep
+// the curated context tables from the retired installer path: verbs,
+// boundaries, and artifact kinds.
 package installers
 
 import (
@@ -15,8 +14,8 @@ import (
 
 // embedded carries the byte-equivalent copies of the template trees that
 // previously lived under src/striatum/skills/templates and
-// src/striatum/plugins/templates. The Python __init__.py package-data markers
-// are intentionally not embedded (RFC 0078 Gate B drops them).
+// src/striatum/plugins/templates. Retired package-data markers are
+// intentionally not embedded (RFC 0078 Gate B drops them).
 //
 //go:embed templates/skills templates/plugins templates/optional
 var embedded embed.FS

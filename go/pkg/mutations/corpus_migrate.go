@@ -18,8 +18,8 @@ import (
 // bulk-migrate `docs/dogfood/` into the per-repo S3 bucket. One call
 // per file: the CLI walks the on-disk tree, base64-encodes each
 // body, and POSTs through this handler. Centralizing the upload here
-// lets the Python CLI stay free of any S3 client library — the same
-// `*blob.Client` the live publish path uses is reused.
+// keeps the CLI wrapper free of S3 client details; the same `*blob.Client`
+// the live publish path uses is reused.
 //
 // Required params: repository_id, dogfood_id, rel_path, body_base64.
 // Optional params: content_type, dry_run.

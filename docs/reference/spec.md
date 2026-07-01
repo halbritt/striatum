@@ -57,7 +57,8 @@ every single-repo mutation, recovery, and read handler had a native
 PostgreSQL implementation before the Go cutover. D107 / RFC 0068 and D111
 set the current target architecture: the production daemon is Go; the Python
 daemon module and selector are removed; and the Python MCP wrapper is removed.
-RFC 0078 removes all Python traces from the active repository head.
+RFC 0078 removes the Python runtime, source tree, CLI/web surfaces, and tests
+from the active implementation.
 The legacy local-state package, root DB/migration facades, direct corpus
 exporter, V1 local-state schema module, deterministic repo-local fixture,
 and broad skipped compatibility tests are deleted. Remaining

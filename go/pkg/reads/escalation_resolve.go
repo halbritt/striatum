@@ -397,8 +397,8 @@ func withResolveRetryOnDeadlock(ctx context.Context, runner db.Runner, fn func(d
 
 // withResolveTx runs escalation.resolve's body inside an authorized mutation
 // transaction. Although escalation.resolve is registered in the reads package
-// (its Python parity handler lives beside the escalation projection), it is a
-// write verb: it must open its transaction the same way every mutation verb does
+// for route compatibility with the escalation projection, it is a write verb:
+// it must open its transaction the same way every mutation verb does
 // (db.BeginAuthorizedMutation, via the mutations withTx chokepoint) so the RFC
 // 0110 authority/attribution prelude is the transaction's first statement. Under
 // pg_write_boundary=full the event append routes through the owner-owned SECURITY

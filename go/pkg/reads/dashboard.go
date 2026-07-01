@@ -11,10 +11,9 @@ import (
 	"github.com/halbritt/striatum/go/pkg/sessionliveness"
 )
 
-// HandleDashboard mirrors reads/dashboard.py.
-// Returns the same shape as the legacy SQLite dashboard render: job
-// state counts, verdict counts, blocker counts, session list, claimable
-// summary, and the last 10 events.
+// HandleDashboard returns the repository dashboard projection: job state
+// counts, verdict counts, blocker counts, session list, claimable summary,
+// and recent events.
 func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	repositoryID, err := requireRepositoryID(envelope)
 	if err != nil {
@@ -23,8 +22,7 @@ func HandleDashboard(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	runID := stringParam(envelope, "run_id")
 	if runID == "" {
 		// Fall back to the most recent run for the repository so the
-		// dashboard verb works without explicit --run-id (the Python
-		// path does the same).
+		// dashboard verb works without explicit --run-id.
 		latest, err := collectRows(ctx, runner,
 			`SELECT run_id FROM striatumd.runs
 			  WHERE repository_id = $1

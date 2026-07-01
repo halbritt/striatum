@@ -16,8 +16,8 @@ const protocolVersion = 1
 // HandleDashboardAll returns the daemon-global dashboard projection over the
 // daemon-owned PostgreSQL registry and per-repository workflow tables.
 //
-// This is intentionally SELECT-only. Unlike the legacy Python/SQLite path, it
-// does not lazily expire leases while rendering a dashboard frame.
+// This is intentionally SELECT-only: rendering a dashboard frame does not
+// lazily expire leases.
 func HandleDashboardAll(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	if runner == nil {
 		return nil, rpc.NewError("daemon_db_missing", "dashboard.all requires daemon PostgreSQL", nil)

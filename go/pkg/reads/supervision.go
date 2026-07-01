@@ -58,9 +58,9 @@ func SetTmuxRunnerForTest(runner gosupervisor.TmuxRunner) func() {
 	}
 }
 
-// HandleSuperviseStatus mirrors the read projection of the Python
-// supervise.status handler. It deliberately does not drain helper files,
-// reattach rows, or mark missing PIDs lost; those are mutation surfaces.
+// HandleSuperviseStatus returns the read projection for supervise.status. It
+// deliberately does not drain helper files, reattach rows, or mark missing PIDs
+// lost; those are mutation surfaces.
 func HandleSuperviseStatus(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	repositoryID, err := requireRepositoryID(envelope)
 	if err != nil {

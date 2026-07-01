@@ -16,7 +16,7 @@ type planEntry struct {
 	TemplateSHA256 string
 }
 
-// fileResult mirrors the per-file dict the Python installers return.
+// fileResult is one per-file result returned by installer planning/apply.
 type fileResult struct {
 	Path         string  `json:"path"`
 	Status       string  `json:"status"`
@@ -32,7 +32,8 @@ type manifestFile struct {
 	TemplateSHA256 string `json:"template_sha256"`
 }
 
-// manifestDoc is the on-disk manifest. Field order matches the Python writer.
+// manifestDoc is the on-disk manifest. Field order is stable for compatibility
+// with existing generated manifests.
 type manifestDoc struct {
 	SchemaVersion   string         `json:"schema_version"`
 	StriatumVersion string         `json:"striatum_version"`

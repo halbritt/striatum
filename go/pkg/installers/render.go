@@ -73,7 +73,7 @@ func renderFrontMatterSchemaSkeletons() string {
 	return strings.Join(lines, "\n\n")
 }
 
-// formatMap emulates the subset of Python str.format_map the templates rely on:
+// formatMap implements the subset of str.format_map the templates rely on:
 // {{ and }} are literal braces, {name} substitutes from the mapping (raising on
 // an unknown key, like _StrictFormatMap). Format specs/conversions are not used
 // by the bundle templates; a name segment before ':' or '!' is honored if one

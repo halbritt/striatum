@@ -14,10 +14,9 @@ import (
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
 
-// HandleRunSummary mirrors reads/run_summary.py — a redaction-safe
-// snapshot of the run's jobs, artifacts, verdicts, and a doctor block.
-// In the Go port the doctor block calls HandleDoctor for parity with
-// the Python implementation post-v1.52.0.
+// HandleRunSummary returns a redaction-safe snapshot of the run's jobs,
+// artifacts, verdicts, and doctor block. The doctor block calls HandleDoctor
+// so run.summary and doctor share the current health semantics.
 func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	repositoryID, err := requireRepositoryID(envelope)
 	if err != nil {

@@ -1,7 +1,6 @@
-// Package reads contains the Go RFC 0048 Phase B transition handlers for
-// read-surface CLI verbs. Each exported Handle* function mirrors a Python
-// read handler in src/striatum/daemon_pg/handlers/reads/ and returns the same
-// top-level JSON shape so compatibility fixtures can compare the two paths.
+// Package reads contains the production Go read-surface handlers. Each
+// exported Handle* function returns the stable top-level JSON shape used by
+// daemon RPC, CLI, MCP, and web projections.
 //
 // Scope (this file holds the shared helpers; per-method files in this
 // package hold the handlers):
@@ -12,8 +11,8 @@
 //
 // Most handlers scope by repository_id. dashboard.all is the daemon-global
 // aggregate read, and escalation.resolve is the one exception to the
-// SELECT-only rule because its Python parity handler lives beside the
-// escalation projection.
+// SELECT-only rule because it is route-compatible with the escalation
+// projection.
 package reads
 
 import (

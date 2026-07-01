@@ -1036,8 +1036,7 @@ func registerHandlers(server *rpc.Server, runner db.Runner, opts ...handlerOptio
 	daemonapply.Service{Runner: runner}.Register(server)
 	// RFC 0048 Phase B: register the Go-core read-surface handlers
 	// before the not-implemented stub loop so the loop's existence-check
-	// skips them. Mirrors src/striatum/daemon_pg/handlers/reads/ in
-	// Python; same response shapes.
+	// skips them while preserving the established response shapes.
 	reads.Register(server, runner, reads.Options{BlobClient: options.BlobClient, StriatumVersion: daemonVersion})
 	mutations.Register(server, runner, mutations.Options{BlobClient: options.BlobClient, DaemonSocketPath: options.DaemonSocketPath, MCPBootEpoch: options.MCPBootEpoch, RecallDigest: options.RecallDigest})
 	repositories.Service{Runner: runner, BlobClient: options.BlobClient}.Register(server)

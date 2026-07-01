@@ -1,17 +1,16 @@
 package installers
 
-// Template context for skill/plugin rendering. Ported verbatim from
-// src/striatum/skills/context.py so the rendered bundles are byte-equivalent
-// to the Python installer for a given runner version. Order is presentation
-// order in the rendered Markdown; do not sort the verb groups alphabetically.
+// Template context for skill/plugin rendering. The rendered bundles preserve
+// the retired installer's output for a given runner version. Order is
+// presentation order in the rendered Markdown; do not sort the verb groups
+// alphabetically.
 
 type verbEntry struct {
 	Verb    string
 	Summary string
 }
 
-// verbGroups mirrors VERB_TABLE. Slices preserve the curated insertion order
-// that Python dicts guaranteed.
+// verbGroups mirrors VERB_TABLE. Slices preserve the curated insertion order.
 var verbGroups = map[string][]verbEntry{
 	"scaffold": {
 		{"repo add", "Register the target repo with the daemon (live state lives in the daemon's PostgreSQL under a `repository_id` scope per D094 / RFC 0043)."},
@@ -66,8 +65,8 @@ var boundaries = []string{
 	"Do not paste over a broken runner: never hand-finish stranded or wedged work (manual worktree capture, cherry-pick, or hand-commit) and report it complete, and never proceed while `doctor` is red — recover through the daemon (`recovery requeue-stale`/`resume`/`complete-stalled`, `checkpoint resolve`) or surface the defect (file an issue, record the friction, escalate) instead of masking it as a success.",
 }
 
-// frontMatterKinds mirrors sorted(ALLOWED_ARTIFACT_KINDS) from
-// src/striatum/artifact_contracts.py. Kept sorted to match the Python output.
+// frontMatterKinds mirrors sorted(ALLOWED_ARTIFACT_KINDS) from the retired
+// artifact-contract source. Kept sorted for stable output.
 var frontMatterKinds = []string{
 	"action_item_ledger",
 	"auto_finalize_gate_evidence",
