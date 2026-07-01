@@ -165,6 +165,8 @@ func evidencePolicyForTopLevel(key string, value any) any {
 		"blocked_downstream_jobs":              blockedDownstreamPolicy(),
 		"next_actions":                         objectPolicy{"_items": "safe"},
 		"ok":                                   "safe",
+		"availability_ok":                      "safe",
+		"provenance_ok":                        "safe",
 		"schema_version":                       "safe",
 		"problems":                             objectPolicy{"_items": "safe"},
 		"exported_at":                          "safe",
@@ -174,7 +176,7 @@ func evidencePolicyForTopLevel(key string, value any) any {
 		"sessions":                             sessionListPolicy(),
 		"verdicts":                             verdictListPolicy(false),
 		"blockers":                             blockerListPolicy(),
-		"doctor":                               objectPolicy{"ok": "safe", "problems": objectPolicy{"_items": "safe"}},
+		"doctor":                               objectPolicy{"ok": "safe", "availability_ok": "safe", "provenance_ok": "safe", "problems": objectPolicy{"_items": "safe"}},
 	}
 	if policy, ok := policies[key]; ok {
 		return policy

@@ -75,6 +75,18 @@ Two rules to internalize before you do anything else:
 The full list of boundaries lives in each SKILL.md's "What not to
 do" section.
 
+## Doctor health planes
+
+`striatum doctor --json` returns the compatibility `ok` bit plus
+`availability_ok` and `provenance_ok`. Treat `availability_ok=false` as a
+stop-and-fix signal for live workflow control: do not launch, recover, or
+continue lanes on top of an unavailable runner. Treat `provenance_ok=false` as
+a stop-and-fix signal for operations that depend on durable evidence,
+especially artifact/worktree durability loss, chain proof gaps, or recovery-gate
+breaches. Advisory notices and provenance-only warnings do not freeze unrelated
+read-only inspection or operator coordination; they should stay visible without
+being treated as a universal workflow outage.
+
 ## The workflow loop
 
 You will repeat this loop until the run reaches a terminal state.

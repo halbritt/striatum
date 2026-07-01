@@ -52,6 +52,12 @@ func TestHandleDoctorFlagsRecoverySweepCursorWedgedClaimableRun(t *testing.T) {
 	if result["ok"] == true {
 		t.Fatalf("doctor ok = true, want false")
 	}
+	if result["availability_ok"] == true {
+		t.Fatalf("availability_ok = true, want false")
+	}
+	if result["provenance_ok"] != true {
+		t.Fatalf("provenance_ok = %v, want true", result["provenance_ok"])
+	}
 	problems := strings.Join(result["problems"].([]string), "\n")
 	if !strings.Contains(problems, "recovery_sweep_cursor_wedged.run_wedged") {
 		t.Fatalf("problems missing recovery cursor wedge:\n%s", problems)
@@ -64,6 +70,9 @@ func TestHandleDoctorFlagsRecoverySweepCursorWedgedClaimableRun(t *testing.T) {
 	found := false
 	for _, record := range records {
 		if record["check"] == "recovery_sweep_cursor_wedged" && record["run_id"] == "run_wedged" {
+			if record["plane"] != doctorProblemPlaneAvailability {
+				t.Fatalf("recovery_sweep_cursor_wedged plane = %v, want %s", record["plane"], doctorProblemPlaneAvailability)
+			}
 			found = true
 		}
 	}

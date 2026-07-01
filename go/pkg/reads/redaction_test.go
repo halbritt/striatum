@@ -121,7 +121,7 @@ func TestEvidenceRedactionDefaultDenyAndSafeScalars(t *testing.T) {
 func TestRunSummaryAndArchiveRedactProseFields(t *testing.T) {
 	summary := redactRunSummaryPayload(map[string]any{
 		"status":         map[string]any{"runs": []any{map[string]any{"run_id": "run_1", "secret": "x"}}},
-		"doctor":         map[string]any{"ok": true, "problems": []any{}, "secret": "x"},
+		"doctor":         map[string]any{"ok": false, "availability_ok": false, "provenance_ok": true, "problems": []any{}, "secret": "x"},
 		"blockers":       []any{map[string]any{"blocker_id": "blk", "description": "secret", "state": "open"}},
 		"branch_context": map[string]any{},
 		"timing":         map[string]any{"completed_at": nil, "duration": "0h 0m 7s"},
@@ -132,6 +132,13 @@ func TestRunSummaryAndArchiveRedactProseFields(t *testing.T) {
 	})
 	if summary["future"] != evidenceFreeTextPlaceholder {
 		t.Fatalf("future field = %#v", summary["future"])
+	}
+	doctor := summary["doctor"].(map[string]any)
+	if doctor["ok"] != false || doctor["availability_ok"] != false || doctor["provenance_ok"] != true {
+		t.Fatalf("doctor redaction dropped health planes: %#v", doctor)
+	}
+	if doctor["secret"] != evidenceFreeTextPlaceholder {
+		t.Fatalf("doctor redaction leaked unknown field: %#v", doctor)
 	}
 	timing := summary["timing"].(map[string]any)
 	if timing["duration"] != nil {

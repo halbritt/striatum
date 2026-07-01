@@ -17,6 +17,8 @@ const doctorBlobProbeTimeout = 5 * time.Second
 const doctorGeneratedRecordIntegrityTimeout = 8 * time.Second
 const doctorArtifactAnchorIntegrityTimeout = 12 * time.Second
 const doctorRecoveryCursorWedgedAfter = 5 * time.Minute
+const doctorProblemPlaneAvailability = "availability"
+const doctorProblemPlaneProvenance = "provenance"
 
 // HandleDoctor mirrors reads/doctor.py. Returns a flat health report of
 // the running daemon-pg state: schema version, append-only invariants
@@ -362,9 +364,12 @@ func HandleDoctor(ctx context.Context, runner db.Runner, envelope rpc.Envelope) 
 	problemRecords = append(problemRecords, laneUIDRecords...)
 
 	warnings, warningRecords, notices, noticeRecords := doctorSplitAdvisoryNotices(warnings, warningRecords)
+	availabilityOK, provenanceOK := doctorProblemPlaneSummary(problems, problemRecords)
 
 	result := map[string]any{
 		"ok":                           len(problems) == 0,
+		"availability_ok":              availabilityOK,
+		"provenance_ok":                provenanceOK,
 		"schema_version":               schemaVersion,
 		"stale_leases":                 staleLeases,
 		"waiting_human":                waitingHuman,
@@ -440,7 +445,11 @@ func doctorSplitAdvisoryNotices(warnings []string, warningRecords []map[string]a
 }
 
 func doctorWarningCode(warning string) string {
-	code := strings.TrimSpace(warning)
+	return doctorFindingCode(warning)
+}
+
+func doctorFindingCode(finding string) string {
+	code := strings.TrimSpace(finding)
 	if code == "" {
 		return ""
 	}
@@ -451,6 +460,63 @@ func doctorWarningCode(warning string) string {
 		code = prefix
 	}
 	return strings.TrimSpace(code)
+}
+
+func doctorProblemPlaneSummary(problems []string, problemRecords []map[string]any) (bool, bool) {
+	availabilityOK := true
+	provenanceOK := true
+	for _, problem := range problems {
+		switch doctorProblemPlaneForCode(doctorFindingCode(problem)) {
+		case doctorProblemPlaneProvenance:
+			provenanceOK = false
+		default:
+			availabilityOK = false
+		}
+	}
+	for _, record := range problemRecords {
+		plane := doctorProblemPlaneForCode(strings.TrimSpace(stringFrom(record, "check")))
+		record["plane"] = plane
+	}
+	return availabilityOK, provenanceOK
+}
+
+func doctorProblemPlaneForCode(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return doctorProblemPlaneAvailability
+	}
+	if doctorProvenanceProblemCode(code) {
+		return doctorProblemPlaneProvenance
+	}
+	return doctorProblemPlaneAvailability
+}
+
+func doctorProvenanceProblemCode(code string) bool {
+	switch code {
+	case "worktree_head_unreachable",
+		"job_completed_without_anchor",
+		"barrier_assembling_target_unreachable",
+		"barrier_committed_manifest_mismatch",
+		"barrier_orphaned_staging_ref",
+		"quorum_seat_unresolvable",
+		"quorum_denominator_mismatch",
+		"finalize_ignored_advisory_dissent",
+		"dissent_ledger_incomplete",
+		"dissent_ledger_incomplete_read_failed",
+		"event_chain_segment_seam_unproven",
+		"event_chain_segment_seams_table_probe_failed",
+		"event_chain_segment_seams_read_failed":
+		return true
+	}
+	for _, prefix := range []string{
+		"artifact_",
+		"generated_record_",
+	} {
+		if strings.HasPrefix(code, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func doctorIncompleteWarning(blockName string, block map[string]any) (string, map[string]any) {

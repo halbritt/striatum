@@ -113,6 +113,28 @@ func TestDoctorSeparatesActionableWarningsFromAdvisoryNotices(t *testing.T) {
 	if len(noticeRecords) != 2 {
 		t.Fatalf("noticeRecords = %#v, want artifact + barrier notice records", noticeRecords)
 	}
+	availabilityOK, provenanceOK := doctorProblemPlaneSummary(nil, nil)
+	if !availabilityOK || !provenanceOK {
+		t.Fatalf("advisory notices should not affect problem planes: availability_ok=%v provenance_ok=%v", availabilityOK, provenanceOK)
+	}
+}
+
+func TestDoctorProblemPlanesClassifyNonVerboseProblemStrings(t *testing.T) {
+	availabilityOK, provenanceOK := doctorProblemPlaneSummary(
+		[]string{"recovery_sweep_cursor_wedged.run_1: claimable_job_count=1"},
+		nil,
+	)
+	if availabilityOK || !provenanceOK {
+		t.Fatalf("availability problem planes = availability_ok=%v provenance_ok=%v", availabilityOK, provenanceOK)
+	}
+
+	availabilityOK, provenanceOK = doctorProblemPlaneSummary(
+		[]string{"worktree_head_unreachable.wt_1: worktree HEAD abc is not reachable"},
+		nil,
+	)
+	if !availabilityOK || provenanceOK {
+		t.Fatalf("provenance problem planes = availability_ok=%v provenance_ok=%v", availabilityOK, provenanceOK)
+	}
 }
 
 func TestHandleDoctorDoesNotRunProviderAuthByDefaultOrVerbose(t *testing.T) {
@@ -424,6 +446,12 @@ func TestDoctorFlagsUnreachableWorktreeHead(t *testing.T) {
 	if result["ok"] == true {
 		t.Fatalf("doctor ok = true, want false")
 	}
+	if result["availability_ok"] != true {
+		t.Fatalf("availability_ok = %v, want true", result["availability_ok"])
+	}
+	if result["provenance_ok"] == true {
+		t.Fatalf("provenance_ok = true, want false")
+	}
 	problems := strings.Join(result["problems"].([]string), "\n")
 	for _, want := range []string{"worktree_head_unreachable." + worktreeID, "job_completed_without_anchor." + jobID, worktreeHead} {
 		if !strings.Contains(problems, want) {
@@ -434,6 +462,9 @@ func TestDoctorFlagsUnreachableWorktreeHead(t *testing.T) {
 	checks := map[string]bool{}
 	for _, record := range records {
 		checks[stringFrom(record, "check")] = true
+		if plane := record["plane"]; plane != doctorProblemPlaneProvenance {
+			t.Fatalf("problem record %s plane = %v, want %s", stringFrom(record, "check"), plane, doctorProblemPlaneProvenance)
+		}
 	}
 	if !checks["worktree_head_unreachable"] || !checks["job_completed_without_anchor"] {
 		t.Fatalf("problem_records = %#v", records)
