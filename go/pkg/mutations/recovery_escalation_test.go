@@ -2,8 +2,12 @@ package mutations
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +77,191 @@ func preseedExhaustedBudget(t *testing.T, ctx context.Context, runner any, repoI
 		) VALUES ($1,$2,$3,2,'requeue_same_attempt',$4,$4,$4)`,
 		repoID, runID, jobID, now); err != nil {
 		t.Fatalf("preseed exhausted budget: %v", err)
+	}
+}
+
+func TestEscalationNotifyURLAllowsOnlyLoopbackOrTailnet(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "loopback IPv4", raw: "http://127.0.0.1:9090/escalations", want: true},
+		{name: "loopback IPv6", raw: "http://[::1]:9090/escalations", want: true},
+		{name: "localhost", raw: "http://localhost:9090/escalations", want: true},
+		{name: "tailnet IPv4", raw: "https://100.85.100.81/escalations", want: true},
+		{name: "tailnet MagicDNS", raw: "https://proximal.tail0ecc2e.ts.net:10000/escalations", want: true},
+		{name: "public host", raw: "https://example.com/escalations", want: false},
+		{name: "private non-tailnet IP", raw: "http://10.0.0.2/escalations", want: false},
+		{name: "unsupported scheme", raw: "ftp://127.0.0.1/escalations", want: false},
+		{name: "userinfo rejected", raw: "http://token@127.0.0.1:9090/escalations", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := parseEscalationNotifyURL(tt.raw)
+			if got != tt.want {
+				t.Fatalf("parseEscalationNotifyURL(%q) allowed=%v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscalationNotifierPostsAfterEscalationCommit(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_escalation_notify_commit"
+	runID, jobID, _, _, _ := seedDeadLaneRepoWriteJob(t, ctx, runner, repoID)
+	preseedExhaustedBudget(t, ctx, runner, repoID, runID, jobID)
+
+	var requests atomic.Int64
+	payloads := make(chan map[string]any, 1)
+	handlerErrs := make(chan error, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodPost {
+			handlerErrs <- fmt.Errorf("method = %s, want POST", r.Method)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			handlerErrs <- fmt.Errorf("decode payload: %w", err)
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		rows, err := queryRows(r.Context(), runner, `
+			SELECT escalation_id FROM striatumd.escalation_inbox
+			 WHERE repository_id = $1 AND run_id = $2 AND blocker_kind = 'recovery_exhausted'`, repoID, runID)
+		if err != nil {
+			handlerErrs <- fmt.Errorf("read committed escalation from handler: %w", err)
+			http.Error(w, "query", http.StatusInternalServerError)
+			return
+		}
+		if len(rows) != 1 {
+			handlerErrs <- fmt.Errorf("handler saw %d committed escalations, want 1", len(rows))
+			http.Error(w, "not committed", http.StatusConflict)
+			return
+		}
+		payloads <- payload
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	t.Setenv(escalationNotifyURLEnv, server.URL+"/notify")
+
+	result, err := SweepRun(ctx, runner, repoID, runID, "")
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	escSummary, ok := result["escalations"].(map[string]any)
+	if !ok || intValue(escSummary["raised_count"]) != 1 {
+		t.Fatalf("raised_count = %#v, want 1", result["escalations"])
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("notifier requests = %d, want 1", got)
+	}
+
+	var payload map[string]any
+	select {
+	case payload = <-payloads:
+	case err := <-handlerErrs:
+		t.Fatalf("notifier handler error: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for notifier payload")
+	}
+	select {
+	case err := <-handlerErrs:
+		t.Fatalf("notifier handler error: %v", err)
+	default:
+	}
+
+	escalationID, _ := recoveryExhaustedEscalation(t, ctx, runner, repoID, runID)
+	if got := fmt.Sprint(payload["schema_version"]); got != "striatum.escalation_notification.v1" {
+		t.Fatalf("payload schema_version = %q, want striatum.escalation_notification.v1", got)
+	}
+	if got := fmt.Sprint(payload["repository_id"]); got != repoID {
+		t.Fatalf("payload repository_id = %q, want %s", got, repoID)
+	}
+	if got := fmt.Sprint(payload["run_id"]); got != runID {
+		t.Fatalf("payload run_id = %q, want %s", got, runID)
+	}
+	if got := fmt.Sprint(payload["blocker_id"]); got != escalationID {
+		t.Fatalf("payload blocker_id = %q, want %s", got, escalationID)
+	}
+	if got := fmt.Sprint(payload["job_id"]); got != jobID {
+		t.Fatalf("payload job_id = %q, want %s", got, jobID)
+	}
+	if got := fmt.Sprint(payload["escalation_kind"]); got != recoveryExhaustedBlockerKind {
+		t.Fatalf("payload escalation_kind = %q, want %s", got, recoveryExhaustedBlockerKind)
+	}
+	for _, forbidden := range []string{"transcript", "raw_transcript", "transcript_excerpt", "secret", "token", "authorization", "payload_json"} {
+		if _, ok := payload[forbidden]; ok {
+			t.Fatalf("payload included forbidden field %q: %#v", forbidden, payload)
+		}
+	}
+}
+
+func TestEscalationNotifierFailureDoesNotRollbackEscalation(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_escalation_notify_failure"
+	runID, jobID, _, _, _ := seedDeadLaneRepoWriteJob(t, ctx, runner, repoID)
+	preseedExhaustedBudget(t, ctx, runner, repoID, runID, jobID)
+
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "notifier down", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	t.Setenv(escalationNotifyURLEnv, server.URL+"/notify")
+
+	if _, err := SweepRun(ctx, runner, repoID, runID, ""); err != nil {
+		t.Fatalf("sweep should ignore notifier failure: %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("notifier requests = %d, want 1", got)
+	}
+	if got := runStateOf(t, ctx, runner, repoID, runID); got != "needs_operator" {
+		t.Fatalf("run state = %q, want needs_operator", got)
+	}
+	_, payload := recoveryExhaustedEscalation(t, ctx, runner, repoID, runID)
+	if got := fmt.Sprint(payload["job_id"]); got != jobID {
+		t.Fatalf("committed escalation job_id = %q, want %s", got, jobID)
+	}
+}
+
+func TestEscalationNotifierDryRunDoesNotRequest(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_escalation_notify_dry_run"
+	runID, jobID, _, _, _ := seedDeadLaneRepoWriteJob(t, ctx, runner, repoID)
+	preseedExhaustedBudget(t, ctx, runner, repoID, runID, jobID)
+
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "dry-run should not notify", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	t.Setenv(escalationNotifyURLEnv, server.URL+"/notify")
+
+	if _, err := HandleRecoveryAuto(ctx, runner, intgEnv(repoID, map[string]any{
+		"run_id":  runID,
+		"dry_run": true,
+	})); err != nil {
+		t.Fatalf("dry-run recovery auto: %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("notifier requests in dry-run = %d, want 0", got)
+	}
+	rows, err := queryRows(ctx, runner, `
+		SELECT blocker_id FROM striatumd.blockers
+		 WHERE repository_id = $1 AND run_id = $2 AND blocker_kind = 'recovery_exhausted'`, repoID, runID)
+	if err != nil {
+		t.Fatalf("read blockers after dry-run: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("dry-run created %d recovery_exhausted blockers, want 0", len(rows))
 	}
 }
 

@@ -58,7 +58,8 @@ func HandleRecoveryAuto(ctx context.Context, runner db.Runner, envelope rpc.Enve
 		ctx = withWorktreeAnchorOracle(ctx, worktreeAnchors)
 	}
 
-	return withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
+	var notificationEscalations []map[string]any
+	result, err := withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
 		// Mark every call below as executing inside the sweep transaction (#198
 		// observability seam). Liveness probes must NOT run while this is set —
 		// they were pre-probed above and read from the injected oracle.
@@ -331,11 +332,12 @@ func HandleRecoveryAuto(ctx context.Context, runner db.Runner, envelope rpc.Enve
 			// needs_operator so it never sits silently 'running'. Idempotent via the
 			// job_recovery_state.run_escalated_at guard; the sweep's running/paused
 			// active-run filter then excludes the escalated run from re-sweeping.
-			raised, eerr := escalateExhaustedJobs(ctx, tx, repositoryID, runID, policy)
+			raised, notify, eerr := escalateExhaustedJobs(ctx, tx, repositoryID, runID, policy)
 			if eerr != nil {
 				return nil, eerr
 			}
 			escalationsRaised = raised
+			notificationEscalations = notify
 		}
 		liveness, err := refreshRunLiveness(ctx, tx, repositoryID, runID, dryRun)
 		if err != nil {
@@ -369,6 +371,13 @@ func HandleRecoveryAuto(ctx context.Context, runner db.Runner, envelope rpc.Enve
 			},
 		}, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if !dryRun {
+		notifyRecoveryEscalationsBestEffort(ctx, repositoryID, runID, notificationEscalations)
+	}
+	return result, nil
 }
 
 func autoCancelAbandonedRunIfEligible(ctx context.Context, tx db.TxRunner, repositoryID, runID string, threshold time.Duration) (map[string]any, error) {

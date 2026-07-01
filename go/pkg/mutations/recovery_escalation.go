@@ -36,7 +36,12 @@ const recoveryExhaustedBlockerKind = "recovery_exhausted"
 //
 // It is idempotent + convergent: a budget row whose run_escalated_at is already
 // set is skipped, so re-running raises no duplicate blocker/escalation rows.
-func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID string, policy recoveryPolicy) ([]map[string]any, error) {
+//
+// The first returned slice preserves the existing public "raised" semantics:
+// jobs that force the whole run to needs_operator. The second returned slice is
+// every newly-created escalation row that should wake an opt-in notifier after
+// the transaction commits, including quarantined-job escalations.
+func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, runID string, policy recoveryPolicy) ([]map[string]any, []map[string]any, error) {
 	// The job's lane is read straight off jobs.lane_selector_json->>'lane_id'
 	// (the canonical lane-name source — same projection runreconcile,
 	// dashboard_all, and the recovery decision tree use). NULLIF coerces an
@@ -57,7 +62,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		 ORDER BY jrs.job_id
 		 FOR UPDATE OF jrs`, repositoryID, runID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// #311 P0: count jobs already quarantined in this run so the
@@ -66,7 +71,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 	// eligibility check increments as it quarantines within this pass.
 	quarantinedSoFar, err := countQuarantinedJobs(ctx, tx, repositoryID, runID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// #311 P0 deployment-safety: probe ONCE whether the 'quarantined' job state is
 	// permitted by the live jobs_state_check (owner bundle 0012 applied). On a
@@ -76,10 +81,11 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 	// violation.
 	quarantinePermitted, err := jobQuarantineStatePermitted(ctx, tx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	raised := []map[string]any{}
+	notify := []map[string]any{}
 	for _, row := range rows {
 		jobID := fmt.Sprint(row["job_id"])
 		workflowJobID := fmt.Sprint(nullable(row["workflow_job_id"]))
@@ -107,12 +113,14 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		// needs_operator and discarding the durable work of every sibling.
 		eligible, ineligibleReason, qerr := quarantineEligible(ctx, tx, repositoryID, runID, jobID, policy, quarantinedSoFar, quarantinePermitted)
 		if qerr != nil {
-			return nil, qerr
+			return nil, nil, qerr
 		}
 		if eligible {
-			if err := quarantineExhaustedJob(ctx, tx, repositoryID, runID, row, lane, stallClass, lastAction, requeueCount, transferCount, respawnCount); err != nil {
-				return nil, err
+			notification, err := quarantineExhaustedJob(ctx, tx, repositoryID, runID, row, lane, stallClass, lastAction, requeueCount, transferCount, respawnCount)
+			if err != nil {
+				return nil, nil, err
 			}
+			notify = append(notify, notification)
 			quarantinedSoFar++
 			continue
 		}
@@ -120,7 +128,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 
 		blockerID, err := newID("blk")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		now := nowString()
 
@@ -159,7 +167,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		}
 		payloadArg, err := db.JSONBArg(tx, payload)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if err := tx.Exec(ctx, `
@@ -171,7 +179,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			repositoryID, blockerID, runID, jobID,
 			recoveryExhaustedBlockerKind, description, now, payloadArg,
 		); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := tx.Exec(ctx, `
 			INSERT INTO striatumd.escalation_inbox (
@@ -182,7 +190,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			repositoryID, blockerID, runID, jobID,
 			blockerID, recoveryExhaustedBlockerKind, now, payloadArg,
 		); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Idempotency guard: stamp run_escalated_at so a re-run does not duplicate
@@ -192,7 +200,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			   SET run_escalated_at = $1, updated_at = $1
 			 WHERE repository_id = $2 AND job_id = $3`,
 			now, repositoryID, jobID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		escalatedEvent := map[string]any{
@@ -207,10 +215,10 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			escalatedEvent["lane"] = lane
 		}
 		if _, err := appendEvent(ctx, tx, repositoryID, runID, "run.escalated", nil, jobID, nil, nil, nil, escalatedEvent); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
-		raised = append(raised, map[string]any{
+		notification := map[string]any{
 			"workflow_job_id":   workflowJobID,
 			"job_id":            jobID,
 			"lane":              lane,
@@ -218,7 +226,9 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 			"blocker_kind":      recoveryExhaustedBlockerKind,
 			"stall_class":       stallClass,
 			"recovery_attempts": recoveryAttempts,
-		})
+		}
+		raised = append(raised, notification)
+		notify = append(notify, notification)
 	}
 
 	if len(raised) == 0 {
@@ -228,9 +238,9 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		// completed deliverables, so re-check completion (maybeCompleteRun excludes
 		// 'quarantined' from the non-terminal set and records the manifest).
 		if err := maybeCompleteRun(ctx, tx, repositoryID, runID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return raised, nil
+		return raised, notify, nil
 	}
 
 	// Flip the run to needs_operator (guarded on state='running' so a
@@ -246,7 +256,7 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		   SET state = 'needs_operator'
 		 WHERE repository_id = $1 AND run_id = $2 AND state = 'running'`,
 		repositoryID, runID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := appendEvent(ctx, tx, repositoryID, runID, "run.needs_operator", nil, nil, nil, nil, nil, map[string]any{
 		// KEEP the stable "recovery_exhausted" reason code: existing consumers /
@@ -257,9 +267,9 @@ func escalateExhaustedJobs(ctx context.Context, tx db.TxRunner, repositoryID, ru
 		"escalation_count":  len(raised),
 		"stuck_jobs":        stuckJobs(raised),
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return raised, nil
+	return raised, notify, nil
 }
 
 // redispatchRecoveryExhaustedJob is the #388 fix, invoked by escalation.resolve
@@ -531,7 +541,7 @@ func jobIsProvenanceRequiredReviewer(ctx context.Context, tx db.TxRunner, reposi
 // guard), appends a recovery.job_quarantined event naming
 // {workflow_job_id, job_id, lane, stall_class}, and releases any residual active
 // lease so the dead lane cannot wake. The caller then re-checks run completion.
-func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, runID string, row map[string]any, lane, stallClass, lastAction string, requeueCount, transferCount, respawnCount int) error {
+func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, runID string, row map[string]any, lane, stallClass, lastAction string, requeueCount, transferCount, respawnCount int) (map[string]any, error) {
 	jobID := fmt.Sprint(row["job_id"])
 	workflowJobID := fmt.Sprint(nullable(row["workflow_job_id"]))
 	recoveryAttempts := requeueCount + transferCount + respawnCount
@@ -539,7 +549,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 
 	blockerID, err := newID("blk")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	laneClause := ""
 	if lane != "" {
@@ -572,7 +582,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 	}
 	payloadArg, err := db.JSONBArg(tx, payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := tx.Exec(ctx, `
@@ -584,7 +594,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		repositoryID, blockerID, runID, jobID,
 		recoveryExhaustedBlockerKind, description, now, payloadArg,
 	); err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.Exec(ctx, `
 		INSERT INTO striatumd.escalation_inbox (
@@ -595,7 +605,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		repositoryID, blockerID, runID, jobID,
 		blockerID, recoveryExhaustedBlockerKind, now, payloadArg,
 	); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Release any residual active lease so the dead lane cannot wake to
@@ -608,7 +618,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		       release_reason = COALESCE(release_reason, 'recovery_quarantine')
 		 WHERE repository_id = $2 AND resource_id = $3 AND state = 'active'`,
 		now, repositoryID, jobID); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Move ONLY this job to 'quarantined'. NEVER 'completed' — no false
@@ -619,7 +629,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		   SET state = 'quarantined', current_lease_id = NULL
 		 WHERE repository_id = $1 AND job_id = $2`,
 		repositoryID, jobID); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Idempotency guard: stamp run_escalated_at so a re-run does not re-process
@@ -630,7 +640,7 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		   SET run_escalated_at = $1, updated_at = $1
 		 WHERE repository_id = $2 AND job_id = $3`,
 		now, repositoryID, jobID); err != nil {
-		return err
+		return nil, err
 	}
 
 	quarantinedEvent := map[string]any{
@@ -646,9 +656,9 @@ func quarantineExhaustedJob(ctx context.Context, tx db.TxRunner, repositoryID, r
 		quarantinedEvent["lane"] = lane
 	}
 	if _, err := appendEvent(ctx, tx, repositoryID, runID, "recovery.job_quarantined", nil, jobID, nil, nil, nil, quarantinedEvent); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return quarantinedEvent, nil
 }
 
 // suggestedQuarantineOperatorActions returns the operator-actionable next steps

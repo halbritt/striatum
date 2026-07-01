@@ -708,10 +708,11 @@ providers.
 `recovery auto` emits the daemon `recovery.sweep` method. The sweep
 runs workflow-opt-in `recovery.auto_finalize` before lazy lease expiry,
 then the existing stale-lease, process-reconcile, and review-only requeue
-recovery pieces where policy allows. Timed-out human checkpoints execute
-the configured `recovery_policy.escalation_hook` in live sweeps; dry-runs
-report the hook kind without side effects, and hook failures are reported
-inside `escalations[]`. `recovery auto-publish` emits the explicit
+recovery pieces where policy allows. When live recovery creates escalation
+rows, `STRIATUM_ESCALATION_NOTIFY_URL` opts into a best-effort post-commit JSON
+POST to loopback or tailnet HTTP(S) targets only. Dry-runs do not notify, and
+notification success or failure is not authoritative. `recovery auto-publish`
+emits the explicit
 `recovery.auto_publish_stale_artifacts` method; the deprecated `recovery.auto`
 alias is not emitted by the current CLI.
 D184 allows the sweep to auto-cancel an abandoned running run after the default

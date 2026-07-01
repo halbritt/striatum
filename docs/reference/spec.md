@@ -2017,12 +2017,12 @@ fails closed if any liveness probe is inconclusive or if any active session,
 supervisor, process, lease, recent event, unpublished repo-write work evidence,
 or other live-work signal exists. The transition records an audit-visible
 recovery event and the normal terminal completion record.
-Timed-out human checkpoints run the configured escalation hook only in live
-sweeps; dry-runs report hook eligibility without side effects, and hook
-failures are folded into `escalations[]`. Escalation is represented by
-daemon state plus blocker/escalation artifact projections; any local
-notification hook is non-authoritative and must never be treated as workflow
-state. CLI flags
+Autonomous recovery escalation is represented by daemon state plus
+blocker/escalation artifact projections. When a live sweep creates recovery
+escalation rows and `STRIATUM_ESCALATION_NOTIFY_URL` is set, the daemon sends a
+best-effort post-commit JSON HTTP(S) notification to loopback or tailnet targets
+only. Dry-runs do not notify, and notification success or failure is
+not authoritative workflow state. CLI flags
 (`--autonomous-review-requeue`, `--autonomous-process-reconcile`,
 `--max-requeue`, `--checkpoint-timeout`, `--eligible-after`,
 `--dry-run`) override workflow defaults. Workflows that omit
