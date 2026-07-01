@@ -22,6 +22,7 @@ const (
 
 	ProbeCodexOutputLastMessage = "codex_exec_output_last_message"
 	ProbeCodexOfflineAuthFile   = "codex_offline_auth_file"
+	ProbeClaudeOfflineExpiry    = "claude_offline_credential_expiry"
 
 	SuccessSignalMatched  = "matched"
 	SuccessSignalMissing  = "missing"
@@ -182,13 +183,6 @@ func Check(ctx context.Context, params Params) Result {
 	}
 	started := time.Now()
 	result := baseResult(params, provider)
-	if provider != ProviderCodex {
-		result.Checked = false
-		result.Status = StatusFailed
-		result.FailureClass = FailureUnsupported
-		result.Remediation = remediation(FailureUnsupported)
-		return result
-	}
 	timeout := params.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -198,6 +192,21 @@ func Check(ctx context.Context, params Params) Result {
 		runner = ExecRunner{}
 	}
 
+	switch provider {
+	case ProviderCodex:
+		return checkCodex(ctx, runner, params, result, timeout, started)
+	case ProviderClaude:
+		return checkClaudeOffline(ctx, runner, params, result, timeout, started)
+	default:
+		result.Checked = false
+		result.Status = StatusFailed
+		result.FailureClass = FailureUnsupported
+		result.Remediation = remediation(FailureUnsupported)
+		return result
+	}
+}
+
+func checkCodex(ctx context.Context, runner Runner, params Params, result Result, timeout time.Duration, started time.Time) Result {
 	// #556: prefer a cheap OFFLINE check over the billed model round-trip. A
 	// valid lane login leaves a parseable $CODEX_HOME/auth.json with a
 	// recognizable credential field; confirming that is sufficient to let the
@@ -232,7 +241,7 @@ func Check(ctx context.Context, params Params) Result {
 		// offline.attempted && !valid && !definitivelyMissing: the probe could
 		// not reach a verdict (e.g. could not read the file for a reason other
 		// than absence). Fall through to the live smoke below rather than guess.
-		result = baseResult(params, provider)
+		result = baseResult(params, ProviderCodex)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "striatum-lane-provider-auth-*")
@@ -253,7 +262,7 @@ func Check(ctx context.Context, params Params) Result {
 	})
 	spec := BuildLaunchSpec(command, tmpDir, params.RunAsUser, SanitizeEnv(params.Env, nil))
 
-	key := SerializationKey(provider, params.RunAsUser, ResolveAuthHome(provider, specEnvForKey(spec, params.Env)))
+	key := SerializationKey(ProviderCodex, params.RunAsUser, ResolveAuthHome(ProviderCodex, specEnvForKey(spec, params.Env)))
 	unlock := lockKey(key)
 	defer unlock()
 
@@ -265,6 +274,55 @@ func Check(ctx context.Context, params Params) Result {
 	}
 	successSignal, readErr := readSuccessSignal(outputPath)
 	result = classifyCodexResult(result, runResult, successSignal, readErr)
+	result.DurationMS = elapsedMS(started)
+	return result
+}
+
+func checkClaudeOffline(ctx context.Context, runner Runner, params Params, result Result, timeout time.Duration, started time.Time) Result {
+	result.Probe = ProbeClaudeOfflineExpiry
+	result.Network = "no_network_offline_credential_file"
+	result.Costing = "no_provider_tokens_spent"
+	result.SuccessSignal = SuccessSignalMissing
+
+	env := SanitizeEnv(params.Env, nil)
+	sampleCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	sample, err := SampleLaneCredential(
+		RosterEntry{Lane: providerAuthLaneName(params), Provider: ProviderClaude, Kind: KindOAuth},
+		env,
+		LaneFileReader(sampleCtx, runner, params.RunAsUser, env),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrCredentialAbsent):
+			result = failedWithRemediation(result, FailureAuthFailed, "log in to Claude for the lane OS user or restore the resolver-selected Claude credential file, then retry")
+			result.SuccessSignal = SuccessSignalMissing
+		case errors.Is(err, ErrResolverMismatch):
+			result = failedWithRemediation(result, FailureLaunchFailed, "set CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR, or HOME so the lane's Claude credential source is resolver-proven")
+			result.SuccessSignal = SuccessSignalMismatch
+		default:
+			result = failedWithRemediation(result, FailureUnexpectedResult, "inspect the resolver-selected Claude credential file; the offline freshness probe could not parse it safely")
+			result.SuccessSignal = SuccessSignalMismatch
+		}
+		result.DurationMS = elapsedMS(started)
+		return result
+	}
+	if !sample.HasExpiry {
+		result = failedWithRemediation(result, FailureAuthFailed, "refresh the lane OS user's Claude OAuth login; the resolver-selected credential has no parseable expiry")
+		result.SuccessSignal = SuccessSignalMissing
+		result.DurationMS = elapsedMS(started)
+		return result
+	}
+	if !sample.ExpiresAt.After(time.Now()) {
+		result = failedWithRemediation(result, FailureAuthFailed, "refresh the lane OS user's expired Claude OAuth login, then retry")
+		result.SuccessSignal = SuccessSignalMissing
+		result.DurationMS = elapsedMS(started)
+		return result
+	}
+	result.Status = StatusPassed
+	result.FailureClass = ""
+	result.SuccessSignal = SuccessSignalMatched
+	result.Remediation = "none"
 	result.DurationMS = elapsedMS(started)
 	return result
 }
@@ -334,21 +392,23 @@ func SanitizeEnv(base []string, pathPrefix []string) []string {
 }
 
 var providerEnvAllowlist = map[string]bool{
-	"COLORTERM":       true,
-	"CODEX_HOME":      true,
-	"HOME":            true,
-	"LANG":            true,
-	"LANGUAGE":        true,
-	"LOGNAME":         true,
-	"PATH":            true,
-	"SSH_AUTH_SOCK":   true,
-	"TERM":            true,
-	"TMPDIR":          true,
-	"TZ":              true,
-	"USER":            true,
-	"XDG_CACHE_HOME":  true,
-	"XDG_CONFIG_HOME": true,
-	"XDG_DATA_HOME":   true,
+	"CLAUDE_CONFIG_DIR":               true,
+	"CLAUDE_SECURESTORAGE_CONFIG_DIR": true,
+	"COLORTERM":                       true,
+	"CODEX_HOME":                      true,
+	"HOME":                            true,
+	"LANG":                            true,
+	"LANGUAGE":                        true,
+	"LOGNAME":                         true,
+	"PATH":                            true,
+	"SSH_AUTH_SOCK":                   true,
+	"TERM":                            true,
+	"TMPDIR":                          true,
+	"TZ":                              true,
+	"USER":                            true,
+	"XDG_CACHE_HOME":                  true,
+	"XDG_CONFIG_HOME":                 true,
+	"XDG_DATA_HOME":                   true,
 }
 
 func ResolveAuthHome(provider string, env []string) string {
@@ -611,6 +671,22 @@ func failed(base Result, failureClass string) Result {
 	base.FailureClass = failureClass
 	base.Remediation = remediation(failureClass)
 	return base
+}
+
+func failedWithRemediation(base Result, failureClass, message string) Result {
+	base = failed(base, failureClass)
+	base.Remediation = message
+	return base
+}
+
+func providerAuthLaneName(params Params) string {
+	if laneID := strings.TrimSpace(params.LaneID); laneID != "" {
+		return laneID
+	}
+	if runAsUser := strings.TrimSpace(params.RunAsUser); runAsUser != "" {
+		return runAsUser
+	}
+	return strings.ToLower(strings.TrimSpace(params.Provider))
 }
 
 func remediation(failureClass string) string {

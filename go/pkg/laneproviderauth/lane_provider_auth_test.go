@@ -192,6 +192,9 @@ func TestUnsupportedProviderResultIsSafe(t *testing.T) {
 	if result.Status != StatusFailed || result.FailureClass != FailureUnsupported || result.Checked {
 		t.Fatalf("unsupported result = %#v", result)
 	}
+	if strings.TrimSpace(result.Remediation) == "" {
+		t.Fatalf("unsupported result lacks remediation: %#v", result)
+	}
 }
 
 // withoutOfflineAuthProbe swaps the offline auth probe for a no-op ("not
@@ -415,6 +418,106 @@ func TestOfflineCodexAuthCheck(t *testing.T) {
 			t.Fatalf("CODEX_HOME-pinned auth.json did not pass: %#v", result)
 		}
 	})
+}
+
+func TestOfflineClaudeAuthCheck(t *testing.T) {
+	t.Run("fresh_oauth_expiry_passes_offline", func(t *testing.T) {
+		configDir := t.TempDir()
+		secret := "claude-refresh-token-must-not-leak"
+		writeClaudeCredential(t, configDir, time.Now().Add(time.Hour), secret)
+
+		result := Check(context.Background(), Params{
+			Provider: ProviderClaude,
+			LaneID:   "author",
+			Env:      []string{"CLAUDE_CONFIG_DIR=" + configDir, "HOME=/home/decoy", "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("Claude provider auth must stay offline and must not run a provider command")
+				return CommandResult{}
+			}),
+		})
+		if !result.Passed() {
+			t.Fatalf("fresh Claude OAuth credential did not pass: %#v", result)
+		}
+		if result.Probe != ProbeClaudeOfflineExpiry || result.Network != "no_network_offline_credential_file" || result.Costing != "no_provider_tokens_spent" {
+			t.Fatalf("offline Claude diagnostics = %#v", result)
+		}
+		payload, err := json.Marshal(result.ToMap())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(payload), secret) || strings.Contains(string(payload), configDir) {
+			t.Fatalf("safe result leaked credential material or path: %s", string(payload))
+		}
+	})
+
+	t.Run("expired_oauth_expiry_fails_closed", func(t *testing.T) {
+		configDir := t.TempDir()
+		writeClaudeCredential(t, configDir, time.Now().Add(-time.Minute), "expired-refresh-token")
+
+		result := Check(context.Background(), Params{
+			Provider: ProviderClaude,
+			Env:      []string{"CLAUDE_CONFIG_DIR=" + configDir, "PATH=/usr/bin"},
+			Runner:   RunnerFunc(func(context.Context, CommandSpec) CommandResult { return CommandResult{} }),
+		})
+		if result.Passed() || result.FailureClass != FailureAuthFailed || result.SuccessSignal != SuccessSignalMissing {
+			t.Fatalf("expired Claude OAuth credential must fail as auth gap: %#v", result)
+		}
+		if !strings.Contains(strings.ToLower(result.Remediation), "expired") {
+			t.Fatalf("expired remediation is not clear: %#v", result)
+		}
+	})
+
+	t.Run("absent_credential_fails_closed", func(t *testing.T) {
+		configDir := t.TempDir()
+		result := Check(context.Background(), Params{
+			Provider: ProviderClaude,
+			Env:      []string{"CLAUDE_CONFIG_DIR=" + configDir, "PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("absent in-process Claude credential must not run a provider command")
+				return CommandResult{}
+			}),
+		})
+		if result.Passed() || result.FailureClass != FailureAuthFailed || result.SuccessSignal != SuccessSignalMissing {
+			t.Fatalf("absent Claude credential must fail as auth gap: %#v", result)
+		}
+		if !strings.Contains(strings.ToLower(result.Remediation), "claude") {
+			t.Fatalf("absent remediation is not provider-aware: %#v", result)
+		}
+	})
+
+	t.Run("resolver_mismatch_fails_closed", func(t *testing.T) {
+		result := Check(context.Background(), Params{
+			Provider: ProviderClaude,
+			Env:      []string{"PATH=/usr/bin"},
+			Runner: RunnerFunc(func(context.Context, CommandSpec) CommandResult {
+				t.Fatalf("resolver mismatch must fail before any provider command")
+				return CommandResult{}
+			}),
+		})
+		if result.Passed() || result.FailureClass != FailureLaunchFailed || result.SuccessSignal != SuccessSignalMismatch {
+			t.Fatalf("resolver mismatch must fail closed as launch/config gap: %#v", result)
+		}
+		if !strings.Contains(result.Remediation, "CLAUDE_CONFIG_DIR") {
+			t.Fatalf("resolver mismatch remediation should name Claude config selectors: %#v", result)
+		}
+	})
+}
+
+func writeClaudeCredential(t *testing.T, configDir string, expires time.Time, secret string) {
+	t.Helper()
+	payload := map[string]any{
+		"claudeAiOauth": map[string]any{
+			"expiresAt":    expires.UnixMilli(),
+			"refreshToken": secret,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ClaudeCredentialFileName), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func outputPathFromSpec(t *testing.T, spec CommandSpec) string {

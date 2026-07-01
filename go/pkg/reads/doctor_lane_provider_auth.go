@@ -29,9 +29,6 @@ var (
 
 func HandleDoctorLaneProviderAuth(ctx context.Context, runner db.Runner, envelope rpc.Envelope) (map[string]any, error) {
 	provider := strings.ToLower(strings.TrimSpace(stringParam(envelope, "lane_provider_auth")))
-	if provider != laneproviderauth.ProviderCodex {
-		return nil, rpc.NewError("schema_invalid", "doctor lane_provider_auth must be codex", nil)
-	}
 	timeout, err := doctorLaneProviderAuthTimeout(envelope.Params["timeout"])
 	if err != nil {
 		return nil, err
@@ -39,7 +36,7 @@ func HandleDoctorLaneProviderAuth(ctx context.Context, runner db.Runner, envelop
 	runID := strings.TrimSpace(stringParam(envelope, "run_id"))
 	laneID := strings.TrimSpace(stringParam(envelope, "lane_id"))
 	repositoryID := strings.TrimSpace(stringParam(envelope, "repository_id"))
-	laneConfig, err := doctorLaneProviderConfig(ctx, runner, repositoryID, runID, laneID)
+	laneConfig, err := doctorLaneProviderConfig(ctx, runner, repositoryID, runID, laneID, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +90,12 @@ type doctorLaneProviderAuthLaneConfig struct {
 	PathPrefix []string
 }
 
-func doctorLaneProviderConfig(ctx context.Context, runner db.Runner, repositoryID, runID, laneID string) (doctorLaneProviderAuthLaneConfig, error) {
-	config := doctorLaneProviderAuthLaneConfig{Binary: laneproviderauth.ProviderCodex}
+func doctorLaneProviderConfig(ctx context.Context, runner db.Runner, repositoryID, runID, laneID, provider string) (doctorLaneProviderAuthLaneConfig, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = laneproviderauth.ProviderCodex
+	}
+	config := doctorLaneProviderAuthLaneConfig{Binary: provider}
 	if repositoryID == "" || runID == "" || laneID == "" {
 		return config, nil
 	}
@@ -117,7 +118,7 @@ func doctorLaneProviderConfig(ctx context.Context, runner db.Runner, repositoryI
 	if len(lane) == 0 {
 		return config, rpc.NewError("not_found", fmt.Sprintf("lane %s not found in run %s workflow snapshot", laneID, runID), nil)
 	}
-	if command := stringListJSONish(lane["command"]); len(command) > 0 && agentloop.LaneAdapterName(command[0]) == laneproviderauth.ProviderCodex {
+	if command := stringListJSONish(lane["command"]); len(command) > 0 && agentloop.LaneAdapterName(command[0]) == provider {
 		config.Binary = command[0]
 	}
 	config.PathPrefix = cleanPathPrefix(stringListJSONish(lane["path_prefix"]))

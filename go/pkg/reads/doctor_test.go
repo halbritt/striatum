@@ -182,6 +182,69 @@ func TestHandleDoctorLaneProviderAuthOptInShape(t *testing.T) {
 	}
 }
 
+func TestHandleDoctorLaneProviderAuthAcceptsProviderAwareValues(t *testing.T) {
+	orig := doctorLaneProviderAuthCheck
+	t.Cleanup(func() { doctorLaneProviderAuthCheck = orig })
+
+	t.Run("claude", func(t *testing.T) {
+		var captured laneproviderauth.Params
+		doctorLaneProviderAuthCheck = func(_ context.Context, params laneproviderauth.Params) laneproviderauth.Result {
+			captured = params
+			return laneproviderauth.Result{
+				Checked:           true,
+				Provider:          params.Provider,
+				Status:            laneproviderauth.StatusPassed,
+				Probe:             laneproviderauth.ProbeClaudeOfflineExpiry,
+				RawOutputReturned: false,
+				Network:           "no_network_offline_credential_file",
+				Costing:           "no_provider_tokens_spent",
+				Remediation:       "none",
+			}
+		}
+
+		result, err := HandleDoctor(context.Background(), &doctorFakeRunner{}, rpc.Envelope{Params: map[string]any{
+			"lane_provider_auth": "claude",
+		}})
+		if err != nil {
+			t.Fatalf("HandleDoctor claude lane-provider-auth: %v", err)
+		}
+		if captured.Provider != laneproviderauth.ProviderClaude {
+			t.Fatalf("captured provider = %q, want claude", captured.Provider)
+		}
+		if result["checked"] != true || result["provider"] != laneproviderauth.ProviderClaude || result["probe"] != laneproviderauth.ProbeClaudeOfflineExpiry {
+			t.Fatalf("claude opt-in result = %#v", result)
+		}
+	})
+
+	t.Run("unsupported", func(t *testing.T) {
+		doctorLaneProviderAuthCheck = func(_ context.Context, params laneproviderauth.Params) laneproviderauth.Result {
+			return laneproviderauth.Result{
+				Checked:           false,
+				Provider:          params.Provider,
+				Status:            laneproviderauth.StatusFailed,
+				FailureClass:      laneproviderauth.FailureUnsupported,
+				RawOutputReturned: false,
+				Network:           "provider_cli_may_use_network",
+				Costing:           "provider_tokens_may_be_spent",
+				Remediation:       "configure a provider with a supported auth preflight",
+			}
+		}
+
+		result, err := HandleDoctor(context.Background(), &doctorFakeRunner{}, rpc.Envelope{Params: map[string]any{
+			"lane_provider_auth": "agy",
+		}})
+		if err != nil {
+			t.Fatalf("HandleDoctor unsupported lane-provider-auth: %v", err)
+		}
+		if result["provider"] != "agy" || result["status"] != laneproviderauth.StatusFailed || result["failure_class"] != laneproviderauth.FailureUnsupported {
+			t.Fatalf("unsupported provider result = %#v", result)
+		}
+		if strings.TrimSpace(result["remediation"].(string)) == "" {
+			t.Fatalf("unsupported provider result lacks remediation: %#v", result)
+		}
+	})
+}
+
 func TestHandleDoctorLaneProviderAuthRunAsUsesLaneHome(t *testing.T) {
 	origCheck := doctorLaneProviderAuthCheck
 	origCurrentUser := currentUsername
