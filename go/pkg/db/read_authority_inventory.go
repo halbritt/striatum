@@ -14,6 +14,10 @@ const (
 	// principal/session identity, or other private workflow metadata if a live
 	// runtime credential leaks.
 	ReadClassRuntimeSensitive ReadAuthorityClass = "runtime_sensitive_select"
+	// ReadClassRuntimeColumnScoped: the runtime role holds direct SELECT only on
+	// named non-secret columns; sensitive columns are denied and must be read
+	// through daemon-authorized projections.
+	ReadClassRuntimeColumnScoped ReadAuthorityClass = "runtime_column_scoped_select"
 	// ReadClassRuntimeOperational: the runtime role currently holds SELECT for
 	// daemon operation, but the table is not one of the representative sensitive
 	// surfaces used in the #164 doctor posture.
@@ -54,7 +58,6 @@ var readAuthorityInventory = map[string]ReadAuthorityClass{
 	"artifacts":                      ReadClassRuntimeSensitive,
 	"blockers":                       ReadClassRuntimeSensitive,
 	"client_capabilities":            ReadClassRuntimeSensitive,
-	"clients":                        ReadClassRuntimeSensitive,
 	"command_requests":               ReadClassRuntimeSensitive,
 	"conversations":                  ReadClassRuntimeSensitive,
 	"conversation_post_dialog_hooks": ReadClassRuntimeSensitive,
@@ -130,6 +133,12 @@ var readAuthorityInventory = map[string]ReadAuthorityClass{
 	"workflow_accepted_risks": ReadClassRuntimeSensitive,
 	"workflow_snapshots":      ReadClassRuntimeSensitive,
 
+	// Column-scoped runtime reads. Bundle 0005 formalizes the clients token
+	// secret gate: token_hash/token_salt are denied, named non-secret metadata
+	// stays directly selectable, and secret reads go through daemon-authorized
+	// SECURITY DEFINER projections.
+	"clients": ReadClassRuntimeColumnScoped,
+
 	// Operational metadata and chain pointers. Still selected by the runtime
 	// role in the current broad posture; not a private-read-denial claim.
 	"apply_receipts":                 ReadClassRuntimeOperational,
@@ -198,12 +207,23 @@ func RuntimeSensitiveReadTables() []string {
 	return out
 }
 
+// RuntimeColumnScopedReadTables returns the sorted tables whose sensitive
+// columns are denied while named non-secret columns remain directly selectable.
+func RuntimeColumnScopedReadTables() []string {
+	var out []string
+	for table, class := range readAuthorityInventory {
+		if class == ReadClassRuntimeColumnScoped {
+			out = append(out, table)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // RuntimeDeniedReadColumns returns the narrow column-level denials that have
-// landed ahead of the full #164 table/projection split. principal_clients
-// stays runtime_sensitive_select with a column gate (the clients precedent):
-// principal_id — the column that makes the linkage an attribution graph — is
-// denied, while client_id/linked_at/unlinked_at remain selectable for the
-// live UPDATE ... WHERE in admin/tokens.go (RFC 0114).
+// landed ahead of the full #164 table/projection split. The clients table is
+// now classified as runtime_column_scoped_select; other column gates remain in
+// their current table classes until a focused slice reclassifies them.
 func RuntimeDeniedReadColumns() map[string][]string {
 	return map[string][]string{
 		"clients":           {"token_hash", "token_salt"},

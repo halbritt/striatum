@@ -35,6 +35,13 @@ func TestPgReadScopeDoctorBlock(t *testing.T) {
 	if block["sensitive_surface_count"] != len(surfaces) {
 		t.Fatalf("sensitive_surface_count = %v, want %d", block["sensitive_surface_count"], len(surfaces))
 	}
+	columnScoped, ok := block["column_scoped_surfaces"].([]string)
+	if !ok || !containsStringItem(columnScoped, "clients") {
+		t.Fatalf("column_scoped_surfaces = %#v, want clients", block["column_scoped_surfaces"])
+	}
+	if block["column_scoped_surface_count"] != len(columnScoped) {
+		t.Fatalf("column_scoped_surface_count = %v, want %d", block["column_scoped_surface_count"], len(columnScoped))
+	}
 	gates, ok := block["partial_projection_gates"].([]map[string]any)
 	if !ok || len(gates) != 4 {
 		t.Fatalf("partial_projection_gates = %#v, want the four RFC 0113/0114 gates", block["partial_projection_gates"])
@@ -76,8 +83,11 @@ func TestPgReadScopeDoctorBlock(t *testing.T) {
 	if !containsStringItem(surfaces, "artifacts") || !containsStringItem(surfaces, "events") {
 		t.Fatalf("expected artifacts and events in representative surfaces, got %#v", surfaces)
 	}
-	if !containsStringItem(surfaces, "clients") || !containsStringItem(surfaces, "work_packets") {
-		t.Fatalf("expected clients and work_packets in representative surfaces, got %#v", surfaces)
+	if containsStringItem(surfaces, "clients") {
+		t.Fatalf("clients still listed as a broad sensitive SELECT surface after the column-scoped classification: %#v", surfaces)
+	}
+	if !containsStringItem(surfaces, "work_packets") {
+		t.Fatalf("expected work_packets in representative surfaces, got %#v", surfaces)
 	}
 	// principals and client_sessions are reclassified out of
 	// runtime_sensitive_select by RFC 0114 (projection-read / denied).

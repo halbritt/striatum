@@ -167,6 +167,30 @@ func TestVerdictModelIdentityOwnerBundleTwoRole(t *testing.T) {
 		"owner-held ALTER (verdicts) as the SUT role")
 }
 
+func TestClientsColumnScopedReadTwoRole(t *testing.T) {
+	fx := pgtest.TwoRole(t)
+	ctx := context.Background()
+
+	err := fx.SUTPool.Runner.Exec(ctx, "SELECT * FROM striatumd.clients LIMIT 1")
+	assertSQLState42501(t, err, "",
+		"runtime SELECT * from clients under the column-scoped token-secret gate")
+
+	for _, column := range []string{"token_hash", "token_salt"} {
+		err := fx.SUTPool.Runner.Exec(ctx,
+			"SELECT "+column+" FROM striatumd.clients LIMIT 1")
+		assertSQLState42501(t, err, "",
+			"runtime SELECT of clients."+column+" under the column-scoped token-secret gate")
+	}
+
+	if err := fx.SUTPool.Runner.Exec(ctx, `
+		SELECT client_id, client_kind, display_name, token_id,
+		       created_at, expires_at, revoked_at, last_used_at
+		  FROM striatumd.clients
+		 LIMIT 1`); err != nil {
+		t.Fatalf("runtime SELECT of non-secret clients metadata must remain allowed: %v", err)
+	}
+}
+
 // TestTwoRoleCatchesDynamicOwnerTableTouch demonstrates the executable-oracle
 // value over the parse-time guard (RFC 0142 §3.7): a DYNAMIC owner-table ALTER the
 // static regex scanner cannot resolve still fails 42501 under the live fixture —

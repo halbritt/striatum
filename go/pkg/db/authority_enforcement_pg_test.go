@@ -853,13 +853,18 @@ func TestTokenSecretColumnsUseAuthorityProjection(t *testing.T) {
 	if !hasColumnSelect(t, ctx, ownerPool.Runner, "clients", "client_id") {
 		t.Fatal("striatumd_rw lost clients.client_id SELECT; only token secret columns should be denied")
 	}
+	err := runtimePool.Runner.Exec(ctx,
+		"SELECT * FROM striatumd.clients WHERE token_id = $1", "tok_projection")
+	if code := pgErrCode(err); code != "42501" {
+		t.Fatalf("runtime SELECT * from clients got err=%v code=%q, want SQLSTATE 42501", err, code)
+	}
 	var tokenID string
 	if err := runtimePool.Runner.QueryRow(ctx,
 		"SELECT token_id FROM striatumd.clients WHERE token_id = $1", "tok_projection").Scan(&tokenID); err != nil {
 		t.Fatalf("runtime role cannot read non-secret token metadata: %v", err)
 	}
 	var tokenHash string
-	err := runtimePool.Runner.QueryRow(ctx,
+	err = runtimePool.Runner.QueryRow(ctx,
 		"SELECT token_hash FROM striatumd.clients WHERE token_id = $1", "tok_projection").Scan(&tokenHash)
 	if code := pgErrCode(err); code != "42501" {
 		t.Fatalf("runtime direct token_hash read got err=%v code=%q, want SQLSTATE 42501", err, code)

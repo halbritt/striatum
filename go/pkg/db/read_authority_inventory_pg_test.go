@@ -103,6 +103,27 @@ func TestRuntimeParityTablesHaveRuntimeSelect(t *testing.T) {
 	}
 }
 
+// TestClientsReadClassIsColumnScoped formalizes the first P1 least-privilege
+// campaign slice: clients is no longer counted as broad runtime-sensitive
+// SELECT, but its token secret columns remain explicitly denied.
+func TestClientsReadClassIsColumnScoped(t *testing.T) {
+	class, ok := db.ClassifyReadTable("clients")
+	if !ok || class != db.ReadClassRuntimeColumnScoped {
+		t.Fatalf("clients read class = (%q, %v), want (%q, true)",
+			class, ok, db.ReadClassRuntimeColumnScoped)
+	}
+	if containsString("clients", db.RuntimeSensitiveReadTables()) {
+		t.Fatal("clients is still listed as a runtime_sensitive_select table")
+	}
+	if !containsString("clients", db.RuntimeColumnScopedReadTables()) {
+		t.Fatal("clients is missing from runtime_column_scoped_select tables")
+	}
+	denied := db.RuntimeDeniedReadColumns()["clients"]
+	if !containsString("token_hash", denied) || !containsString("token_salt", denied) {
+		t.Fatalf("clients denied columns = %v, want token_hash/token_salt", denied)
+	}
+}
+
 // TestReadDeniedColumnsHaveNoRuntimeSelect pins the RFC 0113 R1 column-level
 // reduction: client token hashes/salts are no longer directly selectable by the
 // runtime role after owner bundle 0005, even though non-secret client metadata
@@ -182,6 +203,15 @@ func TestClientSessionsRetainRuntimeDML(t *testing.T) {
 			}
 		}
 	}
+}
+
+func containsString(needle string, haystack []string) bool {
+	for _, item := range haystack {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // TestOwnerTransferClosesSelfRegrant is the executable Option B refutation

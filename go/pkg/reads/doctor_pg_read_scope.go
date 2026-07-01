@@ -53,7 +53,9 @@ var pgReadScopeGates = []pgReadScopeGate{
 //     `striatum daemon owner-ddl apply`, which re-runs ReassertReadRevokes);
 //   - else if every runtime_sensitive_select table is covered by a verified
 //     table-level gate → private_read_denial (unreachable until RFC 0113
-//     R2/R3; kept in the rule so the graduation is mechanical, not editorial);
+//     R2/R3; kept in the rule so the graduation is mechanical, not editorial).
+//     runtime_column_scoped_select tables are excluded from that broad-SELECT
+//     cohort only while their denied-column gates verify;
 //   - else if at least one verified table-level gate exists →
 //     partial_projection_gated;
 //   - else (column gates only — the 0005-only state) → broad_runtime_select.
@@ -63,11 +65,13 @@ var pgReadScopeGates = []pgReadScopeGate{
 // returns and never over-claims a closed surface.
 func pgReadScopeDoctorBlock(ctx context.Context, runner db.Runner) map[string]any {
 	sensitiveSurfaces := db.RuntimeSensitiveReadTables()
+	columnScopedSurfaces := db.RuntimeColumnScopedReadTables()
 	stamps, blockErrors := pgReadScopeStamps(ctx, runner)
 
 	gates := make([]map[string]any, 0, len(pgReadScopeGates))
 	grantDrift := []string{}
 	verifiedTableGates := map[string]bool{}
+	verifiedColumnGates := map[string]bool{}
 	for _, gate := range pgReadScopeGates {
 		stamped := stamps[gate.stamp]
 		tableGate := len(gate.deniedColumns) == 0
@@ -95,6 +99,8 @@ func pgReadScopeDoctorBlock(ctx context.Context, runner db.Runner) map[string]an
 				grantDrift = append(grantDrift, gate.surface)
 			} else if tableGate {
 				verifiedTableGates[gate.surface] = true
+			} else {
+				verifiedColumnGates[gate.surface] = true
 			}
 		}
 		gates = append(gates, entry)
@@ -104,7 +110,8 @@ func pgReadScopeDoctorBlock(ctx context.Context, runner db.Runner) map[string]an
 	switch {
 	case len(grantDrift) > 0:
 		posture = pgReadScopeBroadRuntimeSelect
-	case pgReadScopeAllCovered(sensitiveSurfaces, verifiedTableGates):
+	case pgReadScopeAllCovered(sensitiveSurfaces, verifiedTableGates) &&
+		pgReadScopeColumnScopedCovered(columnScopedSurfaces, verifiedColumnGates):
 		posture = pgReadScopePrivateReadDenial
 	case len(verifiedTableGates) > 0:
 		posture = pgReadScopePartialProjectionGated
@@ -118,20 +125,22 @@ func pgReadScopeDoctorBlock(ctx context.Context, runner db.Runner) map[string]an
 	}
 
 	block := map[string]any{
-		"posture":                   posture,
-		"runtime_role_select_scope": selectScope,
-		"private_read_denial":       posture == pgReadScopePrivateReadDenial,
-		"inventory_source":          "go/pkg/db/read_authority_inventory.go",
-		"sensitive_surface_count":   len(sensitiveSurfaces),
-		"partial_projection_gates":  gates,
-		"errors":                    blockErrors,
+		"posture":                     posture,
+		"runtime_role_select_scope":   selectScope,
+		"private_read_denial":         posture == pgReadScopePrivateReadDenial,
+		"inventory_source":            "go/pkg/db/read_authority_inventory.go",
+		"sensitive_surface_count":     len(sensitiveSurfaces),
+		"column_scoped_surface_count": len(columnScopedSurfaces),
+		"column_scoped_surfaces":      columnScopedSurfaces,
+		"partial_projection_gates":    gates,
+		"errors":                      blockErrors,
 		"bounded_by": []string{
 			"L0 runtime credential rotation makes captured DSN strings stale after daemon restart",
 			"L2 lane isolation prevents sandboxed lanes from reaching PostgreSQL once adopted",
 		},
 		"representative_sensitive_surfaces": sensitiveSurfaces,
 		"note": "RFC 0110 does not claim read confidentiality against a leaked live runtime credential; " +
-			"RFC 0113 R1 (bundles 0005/0006) gates token secrets and principal/session identity, but #164 remains open until every sensitive read surface is bounded.",
+			"RFC 0113 R1 (bundle 0005) makes clients a column-scoped read surface by gating token secrets, and bundle 0006 gates principal/session identity, but #164 remains open until every broad sensitive read surface is bounded.",
 	}
 	if len(grantDrift) > 0 {
 		block["grant_drift"] = grantDrift
@@ -215,6 +224,15 @@ func pgReadScopeAllCovered(sensitive []string, verifiedTableGates map[string]boo
 	}
 	for _, table := range sensitive {
 		if !verifiedTableGates[table] {
+			return false
+		}
+	}
+	return true
+}
+
+func pgReadScopeColumnScopedCovered(columnScoped []string, verifiedColumnGates map[string]bool) bool {
+	for _, table := range columnScoped {
+		if !verifiedColumnGates[table] {
 			return false
 		}
 	}

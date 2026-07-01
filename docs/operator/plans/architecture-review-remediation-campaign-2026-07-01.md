@@ -437,8 +437,12 @@ Source: 06-28 P1 "Continue read-side least-privilege closure".
 
 Current actual: `go/pkg/db/read_authority_inventory.go` deliberately classifies
 many sensitive tables as `runtime_sensitive_select`, including artifacts,
-events, sessions, jobs, runs, verdicts, work packets, supervisors, and generated
-records. The comments are honest that this is not private-read denial.
+events, sessions, jobs, runs, verdicts, work packets, supervisors, generated
+records, and `client_capabilities`. The first narrow slice formalizes the
+existing owner-bundle-0005 `clients` token-secret gate as
+`runtime_column_scoped_select`: `SELECT *` and `token_hash`/`token_salt` reads
+are denied, while named non-secret metadata columns remain directly selectable.
+The comments are honest that this is not private-read denial.
 
 Change: pick one narrow table family and move it from broad runtime SELECT to a
 projection/column-scoped read, with a two-role test. Do not try to close the

@@ -228,12 +228,16 @@ bundles 0005+0006 applied and verified it reports `partial_projection_gated`
 (four gates: `clients` columns, `principals` table, `principal_clients`
 columns, `client_sessions` table), otherwise `broad_runtime_select`, with a
 `grant_drift` array naming any re-opened surface. `private_read_denial`
-remains `false`: prose/workflow tables (RFC 0113 R2), artifact/event metadata
-(R3), and `client_capabilities` (RFC 0114 OQ1) are still directly selectable,
-so L0 rotation and L2 lane isolation still bound that remaining exposure. The
-read surface is inventoried in `go/pkg/db/read_authority_inventory.go` and
-guarded against unclassified table growth. #164 stays open for the remaining
-surfaces.
+remains `false`: the 2026-07-01 architecture-review remediation campaign's
+first least-privilege slice formalizes `clients` as
+`runtime_column_scoped_select`, meaning `SELECT *` and token-secret column reads
+are denied while named non-secret metadata columns stay directly selectable and
+secret reads route through the authority projections. Prose/workflow tables (RFC
+0113 R2), artifact/event metadata (R3), and `client_capabilities` (RFC 0114
+OQ1) are still directly selectable, so L0 rotation and L2 lane isolation still
+bound that remaining exposure. The read surface is inventoried in
+`go/pkg/db/read_authority_inventory.go` and guarded against unclassified table
+growth. #164 stays open for the remaining surfaces.
 The decision log records each per-phase decision on landing.
 
 ### Operator identity and run attribution (RFC 0167 P0 / D260, D263)

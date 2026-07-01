@@ -56,6 +56,15 @@ func TestPgReadScopePostureDerivation(t *testing.T) {
 	if block["private_read_denial"] != false {
 		t.Fatalf("private_read_denial = %v, want false (RFC 0113 R2/R3 are out of scope)", block["private_read_denial"])
 	}
+	columnScoped, ok := block["column_scoped_surfaces"].([]string)
+	if !ok || !containsStringItem(columnScoped, "clients") {
+		t.Fatalf("column_scoped_surfaces = %#v, want clients", block["column_scoped_surfaces"])
+	}
+	sensitive, ok := block["representative_sensitive_surfaces"].([]string)
+	if !ok || containsStringItem(sensitive, "clients") {
+		t.Fatalf("representative_sensitive_surfaces = %#v, want clients excluded after column-scoped classification",
+			block["representative_sensitive_surfaces"])
+	}
 	for _, surface := range []string{"clients", "principals", "principal_clients", "client_sessions"} {
 		gate := readScopeGateBySurface(t, block, surface)
 		if gate["stamped"] != true || gate["verified"] != true {
