@@ -136,6 +136,37 @@ func TestTwoRoleBootstrapOwnershipFidelity(t *testing.T) {
 	}
 }
 
+func TestVerdictModelIdentityOwnerBundleTwoRole(t *testing.T) {
+	fx := pgtest.TwoRole(t)
+	ctx := context.Background()
+
+	for _, column := range []string{
+		"model_identity_declared",
+		"model_family_at_record",
+		"model_identity_basis",
+		"model_co_blindness_at_record",
+	} {
+		exists, err := fx.OwnerPool.Runner.QueryScalar(ctx, `
+			SELECT EXISTS (
+			  SELECT 1 FROM information_schema.columns
+			   WHERE table_schema = 'striatumd'
+			     AND table_name = 'verdicts'
+			     AND column_name = $1
+			)::text`, column)
+		if err != nil {
+			t.Fatalf("read verdicts.%s column: %v", column, err)
+		}
+		if exists != "true" {
+			t.Fatalf("owner bundle 0024 did not add verdicts.%s", column)
+		}
+	}
+
+	err := fx.SUTPool.Runner.Exec(ctx,
+		"ALTER TABLE striatumd.verdicts ADD COLUMN p1_model_identity_probe integer")
+	assertSQLState42501(t, err, "must be owner of table verdicts",
+		"owner-held ALTER (verdicts) as the SUT role")
+}
+
 // TestTwoRoleCatchesDynamicOwnerTableTouch demonstrates the executable-oracle
 // value over the parse-time guard (RFC 0142 §3.7): a DYNAMIC owner-table ALTER the
 // static regex scanner cannot resolve still fails 42501 under the live fixture —

@@ -275,33 +275,29 @@ func HandleOverrideVerdict(ctx context.Context, runner db.Runner, envelope rpc.E
 		// stamp (P0-1) records the lane state the override was issued against.
 		attestation := sessionLaneAttestation(ctx, tx, repositoryID, sessionID)
 		now := nowString()
-		// RFC 0126 P0 (D194 / GH #282): the operator-override INSERT intentionally
-		// does NOT name review_generation. In production (owner bundle 0009 applied)
-		// the column DEFAULTs to 1; stamping the live build generation onto an
-		// override is deferred to P1/P2, when the generation-scoped completion gate
-		// actually consults the column (this operator path is rare, and leaving it
-		// unstamped here keeps both the runtime-only harness and production correct
-		// without an adaptive branch on a non-hot path).
-		if err := tx.Exec(ctx, `
-			INSERT INTO striatumd.verdicts (
-			  repository_id, verdict_id, run_id, job_id, session_id,
-			  verdict, rationale, findings_artifact_id, created_at, posture,
-			  lane_attestation_at_record, review_provenance_override,
-			  review_provenance_decision_id, supervisor_id_at_record
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'override',$10,true,NULL,$11)`,
-			repositoryID,
-			verdictID,
-			job["run_id"],
-			jobID,
-			sessionID,
-			verdict,
-			strings.TrimSpace(rationale),
-			effectiveArtifactID,
-			now,
-			attestation["state"],
-			attestation["supervisor_id"],
-		); err != nil {
+		// RFC 0126 P0 (D194 / GH #282): the operator-override INSERT still
+		// intentionally omits review_generation. In production the owner-bundle
+		// column defaults to 1; this rare path remains compatible with
+		// runtime-only harnesses while stamping explicit operator model provenance
+		// when owner bundle 0024 is present.
+		if err := insertVerdictRow(ctx, tx, verdictRowInsert{
+			RepositoryID:                repositoryID,
+			VerdictID:                   verdictID,
+			RunID:                       job["run_id"],
+			JobID:                       jobID,
+			SessionID:                   sessionID,
+			Verdict:                     verdict,
+			Rationale:                   strings.TrimSpace(rationale),
+			FindingsArtifactID:          effectiveArtifactID,
+			CreatedAt:                   now,
+			Posture:                     "override",
+			LaneAttestationAtRecord:     attestation["state"],
+			ReviewProvenanceOverride:    true,
+			ReviewProvenanceDecisionID:  nil,
+			SupervisorIDAtRecord:        attestation["supervisor_id"],
+			ModelIdentity:               verdictModelIdentityUnknown("operator_override"),
+			IncludeModelIdentityColumns: verdictModelIdentityColumnsPresent(ctx, tx),
+		}); err != nil {
 			return nil, err
 		}
 		resolvedBlockers := 0
@@ -571,7 +567,7 @@ func recordVerdict(
 			return nil, rpc.NewError("invalid_transition", "findings artifact belongs to a different job", nil)
 		}
 	}
-	return applyVerdict(ctx, runner, repositoryID, sessionID, jobID, leaseID, verdict, job, findingsArtifactID, rationale, reviewProvenance, gateAttestation)
+	return applyVerdict(ctx, runner, repositoryID, sessionID, jobID, leaseID, verdict, job, findingsArtifactID, rationale, reviewProvenance, gateAttestation, options.ProvenanceOverrideBasis)
 }
 
 type recordVerdictOptions struct {
@@ -597,7 +593,7 @@ type recordVerdictOptions struct {
 // mutation it performs (completeReviewJob / failReviewJob / routeRevisionCycle) is
 // lease-state-tolerant (unconditional UPDATEs keyed by id), so it is safe on a
 // stale lane.
-func applyVerdict(ctx context.Context, runner any, repositoryID, sessionID, jobID, leaseID, verdict string, job map[string]any, findingsArtifactID, rationale any, reviewProvenance, gateAttestation map[string]any) (map[string]any, error) {
+func applyVerdict(ctx context.Context, runner any, repositoryID, sessionID, jobID, leaseID, verdict string, job map[string]any, findingsArtifactID, rationale any, reviewProvenance, gateAttestation map[string]any, modelIdentityOverrideBasis string) (map[string]any, error) {
 	verdictID, err := newID("verdict")
 	if err != nil {
 		return nil, err
@@ -644,12 +640,6 @@ func applyVerdict(ctx context.Context, runner any, repositoryID, sessionID, jobI
 			reviewProvenance = merged
 		}
 	}
-	exec, ok := runner.(interface {
-		Exec(context.Context, string, ...any) error
-	})
-	if !ok {
-		return nil, fmt.Errorf("runner does not support exec")
-	}
 	// RFC 0126 P0 (D194 / GH #282): stamp the verdict with the reviewed build's
 	// CURRENT review_generation at record time so a later build revision (which
 	// bumps the build's generation in reopenJobForAttempt) renders this verdict
@@ -666,49 +656,52 @@ func applyVerdict(ctx context.Context, runner any, repositoryID, sessionID, jobI
 	// the build's LIVE seal (staged.review_generation = live.review_generation), so
 	// a verdict stamped below the live seal is structurally absent from the readiness
 	// count — the exact trap-killer the primitive guarantees. No P5 behavior change.
-	if reviewGenerationEnabled(ctx, runner) {
-		generation, gerr := reviewedBuildGeneration(ctx, runner, repositoryID, job)
+	includeReviewGeneration := reviewGenerationEnabled(ctx, runner)
+	var generation any
+	if includeReviewGeneration {
+		var gerr error
+		generation, gerr = reviewedBuildGeneration(ctx, runner, repositoryID, job)
 		if gerr != nil {
 			return nil, gerr
 		}
-		if err := exec.Exec(ctx, `
-			INSERT INTO striatumd.verdicts (
-			  repository_id, verdict_id, run_id, job_id, session_id, verdict,
-			  rationale, findings_artifact_id, created_at, posture,
-			  lane_attestation_at_record, review_provenance_override,
-			  review_provenance_decision_id, supervisor_id_at_record, review_generation
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-			repositoryID, verdictID, job["run_id"], jobID, sessionID, verdict,
-			rationale, findingsArtifactID, now, posture,
-			attestation["state"],
-			reviewProvenance["review_provenance_override"] == true,
-			nullable(reviewProvenance["review_provenance_decision_id"]),
-			attestation["supervisor_id"], generation,
-		); err != nil {
-			return nil, err
-		}
-	} else if err := exec.Exec(ctx, `
-		INSERT INTO striatumd.verdicts (
-		  repository_id, verdict_id, run_id, job_id, session_id, verdict,
-		  rationale, findings_artifact_id, created_at, posture,
-		  lane_attestation_at_record, review_provenance_override,
-		  review_provenance_decision_id, supervisor_id_at_record
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		repositoryID, verdictID, job["run_id"], jobID, sessionID, verdict,
-		rationale, findingsArtifactID, now, posture,
-		attestation["state"],
-		reviewProvenance["review_provenance_override"] == true,
-		nullable(reviewProvenance["review_provenance_decision_id"]),
-		attestation["supervisor_id"],
-	); err != nil {
+	}
+	includeModelIdentity := verdictModelIdentityColumnsPresent(ctx, runner)
+	modelIdentity := verdictModelIdentityStamp{}
+	if includeModelIdentity {
+		modelIdentity = verdictModelIdentityForJob(ctx, runner, repositoryID, job, modelIdentityOverrideBasis)
+	}
+	if err := insertVerdictRow(ctx, runner, verdictRowInsert{
+		RepositoryID:                repositoryID,
+		VerdictID:                   verdictID,
+		RunID:                       job["run_id"],
+		JobID:                       jobID,
+		SessionID:                   sessionID,
+		Verdict:                     verdict,
+		Rationale:                   rationale,
+		FindingsArtifactID:          findingsArtifactID,
+		CreatedAt:                   now,
+		Posture:                     posture,
+		LaneAttestationAtRecord:     attestation["state"],
+		ReviewProvenanceOverride:    reviewProvenance["review_provenance_override"] == true,
+		ReviewProvenanceDecisionID:  nullable(reviewProvenance["review_provenance_decision_id"]),
+		SupervisorIDAtRecord:        attestation["supervisor_id"],
+		ReviewGeneration:            generation,
+		IncludeReviewGeneration:     includeReviewGeneration,
+		ModelIdentity:               modelIdentity,
+		IncludeModelIdentityColumns: includeModelIdentity,
+	}); err != nil {
 		return nil, err
 	}
 	payload := map[string]any{
 		"verdict":          verdict,
 		"posture":          posture,
 		"lane_attestation": attestation["state"],
+	}
+	if includeModelIdentity {
+		payload["model_identity_declared"] = modelIdentity.Declared
+		payload["model_family_at_record"] = modelIdentity.Family
+		payload["model_identity_basis"] = modelIdentity.Basis
+		payload["model_co_blindness_at_record"] = modelIdentity.CoBlindness
 	}
 	for key, value := range reviewProvenance {
 		payload[key] = value

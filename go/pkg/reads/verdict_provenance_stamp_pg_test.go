@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/pgtest"
 	"github.com/halbritt/striatum/go/pkg/rpc"
 )
@@ -60,6 +61,12 @@ func TestRunSummaryVerdictsCarryFrozenProvenanceStamp(t *testing.T) {
 	if got := fmt.Sprint(row["supervisor_id_at_record"]); got != "sup_stamp" {
 		t.Fatalf("supervisor_id_at_record = %q, want sup_stamp", got)
 	}
+	if got := fmt.Sprint(row["model_identity_declared"]); got != "unknown" {
+		t.Fatalf("model_identity_declared = %q, want unknown for historical/no-column row", got)
+	}
+	if got := fmt.Sprint(row["model_co_blindness_at_record"]); got != "unknown" {
+		t.Fatalf("model_co_blindness_at_record = %q, want unknown for historical/no-column row", got)
+	}
 
 	// RFC 0118 P0-4: run.summary surfaces the run's completion_mode and an
 	// overrides[] block listing every override-cleared verdict with its
@@ -88,6 +95,60 @@ func TestRunSummaryVerdictsCarryFrozenProvenanceStamp(t *testing.T) {
 	}
 	if got := fmt.Sprint(overrides[0]["review_provenance_decision_id"]); got != "dec_stamp" {
 		t.Fatalf("overrides[0].review_provenance_decision_id = %q, want dec_stamp", got)
+	}
+	if got := fmt.Sprint(overrides[0]["model_identity_basis"]); got != "unknown" {
+		t.Fatalf("overrides[0].model_identity_basis = %q, want unknown fallback", got)
+	}
+}
+
+func TestRunSummaryVerdictsExposeModelIdentityFields(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	if _, _, err := db.ApplyOwnerBundles(ctx, runner, "test"); err != nil {
+		t.Fatalf("apply owner bundles: %v", err)
+	}
+	repoID := "repo_stamp_model_summary"
+	runID := "run_stamp_model"
+	now := time.Date(2026, 6, 10, 9, 30, 0, 0, time.UTC)
+	crSeedRepo(t, ctx, runner, repoID, now)
+	crSeedRun(t, ctx, runner, repoID, runID, "striatum/stamp-model", now, false, nil)
+
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.verdicts (
+		  repository_id, verdict_id, run_id, job_id, session_id, verdict,
+		  rationale, created_at, posture,
+		  lane_attestation_at_record, review_provenance_override,
+		  model_identity_declared, model_family_at_record,
+		  model_identity_basis, model_co_blindness_at_record
+		) VALUES ($1,'verdict_stamp_model',$2,$3,$4,'accept','ok',$5,'neutral',
+		  'attested',false,'Claude','claude','workflow_snapshot.display_model',
+		  'same_model_family')`,
+		repoID, runID, "job_"+runID, "sess_"+runID, now); err != nil {
+		t.Fatalf("seed model-stamped verdict: %v", err)
+	}
+
+	result, err := HandleRunSummary(ctx, runner, rpc.Envelope{
+		Params: map[string]any{"repository_id": repoID, "run_id": runID},
+	})
+	if err != nil {
+		t.Fatalf("HandleRunSummary: %v", err)
+	}
+	verdicts, ok := result["verdicts"].([]map[string]any)
+	if !ok || len(verdicts) != 1 {
+		t.Fatalf("verdicts = %#v, want exactly one row", result["verdicts"])
+	}
+	row := verdicts[0]
+	if got := fmt.Sprint(row["model_identity_declared"]); got != "Claude" {
+		t.Fatalf("model_identity_declared = %q, want Claude", got)
+	}
+	if got := fmt.Sprint(row["model_family_at_record"]); got != "claude" {
+		t.Fatalf("model_family_at_record = %q, want claude", got)
+	}
+	if got := fmt.Sprint(row["model_identity_basis"]); got != "workflow_snapshot.display_model" {
+		t.Fatalf("model_identity_basis = %q, want workflow snapshot basis", got)
+	}
+	if got := fmt.Sprint(row["model_co_blindness_at_record"]); got != "same_model_family" {
+		t.Fatalf("model_co_blindness_at_record = %q, want same_model_family", got)
 	}
 }
 
@@ -217,6 +278,17 @@ func TestEvidenceExportRendersProvenanceSections(t *testing.T) {
 	}
 	if !strings.Contains(text, "sess_run_evidence") || !strings.Contains(text, "dec_evidence") {
 		t.Fatalf("sections missing frozen session / override decision:\n%s", text)
+	}
+	if !strings.Contains(text, "model=`unknown`") || !strings.Contains(text, "identity_basis=`unknown`") {
+		t.Fatalf("operator override section missing model identity fallback:\n%s", text)
+	}
+	verdicts, ok := result["verdicts"].([]any)
+	if !ok || len(verdicts) != 1 {
+		t.Fatalf("exported verdicts = %#v, want one redacted verdict", result["verdicts"])
+	}
+	exportedVerdict, _ := verdicts[0].(map[string]any)
+	if fmt.Sprint(exportedVerdict["model_identity_basis"]) != "unknown" {
+		t.Fatalf("exported model_identity_basis = %#v, want unknown", exportedVerdict["model_identity_basis"])
 	}
 	// RFC 0134: the claim-verification ledger renders authored vs. effective status
 	// and the degrade basis (a VERIFIED claim that decayed to ASSERTED is legible).

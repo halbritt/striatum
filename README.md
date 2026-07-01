@@ -80,7 +80,7 @@ token lives under the daemon runtime directory as `client-token`.
 │         runs · sessions · jobs · leases · verdicts             │
 │         artifacts · blockers · events · audit_log              │
 ├────────────────────────────────────────────────────────────────┤
-│       Postgres striatumd schema (runtime schema 47 / owner 0023)│
+│       Postgres striatumd schema (runtime schema 47 / owner 0024)│
 │    append-only events + artifacts  ·  hash-chained audit rows  │
 │    serialized audit head  ·  per-repo event chain heads        │
 └────────────────────────────────────────────────────────────────┘
@@ -301,13 +301,13 @@ owner-only socket.
 
 | Area | Status |
 |------|--------|
-| Version | v2.39.0 — latest release published 2026-06-27; Go-only runtime, PostgreSQL daemon, runtime schema 46, RFC 0170 P0 observe-only culling substrate, RFC 0171 first build slice, RFC 0168 P0 design acceptance, session-bound operator bootstrap, owner-bundle 0022, and D270 cross-repo product-surface retirement are live. Current source adds integrated RFC 0168 P0 uid-lease runtime schema 47 and owner bundle 0023 (see [CHANGELOG.md](CHANGELOG.md)) |
+| Version | v2.39.0 — latest release published 2026-06-27; Go-only runtime, PostgreSQL daemon, runtime schema 46, RFC 0170 P0 observe-only culling substrate, RFC 0171 first build slice, RFC 0168 P0 design acceptance, session-bound operator bootstrap, owner-bundle 0022, and D270 cross-repo product-surface retirement are live. Current source adds integrated RFC 0168 P0 uid-lease runtime schema 47 plus owner bundle 0024 for verdict model identity (see [CHANGELOG.md](CHANGELOG.md)) |
 | Platforms | Linux + macOS Go binaries · Postgres 14+ |
 | Distribution | GitHub release archives with `SHA256SUMS` |
 | License | Apache-2.0 |
 | CI | Go tests, frontend checks, archive checks, and Go-only smoke scripts |
 | Daemon substrate | Daemon-owned PostgreSQL is the live state substrate; repository files are durable provenance, not the message bus |
-| Schema | Managed by Go runtime migrations and owner bundles; current source is `go/pkg/db/migrations.go` (runtime schema 47), `go/pkg/db/owner.go` (owner bundle 0023), and `docs/reference/spec.md`; latest published release v2.39.0 is runtime schema 46 / owner bundle 0022 |
+| Schema | Managed by Go runtime migrations and owner bundles; current source is `go/pkg/db/migrations.go` (runtime schema 47), `go/pkg/db/owner.go` (owner bundle 0024), and `docs/reference/spec.md`; latest published release v2.39.0 is runtime schema 46 / owner bundle 0022 |
 | Go runtime | Production runtime and release archive path for `striatum`, `striatumd`, and `striatum-supervisor-helper` |
 | Active work | Run `striatum operator bootstrap --markdown` for the live frontier; current state lives in `docs/operator/BRIEF.md`, `docs/operator/rfc-roadmap.md`, and the open GitHub issues |
 | Corpus export / augmentation | Corpus Contract V2 core landed; optional reference-only augmentation stays local and Striatum runs with external memory absent |

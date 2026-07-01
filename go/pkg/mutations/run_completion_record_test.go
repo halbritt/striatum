@@ -166,6 +166,15 @@ func TestRunCompletionWritesRecordWithLedger(t *testing.T) {
 	if fmt.Sprint(stamp["job_id"]) != jobID || fmt.Sprint(stamp["lane_attestation_at_record"]) != "attested" {
 		t.Fatalf("frozen verdict stamp = %#v, want attested stamp for %s", stamp, jobID)
 	}
+	if fmt.Sprint(stamp["model_identity_declared"]) != verdictModelUnknown ||
+		fmt.Sprint(stamp["model_co_blindness_at_record"]) != verdictCoBlindnessUnknown {
+		t.Fatalf("frozen verdict model identity = %#v, want unknown historical stamp", stamp)
+	}
+	gate := asMap(asList(record["provenance_gate"])[0])
+	if fmt.Sprint(gate["model_identity_declared"]) != verdictModelUnknown ||
+		fmt.Sprint(gate["model_co_blindness_at_record"]) != verdictCoBlindnessUnknown {
+		t.Fatalf("provenance gate model identity = %#v, want unknown historical stamp", gate)
+	}
 	jobs := asList(record["jobs"])
 	if len(jobs) != 1 || fmt.Sprint(asMap(jobs[0])["state"]) != "completed" {
 		t.Fatalf("record jobs = %#v, want the completed review job", record["jobs"])

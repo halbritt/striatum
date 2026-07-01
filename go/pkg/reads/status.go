@@ -776,7 +776,7 @@ func statusLatestNonAccepting(ctx context.Context, runner db.Runner, repositoryI
 		`SELECT DISTINCT ON (v.job_id)
 		        v.verdict_id, v.run_id, v.job_id, j.workflow_job_id,
 		        v.verdict, v.posture, v.created_at,
-		        v.rationale, v.findings_artifact_id,
+		        v.rationale, v.findings_artifact_id`+verdictModelIdentityProjection(ctx, runner, "v")+`,
 		        EXISTS (
 		          SELECT 1
 		            FROM striatumd.job_dependencies dep

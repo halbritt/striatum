@@ -49,7 +49,7 @@ func finalizeVerdictCapableJobFromDurableArtifact(ctx context.Context, tx db.TxR
 		"review_provenance_override": true,
 		"review_provenance_basis":    recoveryVerdictArtifactBasis,
 	}
-	completeResult, err := applyVerdict(ctx, tx, repositoryID, artifact.SessionID, jobID, artifact.LeaseID, artifact.Verdict, job, artifact.ArtifactID, reason, reviewProvenance, nil)
+	completeResult, err := applyVerdict(ctx, tx, repositoryID, artifact.SessionID, jobID, artifact.LeaseID, artifact.Verdict, job, artifact.ArtifactID, reason, reviewProvenance, nil, recoveryVerdictArtifactBasis)
 	if err != nil {
 		return nil, err
 	}

@@ -91,13 +91,13 @@ func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelo
 	decorateArtifactProvenance(artifacts)
 
 	verdicts, err := collectRows(ctx, runner,
-		`SELECT verdict_id, job_id, session_id, verdict,
-		        posture AS review_posture, created_at AS recorded_at,
-		        lane_attestation_at_record, review_provenance_override,
-		        review_provenance_decision_id, supervisor_id_at_record
-		   FROM striatumd.verdicts
-		  WHERE repository_id = $1 AND run_id = $2
-		  ORDER BY created_at`,
+		`SELECT v.verdict_id, v.job_id, v.session_id, v.verdict,
+		        v.posture AS review_posture, v.created_at AS recorded_at,
+		        v.lane_attestation_at_record, v.review_provenance_override,
+		        v.review_provenance_decision_id, v.supervisor_id_at_record`+verdictModelIdentityProjection(ctx, runner, "v")+`
+		   FROM striatumd.verdicts v
+		  WHERE v.repository_id = $1 AND v.run_id = $2
+		  ORDER BY v.created_at`,
 		repositoryID, runID,
 	)
 	if err != nil {
@@ -108,13 +108,13 @@ func HandleRunSummary(ctx context.Context, runner db.Runner, envelope rpc.Envelo
 	// decisions, read from the frozen P0-1 stamps — the run's operator
 	// overrides are auditable from the summary alone.
 	overrides, err := collectRows(ctx, runner,
-		`SELECT verdict_id, job_id, session_id, verdict, posture,
-		        lane_attestation_at_record, review_provenance_decision_id,
-		        created_at AS recorded_at
-		   FROM striatumd.verdicts
-		  WHERE repository_id = $1 AND run_id = $2
-		    AND (review_provenance_override = true OR posture = 'override')
-		  ORDER BY created_at`,
+		`SELECT v.verdict_id, v.job_id, v.session_id, v.verdict, v.posture,
+		        v.lane_attestation_at_record, v.review_provenance_decision_id,
+		        v.created_at AS recorded_at`+verdictModelIdentityProjection(ctx, runner, "v")+`
+		   FROM striatumd.verdicts v
+		  WHERE v.repository_id = $1 AND v.run_id = $2
+		    AND (v.review_provenance_override = true OR v.posture = 'override')
+		  ORDER BY v.created_at`,
 		repositoryID, runID,
 	)
 	if err != nil {
@@ -221,12 +221,12 @@ func HandleEvidenceExport(ctx context.Context, runner db.Runner, envelope rpc.En
 	completionRecord := objectOrEmpty(runs[0]["completion_record_json"])
 	delete(runs[0], "completion_record_json")
 	overrideVerdicts, err := collectRows(ctx, runner,
-		`SELECT verdict_id, job_id, verdict, posture,
-		        lane_attestation_at_record, review_provenance_decision_id
-		   FROM striatumd.verdicts
-		  WHERE repository_id = $1 AND run_id = $2
-		    AND (review_provenance_override = true OR posture = 'override')
-		  ORDER BY created_at, verdict_id`,
+		`SELECT v.verdict_id, v.job_id, v.verdict, v.posture,
+		        v.lane_attestation_at_record, v.review_provenance_decision_id`+verdictModelIdentityProjection(ctx, runner, "v")+`
+		   FROM striatumd.verdicts v
+		  WHERE v.repository_id = $1 AND v.run_id = $2
+		    AND (v.review_provenance_override = true OR v.posture = 'override')
+		  ORDER BY v.created_at, v.verdict_id`,
 		repositoryID,
 		runID,
 	)
@@ -249,11 +249,11 @@ func HandleEvidenceExport(ctx context.Context, runner db.Runner, envelope rpc.En
 	decorateArtifactPlacements(artifacts)
 	decorateArtifactProvenance(artifacts)
 	verdicts, err := collectRows(ctx, runner,
-		`SELECT verdict_id, run_id, job_id, verdict,
-		        posture AS review_posture, created_at AS recorded_at
-		   FROM striatumd.verdicts
-		  WHERE repository_id = $1 AND run_id = $2
-		  ORDER BY created_at DESC LIMIT 500`,
+		`SELECT v.verdict_id, v.run_id, v.job_id, v.verdict,
+		        v.posture AS review_posture, v.created_at AS recorded_at`+verdictModelIdentityProjection(ctx, runner, "v")+`
+		   FROM striatumd.verdicts v
+		  WHERE v.repository_id = $1 AND v.run_id = $2
+		  ORDER BY v.created_at DESC LIMIT 500`,
 		repositoryID,
 		runID,
 	)
@@ -385,6 +385,11 @@ func renderProvenanceSections(record map[string]any, overrides []map[string]any)
 		if decision := row["review_provenance_decision_id"]; decision != nil {
 			line += fmt.Sprintf(" decision=`%s`", fmt.Sprint(decision))
 		}
+		line += fmt.Sprintf(" model=`%s` family=`%s` identity_basis=`%s` co_blindness=`%s`",
+			fmt.Sprint(row["model_identity_declared"]),
+			fmt.Sprint(row["model_family_at_record"]),
+			fmt.Sprint(row["model_identity_basis"]),
+			fmt.Sprint(row["model_co_blindness_at_record"]))
 		b.WriteString(line + "\n")
 	}
 	// RFC 0134 / D227: the executable-half claim-verification ledger frozen on the

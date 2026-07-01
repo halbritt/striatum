@@ -430,26 +430,41 @@ func HandleCheckpointResolve(ctx context.Context, runner db.Runner, envelope rpc
 			// row, bound to the resolving decision — the minted clearing session
 			// has no lane, so the stamp records the unattested state honestly.
 			clearingAttestation := sessionLaneAttestation(ctx, tx, repositoryID, fmt.Sprint(overrideSessionID))
-			if err := tx.Exec(ctx, `
-				INSERT INTO striatumd.verdicts (
-				  repository_id, verdict_id, run_id, job_id, session_id, verdict,
-				  rationale, findings_artifact_id, created_at, posture,
-				  lane_attestation_at_record, review_provenance_override,
-				  review_provenance_decision_id, supervisor_id_at_record
-				)
-				VALUES ($1,$2,$3,$4,$5,'accept_with_findings',$6,$7,$8,'override',
-				        $9,true,$10,$11)`,
-				repositoryID, verdictID, job["run_id"], blockerJobID, overrideSessionID,
-				overrideRationale, artifactID, overrideCreatedAt,
-				clearingAttestation["state"], decisionID, clearingAttestation["supervisor_id"]); err != nil {
+			modelIdentityColumns := verdictModelIdentityColumnsPresent(ctx, tx)
+			modelIdentity := verdictModelIdentityUnknown("checkpoint_override")
+			if err := insertVerdictRow(ctx, tx, verdictRowInsert{
+				RepositoryID:                repositoryID,
+				VerdictID:                   verdictID,
+				RunID:                       job["run_id"],
+				JobID:                       fmt.Sprint(blockerJobID),
+				SessionID:                   overrideSessionID,
+				Verdict:                     "accept_with_findings",
+				Rationale:                   overrideRationale,
+				FindingsArtifactID:          artifactID,
+				CreatedAt:                   overrideCreatedAt,
+				Posture:                     "override",
+				LaneAttestationAtRecord:     clearingAttestation["state"],
+				ReviewProvenanceOverride:    true,
+				ReviewProvenanceDecisionID:  decisionID,
+				SupervisorIDAtRecord:        clearingAttestation["supervisor_id"],
+				ModelIdentity:               modelIdentity,
+				IncludeModelIdentityColumns: modelIdentityColumns,
+			}); err != nil {
 				return nil, err
 			}
-			if _, err := appendEvent(ctx, tx, repositoryID, runID, "verdict.recorded", overrideSessionID, blockerJobID, nil, artifactID, nil, map[string]any{
+			eventPayload := map[string]any{
 				"verdict":     "accept_with_findings",
 				"posture":     "override",
 				"source":      "checkpoint.override",
 				"decision_id": decisionID,
-			}); err != nil {
+			}
+			if modelIdentityColumns {
+				eventPayload["model_identity_declared"] = modelIdentity.Declared
+				eventPayload["model_family_at_record"] = modelIdentity.Family
+				eventPayload["model_identity_basis"] = modelIdentity.Basis
+				eventPayload["model_co_blindness_at_record"] = modelIdentity.CoBlindness
+			}
+			if _, err := appendEvent(ctx, tx, repositoryID, runID, "verdict.recorded", overrideSessionID, blockerJobID, nil, artifactID, nil, eventPayload); err != nil {
 				return nil, err
 			}
 			if err := markJobTerminal(ctx, tx, repositoryID, runID, fmt.Sprint(blockerJobID)); err != nil {

@@ -9,9 +9,9 @@
 # file, a DUPLICATE ordinal, or a GAP in the sequence. Two PRs can no longer
 # silently grab the same NNNN (the 0039 / 0041 collisions, RFC 0142 failure #4).
 #
-# Frontiers: runtime_migration = 0047, owner_bundle = 0023 (embedded). Owner
+# Frontiers: runtime_migration = 0047, owner_bundle = 0024 (embedded). Owner
 # ordinal 0021 is RESERVED but STAGED, not embedded (see the owner-bundle note
-# below) — the embedded frontier tops out at 20.
+# below) — normal embedded bundles continue above it.
 #
 # Format: a tiny array-of-tables (a purpose-built parser in reservations.go
 # reads only `ordinal` and `file`; keep it that simple and human-legible).
@@ -308,7 +308,13 @@ file = "0022_operator_identity_run_attribution.sql"
 
 # owner ordinal 23 — RFC 0168 P0 (D272) lane uid lease authority reassertion — is
 # a NORMAL apply-eligible EMBEDDED owner bundle that sits ABOVE the staged revoke
-# 21. It is the highest embedded bundle, so the embedded frontier is now 23.
+# 21.
 [[owner_bundle]]
 ordinal = 23
 file = "0023_lane_uid_leases.sql"
+
+# owner ordinal 24 — P1-VERDICT-MODEL-IDENTITY — adds declared model identity
+# stamps to the owner-held verdicts table.
+[[owner_bundle]]
+ordinal = 24
+file = "0024_verdict_model_identity.sql"

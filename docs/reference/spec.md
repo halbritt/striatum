@@ -810,6 +810,14 @@ escalation re-drives completion. A completed run records
 gate cleared on a frozen attested stamp, `operator_override` when any
 gate cleared by an override basis. `completion_mode` is advisory
 metadata: downstream consumers that care must read it explicitly.
+Verdict rows also carry declared model identity stamps when the owner bundle is
+applied: `model_identity_declared`, `model_family_at_record`,
+`model_identity_basis`, and `model_co_blindness_at_record`. These stamps are
+derived only from the immutable workflow snapshot's declared lane model
+metadata, or recorded as `unknown` with an explicit operator/recovery basis for
+override and recovery paths. Historical NULL rows and deployments without the
+owner columns read as `unknown`; no historical rewrite upgrades old verdicts to
+stronger proof.
 
 When a SINGLE job exhausts its autonomous-recovery budget but its
 downstream is clear, the recovery decision tree moves ONLY that job to
@@ -1102,7 +1110,9 @@ path.
 fresh active session on the same run, appends a newer `accept` or
 `accept_with_findings` verdict without editing prior verdict rows, resolves
 revision-routing human checkpoints when present, and re-evaluates downstream
-gates.
+gates. The appended override verdict records model identity as `unknown` with
+an operator basis; checkpoint and recovery-created clearing verdicts follow the
+same fail-toward-unknown rule rather than fabricating a model from later state.
 
 `checkpoint.resolve continue` and `checkpoint.resolve override` refuse before
 mutating blocker or job state when the parked `waiting_human` job declares a
@@ -1122,6 +1132,8 @@ rationales, are redacted in the export.
 Workflow job titles are omitted by default; job and artifact authorship is
 reported through stable identity metadata: role id, lane id, declared model
 display name, and workflow job id.
+Verdict model identity stamps are exported as categorical scalar fields and
+remain redaction-safe; free-text verdict rationales remain redacted.
 
 Evidence redaction is **default-deny**. The export schema is defined by an
 explicit per-field policy registry that classifies every emitted field as
@@ -1920,7 +1932,10 @@ the sessions block and `completion_record` projection come from the frozen
 `run_completion_record` — the last-live state captured before teardown —
 never from a live probe. `evidence export` renders deterministic
 `## Sessions`, `## Provenance Gate`, and `## Operator Overrides` sections
-from the same frozen state.
+from the same frozen state. Verdict projections in `run.summary`,
+`completion_record`, the provenance gate ledger, and `evidence export` include
+the declared model identity fields and the co-blindness qualifier, using
+`unknown` for historical or unstamped rows.
 
 `run.summary --json` also carries the RFC 0157 (D251) canonical
 `state_projection` block — `{run_state, jobs:[{id,state}]}` — alongside its

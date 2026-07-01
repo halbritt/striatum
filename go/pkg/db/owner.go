@@ -22,13 +22,14 @@ import (
 // runtime-role ApplyMigrations path (RFC 0079 §5).
 //
 // RFC 0167 P0 (D260) advanced this past the staged DDL-revoke with the normal
-// apply-eligible 0022 bundle. RFC 0168 P0 (D272) advances it again with the
-// normal 0023 lane-uid lease authority reassertion. Because normal bundles now
+// apply-eligible 0022 bundle. RFC 0168 P0 (D272) advanced it again with the
+// normal 0023 lane-uid lease authority reassertion. P1-VERDICT-MODEL-IDENTITY
+// advances it with owner-held verdict model stamps. Because normal bundles now
 // live above the revoke frontier, the revoke predicates below target the EXACT
 // revoke version (== DDLRevokeOwnerBundleVersion) rather than ">= the frontier" —
 // otherwise normal bundles above 0021 would be wrongly excluded from apply and a
 // watermark MAX above 21 would be misread as "the revoke (21) was applied".
-const LatestOwnerBundleVersion = 23
+const LatestOwnerBundleVersion = 24
 
 // DDLRevokeOwnerBundleVersion identifies the RFC 0142 P4 C3 DDL-revoke bundle
 // (0021, `REVOKE CREATE ON SCHEMA striatumd FROM striatumd_rw`). It is
@@ -274,6 +275,7 @@ var ownerBundleLabels = map[int]string{
 	21: "serving-role create-DDL revocation: REVOKE CREATE ON SCHEMA striatumd FROM striatumd_rw (RFC 0142 P4 C3, deploy-plan-terminal / D262)",
 	22: "operator identity & run attribution: operator_handles + operator_sessions + runs write-once origin stamp + DEFINER identity projections + composed-route read closure (RFC 0167 P0 / D260)",
 	23: "lane uid lease authority reassertion for RFC 0168 P0 / D272",
+	24: "declared model identity stamps on verdicts (P1-VERDICT-MODEL-IDENTITY)",
 }
 
 // OwnerBundle is one versioned owner-DDL bundle file.

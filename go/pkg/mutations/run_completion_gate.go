@@ -127,6 +127,7 @@ func verifyRunCompletionProvenance(ctx context.Context, runner any, repositoryID
 		verdict := fmt.Sprint(verdictRow["verdict"])
 		entry["verdict"] = verdict
 		entry["verdict_id"] = verdictRow["verdict_id"]
+		attachVerdictModelIdentityFields(entry, verdictRow)
 		if !isAcceptingVerdict(verdict) {
 			entry["basis"] = "non_accepting"
 			continue

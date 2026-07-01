@@ -31,6 +31,122 @@ func readVerdictProvenanceStamp(t *testing.T, ctx context.Context, runner any, r
 	return row
 }
 
+func readVerdictModelIdentityStamp(t *testing.T, ctx context.Context, runner any, repoID, jobID, verdict string) map[string]any {
+	t.Helper()
+	row, err := oneRow(ctx, runner, `
+		SELECT model_identity_declared, model_family_at_record,
+		       model_identity_basis, model_co_blindness_at_record
+		  FROM striatumd.verdicts
+		 WHERE repository_id = $1 AND job_id = $2
+		   AND ($3 = '' OR verdict = $3)
+		 ORDER BY created_at DESC, verdict_id DESC
+		 LIMIT 1`, repoID, jobID, verdict)
+	if err != nil {
+		t.Fatalf("read verdict model identity stamp: %v", err)
+	}
+	return row
+}
+
+func applyOwnerBundlesForVerdictModelIdentity(t *testing.T, ctx context.Context, runner db.Runner) {
+	t.Helper()
+	if _, _, err := db.ApplyOwnerBundles(ctx, runner, "test"); err != nil {
+		t.Fatalf("apply owner bundles: %v", err)
+	}
+}
+
+func TestSubmitReviewStampsDeclaredModelIdentity(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	applyOwnerBundlesForVerdictModelIdentity(t, ctx, runner)
+	repoID, sessionID, jobID, leaseID := seedReviewFindingFixture(t, ctx, runner, findingArtifactPayload("accept"))
+
+	if _, err := HandleSubmitReview(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": sessionID,
+		"job_id":     jobID,
+		"lease_id":   leaseID,
+		"path":       "artifacts/review/FINDING.md",
+		"verdict":    "accept",
+		"rationale":  "attested reviewer accepts",
+	})); err != nil {
+		t.Fatalf("submit review: %v", err)
+	}
+
+	stamp := readVerdictModelIdentityStamp(t, ctx, runner, repoID, jobID, "accept")
+	if got := fmt.Sprint(stamp["model_identity_declared"]); got != "Claude" {
+		t.Fatalf("model_identity_declared = %q, want Claude", got)
+	}
+	if got := fmt.Sprint(stamp["model_family_at_record"]); got != "claude" {
+		t.Fatalf("model_family_at_record = %q, want claude", got)
+	}
+	if got := fmt.Sprint(stamp["model_identity_basis"]); got != verdictModelBasisWorkflowDisplay {
+		t.Fatalf("model_identity_basis = %q, want %s", got, verdictModelBasisWorkflowDisplay)
+	}
+	if got := fmt.Sprint(stamp["model_co_blindness_at_record"]); got != verdictCoBlindnessUnknown {
+		t.Fatalf("model_co_blindness_at_record = %q, want unknown without upstream dependency", got)
+	}
+}
+
+func TestOperatorOverrideStampsUnknownModelIdentity(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	applyOwnerBundlesForVerdictModelIdentity(t, ctx, runner)
+	repoID, sessionID, jobID, leaseID := seedReviewFindingFixture(t, ctx, runner, findingArtifactPayload("needs_revision"))
+
+	if _, err := HandleRecordVerdict(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id": sessionID,
+		"job_id":     jobID,
+		"lease_id":   leaseID,
+		"verdict":    "needs_revision",
+		"rationale":  "reviewer requests changes",
+	})); err != nil {
+		t.Fatalf("record needs_revision: %v", err)
+	}
+	if _, err := HandleOverrideVerdict(ctx, runner, intgEnv(repoID, map[string]any{
+		"session_id":         sessionID,
+		"job_id":             jobID,
+		"verdict":            "accept",
+		"rationale":          "operator accepts despite parked revision checkpoint",
+		"auto_fresh_session": true,
+	})); err != nil {
+		t.Fatalf("override verdict: %v", err)
+	}
+
+	stamp := readVerdictModelIdentityStamp(t, ctx, runner, repoID, jobID, "accept")
+	if got := fmt.Sprint(stamp["model_identity_declared"]); got != verdictModelUnknown {
+		t.Fatalf("model_identity_declared = %q, want unknown", got)
+	}
+	if got := fmt.Sprint(stamp["model_family_at_record"]); got != verdictModelUnknown {
+		t.Fatalf("model_family_at_record = %q, want unknown", got)
+	}
+	if got := fmt.Sprint(stamp["model_identity_basis"]); got != "operator_override" {
+		t.Fatalf("model_identity_basis = %q, want operator_override", got)
+	}
+}
+
+func TestRecordVerdictRecoveryBasisStampsUnknownModelIdentity(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	applyOwnerBundlesForVerdictModelIdentity(t, ctx, runner)
+	repoID, sessionID, jobID, leaseID := seedUnattestedReviewFindingFixture(t, ctx, runner, findingArtifactPayload("accept"))
+
+	if _, err := withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
+		return recordVerdict(ctx, tx, repoID, sessionID, jobID, leaseID, "accept", nil,
+			"auto-finalized from stable expected artifact", recordVerdictOptions{
+				ProvenanceOverrideBasis: "daemon_auto_finalized_from_artifact",
+			})
+	}); err != nil {
+		t.Fatalf("record verdict with recovery basis: %v", err)
+	}
+
+	stamp := readVerdictModelIdentityStamp(t, ctx, runner, repoID, jobID, "accept")
+	if got := fmt.Sprint(stamp["model_identity_declared"]); got != verdictModelUnknown {
+		t.Fatalf("model_identity_declared = %q, want unknown", got)
+	}
+	if got := fmt.Sprint(stamp["model_identity_basis"]); got != "daemon_auto_finalized_from_artifact" {
+		t.Fatalf("model_identity_basis = %q, want recovery basis", got)
+	}
+}
+
 // RFC 0118 P0-2: review.override is an operator surface — its verdict row
 // must carry posture='override' (literal, never the workflow-resolved
 // posture) and a review_provenance_override stamp, so an operator clear can
@@ -134,6 +250,7 @@ func TestRecordVerdictProvenanceOverrideBasisStampsOverride(t *testing.T) {
 func TestCheckpointOverrideStampsClearingVerdict(t *testing.T) {
 	ctx := context.Background()
 	runner := pgtest.Pool(t).Runner
+	applyOwnerBundlesForVerdictModelIdentity(t, ctx, runner)
 	repoID := "repo_ckpt_stamp"
 	runID, reviewJobID, _, sessionID, leaseID := revisionFixture(t, ctx, runner, repoID, []any{})
 	blockerID := openCheckpointViaVerdict(t, ctx, runner, repoID, reviewJobID, sessionID, leaseID)
@@ -150,7 +267,9 @@ func TestCheckpointOverrideStampsClearingVerdict(t *testing.T) {
 
 	row, err := oneRow(ctx, runner, `
 		SELECT lane_attestation_at_record, review_provenance_override,
-		       review_provenance_decision_id, supervisor_id_at_record
+		       review_provenance_decision_id, supervisor_id_at_record,
+		       model_identity_declared, model_family_at_record,
+		       model_identity_basis, model_co_blindness_at_record
 		  FROM striatumd.verdicts
 		 WHERE repository_id = $1 AND job_id = $2 AND posture = 'override'`, repoID, reviewJobID)
 	if err != nil {
@@ -164,6 +283,12 @@ func TestCheckpointOverrideStampsClearingVerdict(t *testing.T) {
 	}
 	if got := fmt.Sprint(row["lane_attestation_at_record"]); got != "unattested" {
 		t.Fatalf("lane_attestation_at_record = %q, want unattested (minted clearing session)", got)
+	}
+	if got := fmt.Sprint(row["model_identity_declared"]); got != verdictModelUnknown {
+		t.Fatalf("model_identity_declared = %q, want unknown", got)
+	}
+	if got := fmt.Sprint(row["model_identity_basis"]); got != "checkpoint_override" {
+		t.Fatalf("model_identity_basis = %q, want checkpoint_override", got)
 	}
 }
 
@@ -307,20 +432,21 @@ func TestVerdictWriteSurfacesAreClassified(t *testing.T) {
 		// gate attestation; operator decisions arrive via review_provenance;
 		// work.claim_override decisions are carried forward; recovery surfaces
 		// declare recordVerdictOptions.ProvenanceOverrideBasis. RFC 0126 P0 (D194)
-		// splits this INSERT into TWO branches — generation-stamped when the owner
-		// bundle 0009 review_generation column is present, and the historical
-		// (un-stamped) form when it is absent (a runtime-migrations-only DB) — so
-		// review.go now carries 3 verdict INSERTs (both applyVerdict branches plus
-		// the HandleOverrideVerdict operator INSERT). Both applyVerdict branches
-		// stamp the same provenance; the override INSERT keeps posture='override'
+		// is now adaptive inside insertVerdictRow (review_generation when owner
+		// bundle 0009 exists, model identity when owner bundle 0024 exists). The
+		// override path also routes through that helper and keeps posture='override'
 		// (TestOverrideVerdictForcesOverridePostureAndStamp).
 		// recordVerdict callers: HandleRecordVerdict, HandleSubmitReview (lane
 		// surfaces behind the admission gate); applyVerdict caller: recordVerdict.
-		"review.go": {verdictInserts: 3, applyVerdictCalls: 1, recordVerdictCalls: 2},
+		"review.go": {applyVerdictCalls: 1, recordVerdictCalls: 2},
 		// checkpoint.override clearing INSERT — operator surface,
 		// posture='override' + decision-bound stamp
 		// (TestCheckpointOverrideStampsClearingVerdict).
-		"operator.go": {verdictInserts: 1},
+		"operator.go": {},
+		// insertVerdictRow — the only direct verdict INSERT. All write surfaces
+		// reach it with their already-classified provenance and declared/unknown
+		// model identity stamp.
+		"verdict_model_identity.go": {verdictInserts: 1},
 		// #144 stale-lease sweep — lane-evidence transcription: truthful
 		// unattested stamp, NO override basis; the completion gate disposes of it
 		// (TestSweepAutoPublishReviewRecordsVerdictAndFiresDownstream).

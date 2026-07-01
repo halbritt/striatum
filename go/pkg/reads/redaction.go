@@ -249,16 +249,20 @@ func sessionListPolicy() objectPolicy {
 
 func verdictListPolicy(includeRun bool) objectPolicy {
 	policy := objectPolicy{
-		"verdict_id":           "safe",
-		"job_id":               "safe",
-		"session_id":           "safe",
-		"verdict":              "safe",
-		"findings_artifact_id": "safe",
-		"rationale":            "redacted",
-		"posture":              "safe",
-		"review_posture":       "safe",
-		"recorded_at":          "safe",
-		"created_at":           "safe",
+		"verdict_id":                   "safe",
+		"job_id":                       "safe",
+		"session_id":                   "safe",
+		"verdict":                      "safe",
+		"findings_artifact_id":         "safe",
+		"rationale":                    "redacted",
+		"posture":                      "safe",
+		"review_posture":               "safe",
+		"recorded_at":                  "safe",
+		"created_at":                   "safe",
+		"model_identity_declared":      "safe",
+		"model_family_at_record":       "safe",
+		"model_identity_basis":         "safe",
+		"model_co_blindness_at_record": "safe",
 	}
 	if includeRun {
 		policy["run_id"] = "safe"
@@ -467,13 +471,19 @@ func redactRunSummaryPayload(payload map[string]any) map[string]any {
 
 func safeVerdict(entry map[string]any) map[string]any {
 	return map[string]any{
-		"verdict_id":           entry["verdict_id"],
-		"job_id":               entry["job_id"],
-		"workflow_job_id":      entry["workflow_job_id"],
-		"verdict":              entry["verdict"],
-		"findings_artifact_id": entry["findings_artifact_id"],
-		"created_at":           entry["created_at"],
-		"posture":              entry["posture"],
+		"verdict_id":                   entry["verdict_id"],
+		"job_id":                       entry["job_id"],
+		"workflow_job_id":              entry["workflow_job_id"],
+		"verdict":                      entry["verdict"],
+		"findings_artifact_id":         entry["findings_artifact_id"],
+		"created_at":                   entry["created_at"],
+		"recorded_at":                  entry["recorded_at"],
+		"posture":                      entry["posture"],
+		"review_posture":               entry["review_posture"],
+		"model_identity_declared":      entry["model_identity_declared"],
+		"model_family_at_record":       entry["model_family_at_record"],
+		"model_identity_basis":         entry["model_identity_basis"],
+		"model_co_blindness_at_record": entry["model_co_blindness_at_record"],
 	}
 }
 

@@ -370,6 +370,34 @@ func TestOwnerBundleNineAddsReviewGeneration(t *testing.T) {
 	}
 }
 
+func TestOwnerBundleTwentyFourAddsVerdictModelIdentity(t *testing.T) {
+	bundles, err := OwnerBundles()
+	if err != nil {
+		t.Fatalf("OwnerBundles: %v", err)
+	}
+	var bundle *OwnerBundle
+	for index := range bundles {
+		if bundles[index].Version == 24 {
+			bundle = &bundles[index]
+			break
+		}
+	}
+	if bundle == nil {
+		t.Fatal("owner bundle 24 is missing")
+	}
+	for _, needle := range []string{
+		"ALTER TABLE striatumd.verdicts",
+		"ADD COLUMN IF NOT EXISTS model_identity_declared text",
+		"ADD COLUMN IF NOT EXISTS model_family_at_record text",
+		"ADD COLUMN IF NOT EXISTS model_identity_basis text",
+		"ADD COLUMN IF NOT EXISTS model_co_blindness_at_record text",
+	} {
+		if !strings.Contains(bundle.SQL, needle) {
+			t.Fatalf("bundle 24 missing %q", needle)
+		}
+	}
+}
+
 // TestOwnerBundleTenAddsWedgeStallClass is GH #324: the wedged_no_tool_progress
 // liveness stall class is added to the sessions_liveness_stall_class_check CHECK.
 // striatumd.sessions is an owner-held table, so widening the CHECK (DROP + re-ADD,

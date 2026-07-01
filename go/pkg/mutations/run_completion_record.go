@@ -48,14 +48,14 @@ func buildRunCompletionRecord(ctx context.Context, runner any, repositoryID, run
 	record["jobs"] = jobs
 
 	verdicts, err := queryRows(ctx, runner, `
-		SELECT job_id, verdict_id, verdict, posture,
-		       lane_attestation_at_record, review_provenance_override,
-		       review_provenance_decision_id, supervisor_id_at_record,
-		       created_at
-		  FROM striatumd.verdicts
-		 WHERE repository_id = $1 AND run_id = $2
-		   AND superseded_by_decision_id IS NULL
-		 ORDER BY created_at, verdict_id`, repositoryID, runID)
+		SELECT v.job_id, v.verdict_id, v.verdict, v.posture,
+		       v.lane_attestation_at_record, v.review_provenance_override,
+		       v.review_provenance_decision_id, v.supervisor_id_at_record,
+		       v.created_at`+verdictModelIdentitySelectProjection(ctx, runner, "v")+`
+		  FROM striatumd.verdicts v
+		 WHERE v.repository_id = $1 AND v.run_id = $2
+		   AND v.superseded_by_decision_id IS NULL
+		 ORDER BY v.created_at, v.verdict_id`, repositoryID, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,11 +269,11 @@ func buildRunArtifactLedger(ctx context.Context, runner any, repositoryID, runID
 			entry["artifacts"] = reconstructionLedgerEntries(recon)
 		}
 		verdict, vErr := oneRow(ctx, runner, `
-			SELECT verdict_id, verdict, posture, lane_attestation_at_record
-			  FROM striatumd.verdicts
-			 WHERE repository_id = $1 AND job_id = $2
-			   AND superseded_by_decision_id IS NULL
-			 ORDER BY created_at DESC, verdict_id DESC
+			SELECT v.verdict_id, v.verdict, v.posture, v.lane_attestation_at_record`+verdictModelIdentitySelectProjection(ctx, runner, "v")+`
+			  FROM striatumd.verdicts v
+			 WHERE v.repository_id = $1 AND v.job_id = $2
+			   AND v.superseded_by_decision_id IS NULL
+			 ORDER BY v.created_at DESC, v.verdict_id DESC
 			 LIMIT 1`, repositoryID, jobID)
 		switch {
 		case errors.Is(vErr, pgx.ErrNoRows):
@@ -285,6 +285,7 @@ func buildRunArtifactLedger(ctx context.Context, runner any, repositoryID, runID
 			entry["verdict"] = verdict["verdict"]
 			entry["posture"] = verdict["posture"]
 			entry["lane_attestation_at_record"] = nullable(verdict["lane_attestation_at_record"])
+			attachVerdictModelIdentityFields(entry, verdict)
 		}
 		ledger = append(ledger, entry)
 	}

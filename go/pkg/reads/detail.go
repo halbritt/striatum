@@ -232,6 +232,7 @@ func HandleJobDetail(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	if err != nil {
 		return nil, err
 	}
+	decorateVerdictModelIdentities(verdicts)
 	var latestVerdict any
 	if len(verdicts) > 0 {
 		latestVerdict = verdicts[0]
@@ -348,6 +349,7 @@ func HandleRunPostureVerdicts(ctx context.Context, runner db.Runner, envelope rp
 	verdicts, err := collectRows(ctx, runner,
 		`SELECT v.verdict_id, v.verdict, v.rationale, v.created_at,
 		        v.job_id, v.findings_artifact_id, v.session_id, v.posture,
+		        `+strings.TrimPrefix(verdictModelIdentityProjection(ctx, runner, "v"), ",")+`,
 		        j.workflow_job_id, j.role_id, j.lane_selector_json,
 		        s.slug AS session_slug
 		   FROM striatumd.verdicts v
@@ -364,6 +366,7 @@ func HandleRunPostureVerdicts(ctx context.Context, runner db.Runner, envelope rp
 	if err != nil {
 		return nil, err
 	}
+	decorateVerdictModelIdentities(verdicts)
 	return map[string]any{
 		"run":      runs[0],
 		"posture":  posture,

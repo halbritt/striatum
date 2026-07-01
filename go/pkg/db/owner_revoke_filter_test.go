@@ -177,14 +177,14 @@ func TestOwnerBundle0021StagedForActivationNotEmbedded(t *testing.T) {
 		}
 	}
 
-	// (e) the watermark frontier is 23/23 (normal bundles 0022 and 0023 sit ABOVE
+	// (e) the watermark frontier is 24/24 (normal bundles 0022+ sit ABOVE
 	// the staged revoke 0021); the revoke is still deploy-plan-terminal, NOT a
-	// watermark advance, so the highest EMBEDDED owner bundle is 23 (21 is staged out).
-	if LatestOwnerBundleVersion != 23 || RequiredOwnerBundleVersion != 23 {
-		t.Fatalf("watermark frontier = Latest=%d Required=%d, want 23/23", LatestOwnerBundleVersion, RequiredOwnerBundleVersion)
+	// watermark advance, so the highest EMBEDDED owner bundle is 24 (21 is staged out).
+	if LatestOwnerBundleVersion != 24 || RequiredOwnerBundleVersion != 24 {
+		t.Fatalf("watermark frontier = Latest=%d Required=%d, want 24/24", LatestOwnerBundleVersion, RequiredOwnerBundleVersion)
 	}
-	if got := maxEmbeddedOwnerVersion(bundles); got != 23 {
-		t.Fatalf("highest EMBEDDED owner bundle = %d, want 23 (the revoke 0021 is staged out; 0022/0023 are embedded)", got)
+	if got := maxEmbeddedOwnerVersion(bundles); got != 24 {
+		t.Fatalf("highest EMBEDDED owner bundle = %d, want 24 (the revoke 0021 is staged out; normal bundles above it are embedded)", got)
 	}
 
 	// (f) BuildPlan emits NO revoke step for the inert-landing binary (revoke-in-plan
