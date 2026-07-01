@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -75,7 +76,11 @@ type DecayTickSweep struct {
 	commit decayCommitFunc
 	onDone func()
 
-	inFlight atomic.Bool
+	slotMu         sync.Mutex
+	nextGeneration uint64
+	slotGeneration uint64
+	slotExpiresAt  time.Time
+	inFlight       atomic.Bool
 }
 
 func NewDecayTickSweep(runner db.Runner) *DecayTickSweep {
@@ -86,29 +91,27 @@ func (s *DecayTickSweep) SweepOnce(ctx context.Context) (map[string]any, error) 
 	if s.Runner == nil {
 		return nil, fmt.Errorf("decay tick sweep requires daemon PostgreSQL")
 	}
-	if !s.inFlight.CompareAndSwap(false, true) {
-		s.logf("decay tick sweep skipped; previous scan still in flight")
+	timeout := s.effectiveTimeout()
+	generation, claimed := s.claimCullSlot(timeout)
+	if !claimed {
+		s.logf("decay tick sweep skipped; previous scan still inside live slot")
 		return map[string]any{"status": "skipped", "reason": "in_flight"}, nil
 	}
-	go s.runDecayTickSweep(ctx)
-	return map[string]any{"status": "launched"}, nil
+	go s.runDecayTickSweep(ctx, generation, timeout)
+	return map[string]any{"status": "launched", "generation": generation}, nil
 }
 
-func (s *DecayTickSweep) runDecayTickSweep(sweepCtx context.Context) {
+func (s *DecayTickSweep) runDecayTickSweep(sweepCtx context.Context, generation uint64, timeout time.Duration) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.logf("decay tick sweep panic recovered; dropping candidacy delta and continuing: panic=%v\n%s", r, debug.Stack())
 		}
-		s.inFlight.Store(false)
+		s.releaseCullSlot(generation)
 		if s.onDone != nil {
 			s.onDone()
 		}
 	}()
 
-	timeout := s.Timeout
-	if timeout <= 0 {
-		timeout = DefaultCullFoldTimeout
-	}
 	cullCtx, cancel := context.WithTimeout(sweepCtx, timeout)
 	defer cancel()
 
@@ -129,6 +132,10 @@ func (s *DecayTickSweep) runDecayTickSweep(sweepCtx context.Context) {
 		s.logf("decay tick sweep scan returned after deadline; writing nothing: %v", cullCtx.Err())
 		return
 	}
+	if !s.generationOwnsLiveSlot(generation) {
+		s.logf("decay tick sweep scan returned after its slot expired or was replaced; writing nothing: generation=%d", generation)
+		return
+	}
 
 	commit := s.commit
 	if commit == nil {
@@ -137,6 +144,52 @@ func (s *DecayTickSweep) runDecayTickSweep(sweepCtx context.Context) {
 	if err := commit(cullCtx, s.Runner, changes); err != nil {
 		s.logf("decay tick sweep commit failed: %v", err)
 	}
+}
+
+func (s *DecayTickSweep) effectiveTimeout() time.Duration {
+	if s.Timeout > 0 {
+		return s.Timeout
+	}
+	return DefaultCullFoldTimeout
+}
+
+func (s *DecayTickSweep) claimCullSlot(timeout time.Duration) (uint64, bool) {
+	now := time.Now()
+	deadline := now.Add(timeout)
+
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+
+	if s.slotGeneration != 0 && now.Before(s.slotExpiresAt) {
+		return 0, false
+	}
+
+	s.nextGeneration++
+	s.slotGeneration = s.nextGeneration
+	s.slotExpiresAt = deadline
+	s.inFlight.Store(true)
+	return s.slotGeneration, true
+}
+
+func (s *DecayTickSweep) generationOwnsLiveSlot(generation uint64) bool {
+	now := time.Now()
+
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+
+	return s.slotGeneration == generation && now.Before(s.slotExpiresAt)
+}
+
+func (s *DecayTickSweep) releaseCullSlot(generation uint64) {
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+
+	if s.slotGeneration != generation {
+		return
+	}
+	s.slotGeneration = 0
+	s.slotExpiresAt = time.Time{}
+	s.inFlight.Store(false)
 }
 
 func (s *DecayTickSweep) logf(format string, args ...any) {

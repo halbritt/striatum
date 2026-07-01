@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,6 +143,135 @@ func TestDecayTickSweepLateReturnAfterTimeoutWritesNothing(t *testing.T) {
 	waitDone(t, done)
 	if commits != 0 {
 		t.Fatalf("late-returning scan reached commit %d time(s); want zero writes", commits)
+	}
+}
+
+func TestDecayTickSweepExpiredSlotAllowsNewGenerationAndRejectsLateWriter(t *testing.T) {
+	firstRelease := make(chan struct{})
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	done := make(chan struct{}, 2)
+	commits := make(chan []cullableChange, 2)
+	var scanCalls atomic.Int64
+
+	sweep := &DecayTickSweep{
+		Runner:  noopDecayRunner{},
+		Timeout: 100 * time.Millisecond,
+		Logf:    func(string, ...any) {},
+		scan: func(context.Context, db.Runner) ([]cullableChange, error) {
+			switch scanCalls.Add(1) {
+			case 1:
+				close(firstStarted)
+				<-firstRelease
+				return []cullableChange{{
+					key:   cullableKey{kind: "decision", ref: "decision:D001"},
+					state: "nominated",
+				}}, nil
+			case 2:
+				close(secondStarted)
+				return []cullableChange{{
+					key:   cullableKey{kind: "decision", ref: "decision:D002"},
+					state: "nominated",
+				}}, nil
+			default:
+				return nil, errors.New("unexpected third decay scan")
+			}
+		},
+		commit: func(_ context.Context, _ db.Runner, changes []cullableChange) error {
+			commits <- changes
+			return nil
+		},
+		onDone: func() { done <- struct{}{} },
+	}
+
+	result, err := sweep.SweepOnce(context.Background())
+	if err != nil {
+		t.Fatalf("first SweepOnce returned error: %v", err)
+	}
+	if result["status"] != "launched" {
+		t.Fatalf("first SweepOnce status = %v, want launched", result["status"])
+	}
+	waitDone(t, firstStarted)
+
+	time.Sleep(150 * time.Millisecond)
+	result, err = sweep.SweepOnce(context.Background())
+	if err != nil {
+		t.Fatalf("second SweepOnce returned error: %v", err)
+	}
+	if result["status"] != "launched" {
+		t.Fatalf("expired first slot starved second scan: status=%v reason=%v", result["status"], result["reason"])
+	}
+	waitDone(t, secondStarted)
+	waitDone(t, done)
+
+	close(firstRelease)
+	waitDone(t, done)
+
+	refs := committedCullRefs(commits)
+	if got := strings.Join(refs, ","); got != "decision:D002" {
+		t.Fatalf("committed refs = %q, want only newer generation decision:D002", got)
+	}
+}
+
+func TestDecayTickSweepReplacedGenerationCannotCommitLateResult(t *testing.T) {
+	firstRelease := make(chan struct{})
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	done := make(chan struct{}, 2)
+	commits := make(chan []cullableChange, 2)
+	var scanCalls atomic.Int64
+
+	sweep := &DecayTickSweep{
+		Runner:  noopDecayRunner{},
+		Timeout: time.Hour,
+		Logf:    func(string, ...any) {},
+		scan: func(context.Context, db.Runner) ([]cullableChange, error) {
+			switch scanCalls.Add(1) {
+			case 1:
+				close(firstStarted)
+				<-firstRelease
+				return []cullableChange{{
+					key:   cullableKey{kind: "decision", ref: "decision:D010"},
+					state: "nominated",
+				}}, nil
+			case 2:
+				close(secondStarted)
+				return []cullableChange{{
+					key:   cullableKey{kind: "decision", ref: "decision:D011"},
+					state: "nominated",
+				}}, nil
+			default:
+				return nil, errors.New("unexpected third decay scan")
+			}
+		},
+		commit: func(_ context.Context, _ db.Runner, changes []cullableChange) error {
+			commits <- changes
+			return nil
+		},
+		onDone: func() { done <- struct{}{} },
+	}
+
+	if _, err := sweep.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("first SweepOnce returned error: %v", err)
+	}
+	waitDone(t, firstStarted)
+
+	sweep.slotMu.Lock()
+	sweep.slotExpiresAt = time.Now().Add(-time.Second)
+	sweep.slotMu.Unlock()
+
+	if _, err := sweep.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("second SweepOnce returned error: %v", err)
+	}
+	waitDone(t, secondStarted)
+	waitDone(t, done)
+
+	close(firstRelease)
+	waitDone(t, done)
+
+	refs := committedCullRefs(commits)
+	if got := strings.Join(refs, ","); got != "decision:D011" {
+		t.Fatalf("committed refs = %q, want only replacement generation decision:D011", got)
 	}
 }
 
@@ -362,6 +492,20 @@ func waitDone(t *testing.T, done <-chan struct{}) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for decay sweep goroutine")
+	}
+}
+
+func committedCullRefs(commits <-chan []cullableChange) []string {
+	var refs []string
+	for {
+		select {
+		case changes := <-commits:
+			for _, change := range changes {
+				refs = append(refs, change.key.ref)
+			}
+		default:
+			return refs
+		}
 	}
 }
 

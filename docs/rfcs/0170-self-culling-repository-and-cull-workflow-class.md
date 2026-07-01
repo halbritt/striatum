@@ -20,8 +20,10 @@ author: proposer-claude-opus-4-8
 > `DecayTickSweep` now nominates/withdraws Tier-1 candidates without deletion,
 > paging, or run-admission effects. The #618 citation-exactness hardening is
 > closed: `status: frozen` Markdown records outside `docs/records/_frozen/` are
-> non-live citation sources. The #619 cull-slot liveness fence and broader P1+
-> work remain future work.
+> non-live citation sources. The #619 cull-slot liveness fence is also closed:
+> expired scan generations can no longer starve later scans or commit late
+> candidacy deltas. Broader P1+ tombstone, doctor, `cull_gate`, and reaper work
+> remains future work.
 
 ## Problem
 
