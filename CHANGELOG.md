@@ -4,6 +4,13 @@
 
 ### Added
 
+- **RFC 0165 accepted and RFC 0173 proposed.** Accepted Claude provider
+  credential freshness and spawn-time projection as D277, then split source
+  authorization into RFC 0173 for the successor `rfc-0165-build` workflow. The
+  build RFC binds the implementation to a generated projection contract, pure
+  pre-spawn planner/refusal witness, access-token-only Claude projection,
+  immutable launch credential bindings, provider-auth debt recovery
+  classification, redacted operator surfaces, and TTL-spanning dogfood proof.
 - **RFC 0172 accepted.** Accepted proof-only multi-campaign supervision as
   D275: campaign arcs, authority receipts, fresh-context replay,
   deferral quarantine, contradiction reports, and read-only portfolio status.

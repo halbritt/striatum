@@ -1,12 +1,26 @@
 # RFC 0165: Claude provider credential freshness and spawn-time projection
 
-Status: proposed (design v5 accepted with findings; build pending)
+Status: accepted (D277, 2026-07-01; build delegated to RFC 0173)
 Date: 2026-06-23
 Context: [#583](https://github.com/halbritt/striatum/issues/583); RFC 0096
 (supervised-lane trust boundary); RFC 0121 (lane provider-auth preflight gate);
 RFC 0143 (lane credential survival across boot-epoch rotation); RFC 0162 (lane
 auth silent-failure observability)
 author: proposer-codex-gpt-5-001
+
+## Accepted Form
+
+Accepted by [D277](../decisions/decision-log.md) after the
+`rfc-0165-design-v5` falsification gate integrated on 2026-06-30. The accepted
+design is the v5 proposal at
+`docs/operator/artifacts/rfc-0165-design-v5/commit/proposal/PROPOSAL.md` plus
+the cycle-3 `accept_with_findings` ledger. This RFC accepts the product
+direction and constraints. It does not land source behavior by itself.
+
+The implementation work is delegated to
+[RFC 0173](0173-claude-provider-credential-projection-build.md), which turns the
+accepted design into the `rfc-0165-build` source, SQL, generated-contract,
+authority-map, test, and product-doc scope.
 
 ## Problem
 

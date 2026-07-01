@@ -12,6 +12,27 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-07-01 delta - RFC 0165 accepted; RFC 0173 build RFC proposed
+
+RFC 0165 is now accepted by D277. This is an acceptance-state and build-contract
+change only; no source behavior lands with the decision. The accepted form is
+the `rfc-0165-design-v5` proposal plus the cycle-3 `accept_with_findings`
+ledger from `run_efde0bcac1a8712b90c94e22e9f5db97`.
+
+The build target is RFC 0173 and the successor `rfc-0165-build` workflow. The
+build must preserve the v5 floors and the added ADHD stress-pass constraints:
+one generated projection contract as the source for storage/RPC/CLI/supervisor
+launch/authority-map/docs obligations; one immutable launch credential binding
+used by recovery before any latest lane-user readiness row; and one
+side-effect-free pre-spawn planner that production launch consumes before
+scratch, FIFO/ACL, session-token, supervisor, helper/tmux, receipt, or provider
+process side effects. Provider-auth debt must remain separate from generic
+recovery budget, and lane credential samples are downgrade-only evidence.
+
+Live preflight for this doc/status change was green: `operator bootstrap`
+reported daemon reachable/authorized on `main`, and `doctor --json` reported
+`ok=true` with `problem_count=0`.
+
 ## 2026-06-30 delta - RFC 0165 v5 design accepted and integrated
 
 RFC 0165 design v5 completed as
