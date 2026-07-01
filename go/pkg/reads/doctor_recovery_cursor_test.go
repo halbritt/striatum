@@ -149,6 +149,38 @@ func TestDoctorRecoverySweepCursorFlagsLatchReadFailure(t *testing.T) {
 	}
 }
 
+func TestDoctorRecoverySweepCursorFlagsTrippedRunWithRecoveryCommand(t *testing.T) {
+	now := time.Date(2026, 7, 1, 22, 50, 0, 0, time.UTC)
+	runner := &doctorRecoveryCursorFakeRunner{recoveryRows: []map[string]any{{
+		"run_id":                               "run_trip",
+		"run_state":                            "needs_operator",
+		"cursor_state":                         "sweep_degraded",
+		"last_sweep_at":                        now,
+		"recovery_sweep_trip_state":            "tripped",
+		"recovery_degraded_sweep_count":        int64(3),
+		"recovery_sweep_trip_threshold":        int64(3),
+		"recovery_sweep_trip_error":            "synthetic sweep failure",
+		"recovery_sweep_trip_blocker_id":       "blk_trip",
+		"recovery_sweep_trip_recovery_command": "striatum escalation resolve blk_trip",
+		"started_at":                           now,
+		"created_at":                           now,
+	}}}
+
+	block, problems, records := doctorRecoverySweepCursor(context.Background(), runner, "repo_1", now)
+	if len(problems) != 1 || !strings.Contains(problems[0], "recovery_sweep_cursor_tripped.run_trip") {
+		t.Fatalf("problems = %#v, want tripped cursor problem", problems)
+	}
+	if !strings.Contains(problems[0], "striatum escalation resolve blk_trip") {
+		t.Fatalf("problem missing recovery command: %#v", problems)
+	}
+	if block["tripped_count"] != 1 {
+		t.Fatalf("block = %#v, want one tripped run", block)
+	}
+	if len(records) != 1 || records[0]["check"] != "recovery_sweep_cursor_tripped" {
+		t.Fatalf("records = %#v, want tripped record", records)
+	}
+}
+
 func TestDoctorRecoverySweepCursorUsesPersistedCursorJSON(t *testing.T) {
 	ctx := context.Background()
 	runner := pgtest.Pool(t).Runner

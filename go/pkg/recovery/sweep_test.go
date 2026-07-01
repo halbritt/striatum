@@ -3,11 +3,14 @@ package recovery
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/pgtest"
+	"github.com/halbritt/striatum/go/pkg/reads"
+	"github.com/halbritt/striatum/go/pkg/rpc"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -35,7 +38,7 @@ func (r *sweepCursorFakeRunner) Query(_ context.Context, sql string, _ ...any) (
 }
 
 func (r *sweepCursorFakeRunner) QueryRow(context.Context, string, ...any) db.Row {
-	return nil
+	return sweepBreakerFakeRow{err: pgx.ErrNoRows}
 }
 
 func (r *sweepCursorFakeRunner) QueryScalar(context.Context, string, ...any) (string, error) {
@@ -55,7 +58,7 @@ func TestUpsertSchedulerCursorAddsReadSideLatch(t *testing.T) {
 	ptyOnlyAt := toolAdvancedAt.Add(10 * time.Minute)
 	seedRecoveryCursorLatchFixture(t, ctx, runner, repoID, runID, toolAdvancedAt, ptyOnlyAt)
 
-	if err := upsertSchedulerCursor(ctx, runner, repoID, runID, map[string]any{"status": "ok"}, "active"); err != nil {
+	if _, err := upsertSchedulerCursor(ctx, runner, repoID, runID, map[string]any{"status": "ok"}, "active"); err != nil {
 		t.Fatalf("upsertSchedulerCursor: %v", err)
 	}
 
@@ -142,7 +145,7 @@ func seedRecoveryCursorLatchFixture(t *testing.T, ctx context.Context, runner db
 func TestUpsertSchedulerCursorRecordsLatchReadFailure(t *testing.T) {
 	runner := &sweepCursorFakeRunner{queryErr: errors.New("latch read failed")}
 
-	if err := upsertSchedulerCursor(context.Background(), runner, "repo_1", "run_1", map[string]any{"status": "ok"}, "sweep_degraded"); err != nil {
+	if _, err := upsertSchedulerCursor(context.Background(), runner, "repo_1", "run_1", map[string]any{"status": "ok"}, "sweep_degraded"); err != nil {
 		t.Fatalf("upsertSchedulerCursor should not fail on latch read error: %v", err)
 	}
 	result, ok := runner.execArgs[2].(map[string]any)
@@ -245,3 +248,208 @@ func (r *sweepCursorFakeRows) Values() ([]any, error) {
 func (r *sweepCursorFakeRows) RawValues() [][]byte { return nil }
 
 func (r *sweepCursorFakeRows) Conn() *pgx.Conn { return nil }
+
+type sweepBreakerFakeRow struct {
+	count     int
+	tripState string
+	runState  string
+	err       error
+}
+
+func (r sweepBreakerFakeRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	for i := range dest {
+		switch target := dest[i].(type) {
+		case *int:
+			*target = r.count
+		case *string:
+			switch i {
+			case 1:
+				*target = r.tripState
+			case 2:
+				*target = r.runState
+			default:
+				*target = ""
+			}
+		default:
+			return errors.New("unsupported breaker row scan target")
+		}
+	}
+	return nil
+}
+
+func TestActiveRunSweepTripsPoisonRunAndRecoversAfterResolve(t *testing.T) {
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	repoID := "repo_recovery_sweep_trip"
+	poisonRunID := "run_recovery_sweep_trip_poison"
+	healthyRunID := "run_recovery_sweep_trip_healthy"
+	seedRecoverySweepTripFixture(t, ctx, runner, repoID, poisonRunID, healthyRunID)
+
+	visited := map[string]int{}
+	sweep := ActiveRunSweep{
+		Runner: runner,
+		Author: "test",
+		sweepRun: func(_ context.Context, _ db.Runner, _ string, runID string, _ string) (map[string]any, error) {
+			visited[runID]++
+			if runID == poisonRunID {
+				return nil, errors.New("synthetic per-run recovery panic/error")
+			}
+			return map[string]any{"status": "ok"}, nil
+		},
+	}
+
+	for i := 0; i < recoverySweepTripThreshold; i++ {
+		if _, err := sweep.SweepOnce(ctx); err != nil {
+			t.Fatalf("sweep tick %d: %v", i+1, err)
+		}
+	}
+	if visited[poisonRunID] != recoverySweepTripThreshold {
+		t.Fatalf("poison run visits before trip = %d, want %d", visited[poisonRunID], recoverySweepTripThreshold)
+	}
+	if visited[healthyRunID] != recoverySweepTripThreshold {
+		t.Fatalf("healthy run visits before trip = %d, want %d", visited[healthyRunID], recoverySweepTripThreshold)
+	}
+	if got := recoverySweepRunState(t, ctx, runner, repoID, poisonRunID); got != "needs_operator" {
+		t.Fatalf("poison run state = %q, want needs_operator", got)
+	}
+	escalationID := recoverySweepTripEscalationID(t, ctx, runner, repoID, poisonRunID)
+	if escalationID == "" {
+		t.Fatal("trip did not create a recovery_exhausted escalation")
+	}
+
+	doctor, err := reads.HandleDoctor(ctx, runner, rpc.Envelope{
+		Params: map[string]any{"repository_id": repoID, "verbose": true},
+	})
+	if err != nil {
+		t.Fatalf("doctor after trip: %v", err)
+	}
+	problems := strings.Join(doctor["problems"].([]string), "\n")
+	if !strings.Contains(problems, "recovery_sweep_cursor_tripped."+poisonRunID) {
+		t.Fatalf("doctor problems missing recovery_sweep_cursor_tripped:\n%s", problems)
+	}
+	if !strings.Contains(problems, "striatum escalation resolve "+escalationID) {
+		t.Fatalf("doctor problems missing recovery command for %s:\n%s", escalationID, problems)
+	}
+
+	if _, err := sweep.SweepOnce(ctx); err != nil {
+		t.Fatalf("post-trip sweep: %v", err)
+	}
+	if visited[poisonRunID] != recoverySweepTripThreshold {
+		t.Fatalf("poison run was swept after trip; visits=%d want still %d", visited[poisonRunID], recoverySweepTripThreshold)
+	}
+	if visited[healthyRunID] != recoverySweepTripThreshold+1 {
+		t.Fatalf("healthy run did not continue after poison trip; visits=%d", visited[healthyRunID])
+	}
+
+	resolved, err := reads.HandleEscalationResolve(ctx, runner, rpc.Envelope{
+		Params: map[string]any{
+			"repository_id":   repoID,
+			"escalation_id":   escalationID,
+			"resolution_note": "fixed the sweep poison input",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve trip escalation: %v", err)
+	}
+	if resolved["status"] != "resolved" {
+		t.Fatalf("resolve status = %#v, want resolved", resolved["status"])
+	}
+	if got := recoverySweepRunState(t, ctx, runner, repoID, poisonRunID); got != "running" {
+		t.Fatalf("poison run state after resolve = %q, want running", got)
+	}
+
+	if _, err := sweep.SweepOnce(ctx); err != nil {
+		t.Fatalf("post-resolve sweep: %v", err)
+	}
+	if visited[poisonRunID] != recoverySweepTripThreshold+1 {
+		t.Fatalf("poison run was not swept after resolve; visits=%d", visited[poisonRunID])
+	}
+	if got := recoverySweepRunState(t, ctx, runner, repoID, poisonRunID); got != "running" {
+		t.Fatalf("poison run re-tripped immediately after resolve; state=%q", got)
+	}
+	count, state := recoverySweepCursorBreaker(t, ctx, runner, repoID, poisonRunID)
+	if count != 1 || state != "armed" {
+		t.Fatalf("breaker after resolve+one failure = count %d state %q, want count 1 state armed", count, state)
+	}
+}
+
+func seedRecoverySweepTripFixture(t *testing.T, ctx context.Context, runner db.Runner, repoID string, runIDs ...string) {
+	t.Helper()
+	now := time.Date(2026, 7, 1, 20, 0, 0, 0, time.UTC)
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.repositories (
+		  repository_id, repo_identity, repo_root, state_db_path, display_name,
+		  registered_at, last_schema_version, state
+		) VALUES ($1,$2,$3,$4,'repo',$5,28,'active')`,
+		repoID, "ident_"+repoID, "/tmp/"+repoID, "/tmp/"+repoID+"/.striatum", now); err != nil {
+		t.Fatalf("insert repository: %v", err)
+	}
+	if err := runner.Exec(ctx, `
+		INSERT INTO striatumd.workflow_snapshots (
+		  repository_id, workflow_snapshot_id, workflow_id, content_sha256, workflow_json, loaded_at
+		) VALUES ($1,$2,'wf','sha','{}'::jsonb,$3)`, repoID, "snap_"+repoID, now); err != nil {
+		t.Fatalf("insert workflow snapshot: %v", err)
+	}
+	for i, runID := range runIDs {
+		createdAt := now.Add(time.Duration(i) * time.Second)
+		if err := runner.Exec(ctx, `
+			INSERT INTO striatumd.runs (
+			  repository_id, run_id, workflow_snapshot_id, repo_root, state, created_at, started_at
+			) VALUES ($1,$2,$3,$4,'running',$5,$5)`,
+			repoID, runID, "snap_"+repoID, "/tmp/"+repoID, createdAt); err != nil {
+			t.Fatalf("insert run %s: %v", runID, err)
+		}
+	}
+}
+
+func recoverySweepRunState(t *testing.T, ctx context.Context, runner db.Runner, repoID string, runID string) string {
+	t.Helper()
+	var state string
+	if err := runner.QueryRow(ctx, `
+		SELECT state FROM striatumd.runs
+		 WHERE repository_id = $1 AND run_id = $2`,
+		repoID, runID).Scan(&state); err != nil {
+		t.Fatalf("read run state %s: %v", runID, err)
+	}
+	return state
+}
+
+func recoverySweepTripEscalationID(t *testing.T, ctx context.Context, runner db.Runner, repoID string, runID string) string {
+	t.Helper()
+	var escalationID string
+	err := runner.QueryRow(ctx, `
+		SELECT escalation_id
+		  FROM striatumd.escalation_inbox
+		 WHERE repository_id = $1
+		   AND run_id = $2
+		   AND blocker_kind = 'recovery_exhausted'
+		   AND payload_json->>'source' = $3
+		   AND state = 'pending'
+		 ORDER BY created_at, escalation_id
+		 LIMIT 1`,
+		repoID, runID, recoverySweepTripSource).Scan(&escalationID)
+	if err != nil {
+		t.Fatalf("read trip escalation: %v", err)
+	}
+	return escalationID
+}
+
+func recoverySweepCursorBreaker(t *testing.T, ctx context.Context, runner db.Runner, repoID string, runID string) (int, string) {
+	t.Helper()
+	var count int
+	var state string
+	if err := runner.QueryRow(ctx, `
+		SELECT (last_result_json->>'recovery_degraded_sweep_count')::integer,
+		       last_result_json->>'recovery_sweep_trip_state'
+		  FROM striatumd.scheduler_cursors
+		 WHERE repository_id = $1
+		   AND run_id = $2
+		   AND cursor_kind = 'recovery'`,
+		repoID, runID).Scan(&count, &state); err != nil {
+		t.Fatalf("read breaker cursor: %v", err)
+	}
+	return count, state
+}

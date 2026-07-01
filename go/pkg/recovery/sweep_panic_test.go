@@ -57,7 +57,7 @@ func (r *sweepPanicFakeRunner) Query(_ context.Context, sql string, _ ...any) (p
 }
 
 func (r *sweepPanicFakeRunner) QueryRow(context.Context, string, ...any) db.Row {
-	return nil
+	return sweepBreakerFakeRow{err: pgx.ErrNoRows}
 }
 
 func (r *sweepPanicFakeRunner) QueryScalar(context.Context, string, ...any) (string, error) {

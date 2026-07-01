@@ -2,6 +2,8 @@ package recovery
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -10,6 +12,12 @@ import (
 	"github.com/halbritt/striatum/go/pkg/db"
 	"github.com/halbritt/striatum/go/pkg/mutations"
 	"github.com/jackc/pgx/v5"
+)
+
+const (
+	recoverySweepTripThreshold = 3
+	recoverySweepTripSource    = "recovery.sweep_trip_latch"
+	recoveryExhaustedKind      = "recovery_exhausted"
 )
 
 type queryRunner interface {
@@ -100,18 +108,39 @@ func (s ActiveRunSweep) SweepOnce(ctx context.Context) (map[string]any, error) {
 	for _, run := range activeRuns {
 		result, err := runPerRunSweep(ctx, sweepRun, s.Runner, run.repositoryID, run.runID, author)
 		if err != nil {
-			result = map[string]any{"error": err.Error()}
-			if cursorErr := upsertSchedulerCursor(ctx, s.Runner, run.repositoryID, run.runID, result, "sweep_degraded"); cursorErr != nil {
+			sweepErr := err
+			result = map[string]any{"error": sweepErr.Error()}
+			cursorUpdate := recoveryCursorUpdate(ctx, s.Runner, run.repositoryID, run.runID, result, "sweep_degraded")
+			var trip recoverySweepTrip
+			if cursorUpdate.tripped {
+				var tripErr error
+				trip, tripErr = tripRecoverySweepBreaker(ctx, s.Runner, run.repositoryID, run.runID, sweepErr.Error(), cursorUpdate.degradedCount, cursorUpdate.tripThreshold, author)
+				if tripErr != nil {
+					return nil, tripErr
+				}
+				cursorUpdate.result["recovery_sweep_trip_escalation_id"] = trip.escalationID
+				cursorUpdate.result["recovery_sweep_trip_recovery_command"] = trip.recoveryCommand
+			}
+			if cursorErr := writeSchedulerCursor(ctx, s.Runner, run.repositoryID, run.runID, cursorUpdate.result, "sweep_degraded"); cursorErr != nil {
 				return nil, cursorErr
 			}
-			sweeps = append(sweeps, map[string]any{
+			entry := map[string]any{
 				"repository_id": run.repositoryID,
 				"run_id":        run.runID,
-				"error":         err.Error(),
-			})
+				"error":         sweepErr.Error(),
+			}
+			if cursorUpdate.degradedCount > 0 {
+				entry["degraded_sweep_count"] = cursorUpdate.degradedCount
+			}
+			if cursorUpdate.tripped {
+				entry["tripped"] = true
+				entry["recovery_command"] = trip.recoveryCommand
+				entry["escalation_id"] = trip.escalationID
+			}
+			sweeps = append(sweeps, entry)
 			continue
 		}
-		if err := upsertSchedulerCursor(ctx, s.Runner, run.repositoryID, run.runID, result, "active"); err != nil {
+		if _, err := upsertSchedulerCursor(ctx, s.Runner, run.repositoryID, run.runID, result, "active"); err != nil {
 			return nil, err
 		}
 		sweeps = append(sweeps, map[string]any{
@@ -243,9 +272,31 @@ func upsertAutoSpawnCursor(ctx context.Context, runner db.Runner, repositoryID s
 		repositoryID, runID, resultArg, state)
 }
 
-func upsertSchedulerCursor(ctx context.Context, runner db.Runner, repositoryID string, runID string, result map[string]any, state string) error {
-	latched := recoveryCursorResultWithLatch(ctx, runner, repositoryID, runID, result)
-	resultArg, err := db.JSONBArg(runner, latched)
+type schedulerCursorUpdate struct {
+	result        map[string]any
+	degradedCount int
+	tripped       bool
+	tripThreshold int
+}
+
+type recoverySweepBreakerState struct {
+	degradedCount int
+	tripState     string
+	runState      string
+}
+
+type recoverySweepTrip struct {
+	escalationID    string
+	recoveryCommand string
+}
+
+func upsertSchedulerCursor(ctx context.Context, runner db.Runner, repositoryID string, runID string, result map[string]any, state string) (schedulerCursorUpdate, error) {
+	update := recoveryCursorUpdate(ctx, runner, repositoryID, runID, result, state)
+	return update, writeSchedulerCursor(ctx, runner, repositoryID, runID, update.result, state)
+}
+
+func writeSchedulerCursor(ctx context.Context, runner db.Runner, repositoryID string, runID string, result map[string]any, state string) error {
+	resultArg, err := db.JSONBArg(runner, result)
 	if err != nil {
 		return err
 	}
@@ -263,22 +314,255 @@ func upsertSchedulerCursor(ctx context.Context, runner db.Runner, repositoryID s
 		repositoryID, runID, resultArg, state)
 }
 
-func recoveryCursorResultWithLatch(ctx context.Context, runner db.Runner, repositoryID string, runID string, result map[string]any) map[string]any {
+func recoveryCursorUpdate(ctx context.Context, runner db.Runner, repositoryID string, runID string, result map[string]any, state string) schedulerCursorUpdate {
 	latched := map[string]any{}
 	for key, value := range result {
 		latched[key] = value
+	}
+	update := schedulerCursorUpdate{
+		result:        latched,
+		tripThreshold: recoverySweepTripThreshold,
 	}
 	latch, err := readRecoveryCursorLatch(ctx, runner, repositoryID, runID)
 	if err != nil {
 		latched["claimable_job_count"] = 0
 		latched["last_lane_advanced_at"] = nil
 		latched["recovery_cursor_latch_error"] = err.Error()
-		return latched
+	} else {
+		for key, value := range latch {
+			latched[key] = value
+		}
 	}
-	for key, value := range latch {
-		latched[key] = value
+	if state != "sweep_degraded" {
+		return update
 	}
-	return latched
+	breaker, err := readRecoverySweepBreakerState(ctx, runner, repositoryID, runID)
+	if err != nil {
+		latched["recovery_sweep_breaker_error"] = err.Error()
+	}
+	degradedCount := breaker.degradedCount + 1
+	if degradedCount < 1 {
+		degradedCount = 1
+	}
+	update.degradedCount = degradedCount
+	latched["recovery_degraded_sweep_count"] = degradedCount
+	latched["recovery_sweep_trip_threshold"] = recoverySweepTripThreshold
+	latched["recovery_sweep_trip_state"] = "armed"
+	if errorText, ok := result["error"].(string); ok && errorText != "" {
+		latched["recovery_sweep_trip_error"] = truncateRecoverySweepText(errorText, 1000)
+	}
+	if degradedCount >= recoverySweepTripThreshold {
+		update.tripped = true
+		latched["recovery_sweep_trip_state"] = "tripped"
+		latched["recovery_sweep_tripped_at"] = recoverySweepNow()
+	}
+	return update
+}
+
+func readRecoverySweepBreakerState(ctx context.Context, runner db.Runner, repositoryID string, runID string) (recoverySweepBreakerState, error) {
+	var count int
+	var tripState string
+	var runState string
+	err := runner.QueryRow(ctx, `
+		SELECT CASE
+		         WHEN COALESCE(c.last_result_json->>'recovery_degraded_sweep_count', '') ~ '^[0-9]+$'
+		         THEN (c.last_result_json->>'recovery_degraded_sweep_count')::integer
+		         ELSE 0
+		       END AS recovery_degraded_sweep_count,
+		       COALESCE(c.last_result_json->>'recovery_sweep_trip_state', '') AS recovery_sweep_trip_state,
+		       COALESCE(r.state, '') AS run_state
+		  FROM striatumd.scheduler_cursors c
+		  LEFT JOIN striatumd.runs r
+		    ON r.repository_id = c.repository_id
+		   AND r.run_id = c.run_id
+		 WHERE c.repository_id = $1
+		   AND c.run_id = $2
+		   AND c.cursor_kind = 'recovery'`,
+		repositoryID, runID).Scan(&count, &tripState, &runState)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return recoverySweepBreakerState{}, nil
+		}
+		return recoverySweepBreakerState{}, err
+	}
+	if count < 0 {
+		count = 0
+	}
+	if tripState == "tripped" && (runState == "running" || runState == "paused") {
+		count = 0
+	}
+	return recoverySweepBreakerState{
+		degradedCount: count,
+		tripState:     tripState,
+		runState:      runState,
+	}, nil
+}
+
+func tripRecoverySweepBreaker(ctx context.Context, runner db.Runner, repositoryID string, runID string, errorText string, degradedCount int, threshold int, author string) (recoverySweepTrip, error) {
+	tx, err := db.BeginAuthorizedMutation(ctx, runner, db.AuthorityFromContext(ctx))
+	if err != nil {
+		return recoverySweepTrip{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(context.Background())
+		}
+	}()
+	if err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "striatum:run:"+repositoryID+":"+runID); err != nil {
+		return recoverySweepTrip{}, err
+	}
+
+	var existingBlockerID string
+	err = tx.QueryRow(ctx, `
+		SELECT blocker_id
+		  FROM striatumd.blockers
+		 WHERE repository_id = $1
+		   AND run_id = $2
+		   AND blocker_kind = $3
+		   AND state = 'open'
+		   AND payload_json->>'source' = $4
+		 ORDER BY created_at, blocker_id
+		 LIMIT 1`,
+		repositoryID, runID, recoveryExhaustedKind, recoverySweepTripSource).Scan(&existingBlockerID)
+	if err != nil && err != pgx.ErrNoRows {
+		return recoverySweepTrip{}, err
+	}
+	if existingBlockerID != "" {
+		if err := tx.Exec(ctx, `
+			UPDATE striatumd.runs
+			   SET state = 'needs_operator'
+			 WHERE repository_id = $1
+			   AND run_id = $2
+			   AND state IN ('running','paused')`,
+			repositoryID, runID); err != nil {
+			return recoverySweepTrip{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return recoverySweepTrip{}, err
+		}
+		committed = true
+		return recoverySweepTrip{
+			escalationID:    existingBlockerID,
+			recoveryCommand: "striatum escalation resolve " + existingBlockerID,
+		}, nil
+	}
+
+	var runState string
+	if err := tx.QueryRow(ctx, `
+		SELECT state
+		  FROM striatumd.runs
+		 WHERE repository_id = $1 AND run_id = $2
+		 FOR UPDATE`,
+		repositoryID, runID).Scan(&runState); err != nil {
+		return recoverySweepTrip{}, err
+	}
+	if runState != "running" && runState != "paused" && runState != "needs_operator" {
+		if err := tx.Commit(ctx); err != nil {
+			return recoverySweepTrip{}, err
+		}
+		committed = true
+		return recoverySweepTrip{}, nil
+	}
+
+	blockerID, err := newRecoverySweepID("blk")
+	if err != nil {
+		return recoverySweepTrip{}, err
+	}
+	recoveryCommand := "striatum escalation resolve " + blockerID
+	shortError := truncateRecoverySweepText(errorText, 1000)
+	now := recoverySweepNow()
+	payload := map[string]any{
+		"schema_version":                "striatum.recovery_escalation.v1",
+		"source":                        recoverySweepTripSource,
+		"is_escalation":                 true,
+		"blocker_kind":                  recoveryExhaustedKind,
+		"severity":                      "blocked",
+		"disposition":                   "sweep_trip_latch",
+		"consecutive_degraded_sweeps":   degradedCount,
+		"recovery_sweep_trip_threshold": threshold,
+		"last_error":                    shortError,
+		"author":                        author,
+		"suggested_operator_actions": []any{
+			"inspect and fix the recovery sweep error for this run",
+			"after the fault is corrected, run `" + recoveryCommand + "` to clear needs_operator and re-arm the sweep",
+			"cancel the run if it cannot be recovered",
+		},
+	}
+	payloadArg, err := db.JSONBArg(tx, payload)
+	if err != nil {
+		return recoverySweepTrip{}, err
+	}
+	description := fmt.Sprintf(
+		"recovery sweep breaker tripped after %d consecutive degraded sweeps: %s; recover with `%s` after fixing the sweep error, or cancel the run",
+		degradedCount, shortError, recoveryCommand,
+	)
+	if err := tx.Exec(ctx, `
+		INSERT INTO striatumd.blockers (
+		  repository_id, blocker_id, run_id, job_id, session_id, severity,
+		  blocker_kind, description, state, created_at, payload_json
+		)
+		VALUES ($1,$2,$3,NULL,NULL,'blocked',$4,$5,'open',$6,$7::jsonb)`,
+		repositoryID, blockerID, runID, recoveryExhaustedKind, description, now, payloadArg,
+	); err != nil {
+		return recoverySweepTrip{}, err
+	}
+	if err := tx.Exec(ctx, `
+		INSERT INTO striatumd.escalation_inbox (
+		  repository_id, escalation_id, run_id, job_id, session_id,
+		  blocker_id, blocker_kind, severity, state, created_at, payload_json
+		)
+		VALUES ($1,$2,$3,NULL,NULL,$4,$5,'blocked','pending',$6,$7::jsonb)`,
+		repositoryID, blockerID, runID, blockerID, recoveryExhaustedKind, now, payloadArg,
+	); err != nil {
+		return recoverySweepTrip{}, err
+	}
+	if err := tx.Exec(ctx, `
+		UPDATE striatumd.runs
+		   SET state = 'needs_operator'
+		 WHERE repository_id = $1
+		   AND run_id = $2
+		   AND state IN ('running','paused')`,
+		repositoryID, runID); err != nil {
+		return recoverySweepTrip{}, err
+	}
+	if db.ActiveWriteBoundary().AtLeast(db.PhaseFull) {
+		if _, err := db.AppendEventRowSD(ctx, tx, db.EventRow{
+			RepositoryID: repositoryID,
+			RunID:        runID,
+			EventType:    "run.escalated",
+			Payload: map[string]any{
+				"reason":                      recoveryExhaustedKind,
+				"source":                      recoverySweepTripSource,
+				"blocker_id":                  blockerID,
+				"blocker_kind":                recoveryExhaustedKind,
+				"consecutive_degraded_sweeps": degradedCount,
+				"last_error":                  shortError,
+			},
+		}); err != nil {
+			return recoverySweepTrip{}, err
+		}
+		if _, err := db.AppendEventRowSD(ctx, tx, db.EventRow{
+			RepositoryID: repositoryID,
+			RunID:        runID,
+			EventType:    "run.needs_operator",
+			Payload: map[string]any{
+				"reason":        recoveryExhaustedKind,
+				"source":        recoverySweepTripSource,
+				"escalation_id": blockerID,
+			},
+		}); err != nil {
+			return recoverySweepTrip{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recoverySweepTrip{}, err
+	}
+	committed = true
+	return recoverySweepTrip{
+		escalationID:    blockerID,
+		recoveryCommand: recoveryCommand,
+	}, nil
 }
 
 func readRecoveryCursorLatch(ctx context.Context, runner db.Runner, repositoryID string, runID string) (map[string]any, error) {
@@ -356,4 +640,26 @@ func readRecoveryCursorLatch(ctx context.Context, runner db.Runner, repositoryID
 		result["last_lane_advanced_at"] = lastLaneAdvancedAt.UTC().Format(time.RFC3339)
 	}
 	return result, nil
+}
+
+func recoverySweepNow() string {
+	return time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
+}
+
+func newRecoverySweepID(prefix string) (string, error) {
+	var body [16]byte
+	if _, err := rand.Read(body[:]); err != nil {
+		return "", err
+	}
+	return prefix + "_" + hex.EncodeToString(body[:]), nil
+}
+
+func truncateRecoverySweepText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
 }

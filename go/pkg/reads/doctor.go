@@ -562,6 +562,12 @@ func doctorRecoverySweepCursor(ctx context.Context, runner db.Runner, repository
 		       COALESCE(c.last_result_json->>'claimable_job_count', '0') AS claimable_job_count,
 		       c.last_result_json->>'last_lane_advanced_at' AS last_lane_advanced_at,
 		       c.last_result_json->>'recovery_cursor_latch_error' AS recovery_cursor_latch_error,
+		       c.last_result_json->>'recovery_sweep_trip_state' AS recovery_sweep_trip_state,
+		       COALESCE(c.last_result_json->>'recovery_degraded_sweep_count', '0') AS recovery_degraded_sweep_count,
+		       COALESCE(c.last_result_json->>'recovery_sweep_trip_threshold', '0') AS recovery_sweep_trip_threshold,
+		       c.last_result_json->>'recovery_sweep_trip_error' AS recovery_sweep_trip_error,
+		       c.last_result_json->>'recovery_sweep_trip_recovery_command' AS recovery_sweep_trip_recovery_command,
+		       trip.blocker_id AS recovery_sweep_trip_blocker_id,
 		       r.started_at,
 		       r.created_at
 		  FROM striatumd.runs r
@@ -569,8 +575,19 @@ func doctorRecoverySweepCursor(ctx context.Context, runner db.Runner, repository
 		    ON c.repository_id = r.repository_id
 		   AND c.run_id = r.run_id
 		   AND c.cursor_kind = 'recovery'
+		  LEFT JOIN LATERAL (
+		       SELECT b.blocker_id
+		         FROM striatumd.blockers b
+		        WHERE b.repository_id = r.repository_id
+		          AND b.run_id = r.run_id
+		          AND b.blocker_kind = 'recovery_exhausted'
+		          AND b.state = 'open'
+		          AND b.payload_json->>'source' = 'recovery.sweep_trip_latch'
+		        ORDER BY b.created_at, b.blocker_id
+		        LIMIT 1
+		  ) trip ON true
 		 WHERE r.repository_id = $1
-		   AND r.state = 'running'
+		   AND r.state IN ('running','needs_operator')
 		   AND c.state <> 'removed'
 		 ORDER BY COALESCE(r.started_at, r.created_at), r.run_id`,
 		repositoryID)
@@ -588,13 +605,41 @@ func doctorRecoverySweepCursor(ctx context.Context, runner db.Runner, repository
 
 	wedged := []map[string]any{}
 	latchErrors := []map[string]any{}
+	tripped := []map[string]any{}
 	problems := []string{}
 	records := []map[string]any{}
 	for _, row := range rows {
+		runID := stringFrom(row, "run_id")
+		if stringFrom(row, "recovery_sweep_trip_state") == "tripped" {
+			command := stringFrom(row, "recovery_sweep_trip_recovery_command")
+			if command == "" {
+				if blockerID := stringFrom(row, "recovery_sweep_trip_blocker_id"); blockerID != "" {
+					command = "striatum escalation resolve " + blockerID
+				} else {
+					command = "striatum doctor --json"
+				}
+			}
+			record := map[string]any{
+				"check":                    "recovery_sweep_cursor_tripped",
+				"run_id":                   runID,
+				"run_state":                row["run_state"],
+				"cursor_state":             row["cursor_state"],
+				"last_sweep_at":            row["last_sweep_at"],
+				"degraded_sweep_count":     intFrom(row, "recovery_degraded_sweep_count"),
+				"trip_threshold":           intFrom(row, "recovery_sweep_trip_threshold"),
+				"last_error":               stringFrom(row, "recovery_sweep_trip_error"),
+				"recovery_command":         command,
+				"recovery_trip_blocker_id": stringFrom(row, "recovery_sweep_trip_blocker_id"),
+			}
+			tripped = append(tripped, record)
+			records = append(records, record)
+			problems = append(problems, "recovery_sweep_cursor_tripped."+runID+": breaker tripped after "+
+				intPlaceholder(intFrom(row, "recovery_degraded_sweep_count"))+" degraded sweeps; recover via `"+command+"` after fixing the sweep error, or cancel the run")
+			continue
+		}
 		if stringFrom(row, "run_state") != "running" {
 			continue
 		}
-		runID := stringFrom(row, "run_id")
 		if latchError := stringFrom(row, "recovery_cursor_latch_error"); latchError != "" {
 			record := map[string]any{
 				"check":         "recovery_sweep_cursor_latch_error",
@@ -634,6 +679,8 @@ func doctorRecoverySweepCursor(ctx context.Context, runner db.Runner, repository
 	}
 	block["latch_error_count"] = len(latchErrors)
 	block["latch_errors"] = latchErrors
+	block["tripped_count"] = len(tripped)
+	block["tripped_runs"] = tripped
 	block["wedged_count"] = len(wedged)
 	block["wedged_runs"] = wedged
 	return block, problems, records
