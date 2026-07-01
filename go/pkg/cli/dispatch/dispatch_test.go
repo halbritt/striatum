@@ -260,7 +260,7 @@ func TestDispatchHelpListsRequiredAndOptionalFlags(t *testing.T) {
 	cases := map[string][]string{
 		"supervise stop":       {"--session-id", "--reason", "required:"},
 		"register-session":     {"--capability", "--fresh", "run-id", "role", "lane"},
-		"doctor":               {"--lane-provider-auth", "codex", "--timeout", "doctor"},
+		"doctor":               {"--lane-provider-auth", "codex|claude", "--timeout", "doctor"},
 		"checkpoint resolve":   {"continue|cancel", "--decision-id", "blocker-id"},
 		"supervise start":      {"--session-id", "--provider-auth-gate", "auto|required|off", "supervise.start"},
 		"supervise send":       {"--packet-id", "supervise.send"},

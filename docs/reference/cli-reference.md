@@ -223,16 +223,19 @@ striatum supervise trajectory
 ```
 
 `supervise start` owns the lane provider-auth launch gate. The default
-`auto` mode runs the Codex smoke only for supported Codex agent-loop lanes under
-a distinct configured lane OS user; `required` blocks unsupported providers and
-auth-negative smoke results; `off` is the explicit rollback path.
+`auto` mode runs supported provider-auth preflights for Codex and Claude
+agent-loop lanes under a distinct configured lane OS user; `required` blocks
+unsupported providers and auth-negative preflight results; `off` is the
+explicit rollback path.
 The gate runs before scratch/FIFO creation, session-bound lane token minting,
 supervisor rows/events, helper/tmux, or the provider lane process. Blocking
 results return a safe `lane_provider_auth` details block. The block can include
 the probe name, exit code, stdout/stderr byte counts, and bounded success-signal
 state; it never includes raw stdout, stderr, final text, auth paths, provider
 account ids, environment values, token material, PTY logs, or tracebacks.
-For Codex, zero exit means the lane provider CLI authenticated successfully
+For Codex, zero exit means the lane provider CLI authenticated successfully.
+For Claude, the preflight is an offline freshness check of the resolver-selected
+`.credentials.json`; it does not run a provider command or spend model tokens.
 even if the bounded `--output-last-message` signal is missing or mismatched;
 that condition is diagnostic and does not block launch.
 
@@ -351,7 +354,7 @@ striatum daemon migrate-db [--admin-url <dsn>] [--json]
 striatum daemon owner-ddl apply [--owner-url <dsn>] [--json]
 striatum daemon token-create <capability>
 striatum doctor [--verbose] [--json]
-striatum doctor --lane-provider-auth codex [--run-id <id>] [--lane-id <id>] [--timeout 45s] --json
+striatum doctor --lane-provider-auth codex|claude [--run-id <id>] [--lane-id <id>] [--timeout 45s] --json
 striatumd [daemon-start options]
 systemctl --user start|stop|restart|status striatumd
 striatum repo add <path> [--init] [--display-name <name>] [--no-migrate] [--apply-blob-creation]
@@ -386,8 +389,10 @@ daemon-owned Postgres has no clients and writes a `0600` runtime
 never logged to audit, and never stored in the registry.
 
 Ordinary `doctor` and `doctor --verbose` do not run provider CLIs. The
-provider-auth diagnostic is explicit-only because it may touch the network,
-spend provider tokens, trigger auth refresh, or hang on an interactive prompt.
+provider-auth diagnostic is explicit-only because provider-specific checks may
+touch the network, spend provider tokens, trigger auth refresh, or hang on an
+interactive prompt. The Claude diagnostic is offline-only and reads credential
+freshness without running a provider command or spending model tokens.
 Its JSON result is the same private-safe block used by `supervise.start`, with
 `raw_output_returned=false`. A Codex zero-exit smoke with a missing or
 mismatched bounded success signal reports `success_signal` as `missing`,
@@ -438,10 +443,10 @@ name daemon recovery work. `doctor --verbose` includes structured
 `problem_records`, `warning_records`, and `notice_records` alongside the stable
 string lists, including RFC 0171 `generated_record_integrity` records for
 missing, corrupt, swapped, duplicate-source, or metadata-incomplete
-generated-record blobs. `doctor --lane-provider-auth codex [--run-id <id>]
-[--lane-id <id>] [--timeout 45s] --json` is an explicit provider-auth smoke
-for the lane identity; ordinary `doctor` and `doctor --verbose` never run
-provider CLIs.
+generated-record blobs. `doctor --lane-provider-auth codex|claude [--run-id
+<id>] [--lane-id <id>] [--timeout 45s] --json` is an explicit provider-auth
+diagnostic for the lane identity; ordinary `doctor` and `doctor --verbose`
+never run provider CLIs.
 `striatum daemon status` is the local bootstrap summary for unit state and
 runtime paths; it folds in read-only doctor information when the daemon is
 reachable.

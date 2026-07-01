@@ -376,17 +376,20 @@ Cross-user lanes must prove the provider CLI can authenticate as the lane OS
 user before a supervised lane is launched. `supervise start` accepts
 `--provider-auth-gate auto|required|off`:
 
-- `auto` is the default. It runs the Codex provider-auth smoke for supported
-  Codex agent-loop lanes only when `STRIATUM_LANE_OS_USER` names a distinct
-  lane user.
+- `auto` is the default. It runs the provider-auth preflight for supported
+  Codex and Claude agent-loop lanes only when `STRIATUM_LANE_OS_USER` names a
+  distinct lane user.
 - `required` blocks launch on any unsupported provider or auth-negative smoke
   result.
 - `off` explicitly bypasses the launch gate for emergency rollback.
 
-The smoke runs as the lane OS user with a sanitized `env -i` environment and
+The preflight runs as the lane OS user with a sanitized `env -i` environment and
 does not pass Striatum MCP tokens, PostgreSQL DSNs, provider token variables, or
-raw workflow command output into the result. It may use the network and provider
-tokens, so ordinary `striatum doctor` and `doctor --verbose` do not run it.
+raw workflow command output into the result. Codex uses the provider CLI smoke,
+which may use the network and provider tokens. Claude uses an offline credential
+freshness check against the resolver-selected `.credentials.json` and does not
+run a provider command or spend model tokens. Ordinary `striatum doctor` and
+`doctor --verbose` do not run either preflight.
 For Codex, a zero-exit smoke proves the lane provider CLI could authenticate;
 missing or mismatched `--output-last-message` text is reported as a safe
 `success_signal` diagnostic rather than treated as an auth failure. Blocking
@@ -397,6 +400,7 @@ Operators can request the same primitive explicitly:
 
 ```sh
 striatum doctor --lane-provider-auth codex --json
+striatum doctor --lane-provider-auth claude --json
 ```
 
 When a `run drive` launch hits a provider-auth refusal, the driver forwards the

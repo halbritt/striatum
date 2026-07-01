@@ -65,13 +65,13 @@ var usageByGroup = map[string]Usage{
 	"doctor": {
 		Params: []Param{
 			{Name: "verbose", Bool: true, Help: "include structured problem_records alongside the stable problems string list"},
-			{Name: "lane-provider-auth", Values: []string{"codex"}, Help: "explicit opt-in provider-auth smoke for a lane provider; ordinary doctor and doctor --verbose do not run provider CLIs"},
-			{Name: "run-id", Help: "optional run whose frozen workflow lane should supply binary/path_prefix for the provider-auth smoke"},
+			{Name: "lane-provider-auth", Values: []string{"codex", "claude"}, Help: "explicit opt-in provider-auth diagnostic for a lane provider; ordinary doctor and doctor --verbose do not run provider CLIs"},
+			{Name: "run-id", Help: "optional run whose frozen workflow lane should supply binary/path_prefix for the provider-auth diagnostic"},
 			{Name: "lane-id", Help: "optional lane in --run-id whose provider binary/path_prefix should be used"},
-			{Name: "timeout", Help: "provider-auth smoke timeout; defaults to 45s"},
+			{Name: "timeout", Help: "provider-auth diagnostic timeout; defaults to 45s"},
 		},
 		Notes: []string{
-			"Provider auth preflight may use network/provider tokens and is explicit-only: pass --lane-provider-auth codex, normally with --json.",
+			"Provider auth preflight is explicit-only: pass --lane-provider-auth codex or --lane-provider-auth claude, normally with --json. Codex may use network/provider tokens; Claude checks resolver-selected credential freshness offline.",
 		},
 	},
 	"join_verify": {
