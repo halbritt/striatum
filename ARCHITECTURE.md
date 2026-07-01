@@ -11,7 +11,9 @@ coding agents**: multi-model lanes (Claude / Codex / Gemini) execute reviewed,
 provenance-tracked work against target repositories, with anti-hallucination
 coming from multi-model review plus an append-only audit trail. Self-hosted
 server, multi-repo, possibly multi-user (RFC 0107) — never SaaS, no telemetry,
-no cloud APIs (D094).
+no Striatum-managed cloud APIs (D094). Operator-provided S3-compatible blob
+endpoints are configured durability backends, not a hosted Striatum service
+(RFC 0072 / RFC 0123).
 
 ## Components (three binaries, one Makefile)
 

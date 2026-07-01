@@ -13,10 +13,22 @@ This specification binds the V1 MVP described in
 terminal-based AI coding agents. It coordinates registered target
 repositories through a local daemon, daemon RPC methods, and
 capability-gated client surfaces (CLI, MCP, and local web UI). It
-does not provide hosted services, external persistence, telemetry,
-Slack/remote serving, durable transcript capture, provider SDK
-integration, malicious-local-operator-resistant sealed apply, or
-automatic commits.
+does not provide a hosted control plane, Striatum-managed external
+persistence service, bundled cloud service, telemetry, Slack/remote
+serving, durable transcript capture/export, provider SDK integration,
+malicious-local-operator-resistant sealed apply, or automatic commits.
+
+Blob storage is an operator-configured durability backend, not a
+Striatum-hosted service. Under
+[RFC 0072](../rfcs/0072-blob-backed-artifact-storage.md),
+[RFC 0123](../rfcs/0123-blob-routed-lane-exhaust-and-git-publication-specs.md),
+and [RFC 0171](../rfcs/0171-operator-records-blob-dockets-and-virtual-records.md),
+selected artifact exhaust and generated-record bodies may be stored in
+an operator-provided local or S3-compatible blob endpoint; the daemon
+records keys and hashes in PostgreSQL, which remains the authoritative
+live state and index. Striatum neither provisions nor manages that
+endpoint and does not use it for telemetry, remote transcript export,
+or workflow authority; see [§ Artifacts](#artifacts).
 
 RFC 0033, RFC 0043, and RFC 0048 establish the current substrate:
 daemon-owned PostgreSQL is authoritative for daemon-global state and
@@ -25,8 +37,8 @@ is operational scratch only. RFC 0030 supplies the daemon RPC envelope,
 RFC 0031 supplies daemon-owned supervision/apply foundations, and RFC 0032's
 cross-repository workflow surface is retired by D270; its remaining durable
 value is historical schema and MCP mutation capability provenance. Hosted
-service semantics and bundled PostgreSQL remain separate future product
-decisions.
+service semantics, bundled PostgreSQL, and Striatum-managed blob hosting
+remain separate future product decisions.
 
 The authoritative live state is the daemon-owned PostgreSQL instance
 (RFC 0033) under a `repository_id` scope per registered target
