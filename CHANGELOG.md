@@ -54,9 +54,28 @@
   session, and work lease expiry beyond the reseal grace fail closed back to
   the typed Slice A recovery floor. The `reseal` capability is not grantable
   through the public capability map and no admin token is made lane-readable.
+- **Architecture-review remediation campaign.** Closed the 2026-07-01
+  remediation wave: route-budget metadata guardrails, opt-in post-commit
+  escalation notifications, declared verdict model identity stamps, doctor
+  availability/provenance plane classification, RFC 0170 frozen-citation and
+  cull-slot liveness fences, generated-workflow placement posture defaults,
+  repeated-degraded-sweep trip latching, audit follow-through rules, and active
+  retired-runtime wording cleanup all landed on `main`.
 
 ### Fixed
 
+- **Migration hash mismatches park daemon boot instead of crash-looping.**
+  Recorded or embedded/source PostgreSQL migration hash mismatches now return a
+  typed `MigrationHashMismatchError` and route `striatumd` through the same
+  non-restartable exit-79 remediation path used by owner-DDL/schema-drift
+  halts.
+- **Claude provider-auth doctor checks.** `doctor --lane-provider-auth claude`
+  now uses the existing Claude credential resolver/expiry machinery for an
+  offline freshness check instead of failing as an unsupported codex-only
+  provider.
+- **Blob-storage product boundary wording.** The reference spec now separates
+  prohibited hosted/external persistence from supported operator-provided
+  local/S3-compatible blob durability backends.
 - **Review checkpoint artifact durability.** Review verdict and checkpoint
   paths now porter-commit and anchor repo-write artifacts before terminal
   review state. `recovery reseal` can repair uncommitted published bodies,
@@ -74,6 +93,14 @@
   `docs/operator/workflows/<slug>.json`, updated references, and added an
   explicit `make check-docs-audit` mode for whole-tree link audits that include
   normally ignored historical/operator regions.
+
+### Security
+
+- **First read least-privilege table-family slice.** The read-authority
+  inventory now classifies `striatumd.clients` as
+  `runtime_column_scoped_select`: runtime `SELECT *` and direct token-secret
+  column reads stay denied, non-secret client metadata remains selectable, and
+  secret auth reads continue through the authority-gated projection path.
 
 ### Removed
 

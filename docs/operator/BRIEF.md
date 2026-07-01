@@ -12,6 +12,20 @@ status: "current"
 # Operator Brief
 author: operator-claude-opus-4-8-001
 
+## 2026-07-01 delta - architecture-review remediation campaign shipped
+The 2026-07-01 architecture-review remediation campaign is closed; see `docs/operator/plans/architecture-review-remediation-campaign-2026-07-01.md`.
+Workstreams landed on `main` through `4eeb9df3`: migration
+hash-mismatch parking, Claude provider-auth doctor checks, blob-boundary docs,
+route-budget metadata, escalation notification, verdict model identity, doctor
+planes, RFC 0170 P1 citation/liveness fixes, the first `clients`
+column-scoped read slice, deprecated-route retirement, placement posture
+adoption, sweep trip latching, retired-runtime wording cleanup, and audit
+follow-through rules. Live closeout was green (`doctor ok=true`,
+`problem_count=0`, six advisory warnings; no active runs/jobs/blockers). The
+daemon had not yet restarted onto the new doctor-plane binary, so live
+`availability_ok` / `provenance_ok` fields were absent though source/tests
+landed.
+
 ## 2026-07-01 delta - architecture-review remediation campaign planned
 
 The 2026-07-01 deep architecture review and the immediately prior 2026-06-28

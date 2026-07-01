@@ -4,10 +4,10 @@ artifact_kind: "work_plan"
 plan_id: "plan_architecture-review-remediation-campaign-2026-07-01"
 scope_kind: "initiative"
 scope_ref: "docs/audits/STRIATUM_DEEP_ARCHITECTURE_REVIEW_CLAUDE_FABLE_5_2026-07-01.md"
-state: "open"
+state: "closed"
 opened_at: "2026-07-01"
-closed_at: null
-closure_summary: null
+closed_at: "2026-07-01"
+closure_summary: "All P0/P1/P2 campaign workstreams landed on main through 4eeb9df3; #164 read least privilege remains open only for future table-family slices beyond this campaign's first clients column-scope slice."
 supersedes: null
 retrieval_priority: "high"
 ---
@@ -36,6 +36,14 @@ open blockers 0, and `doctor ok=true` with six advisory worktree warnings.
 one commit behind current `main`; the 06-28 review baseline is 109 commits
 behind current `main`. The findings below are therefore re-anchored to current
 source where the review text drifted.
+
+Closeout verification ran on `4eeb9df3` on `main`. `doctor --json` reported
+`ok=true`, `problem_count=0`, and six advisory warnings; `status --json
+--run-limit 0` reported no active runs, waiting jobs, claimable jobs, or open
+blockers. The live daemon had not yet been restarted onto the new doctor-plane
+binary shape during that check, so `availability_ok` / `provenance_ok` were not
+present in the live response even though the source/tests for those fields had
+landed.
 
 ## Coordinator Rules
 
@@ -81,20 +89,20 @@ source, but re-tiers stale or overstated items:
 
 | ID | Tier | Source | Current decision |
 | --- | --- | --- | --- |
-| P0-MIGRATION-HASH-PARK | P0 | 07-01 blocker | Still live; fix first before any new migration-bearing slice lands. |
-| P0-CLAUDE-PROVIDER-DOCTOR | P0 | 07-01 P0 recommendation | Still live; doctor route and `laneproviderauth.Check` are codex-only even though resolver/expiry code already models Claude. |
-| P0-BLOB-BOUNDARY-WORDING | P0 | 06-28 P0 | Still live; spec product boundary says "no external persistence" while the same spec and source support operator-provided blob storage. |
-| P1-ROUTE-BUDGET-GATE | P1 | 06-28 P0, 07-01 smell | Downgraded from P0: serious surface-control debt, not a runtime blocker. |
-| P1-ESCALATION-NOTIFIER | P1 | 07-01 blocker/P1 | Keep as P1: escalation state exists; the missing wake-human path is an unattended-operation gap. Docs also overclaim an unimplemented hook. |
-| P1-VERDICT-MODEL-IDENTITY | P1 | 07-01 serious | Still live; verdicts carry attestation/review-generation stamps but no declared model identity or same-model override stamp. |
-| P1-DOCTOR-PLANES | P1 | 07-01 P1 | Still live; D276 split notices/warnings, but `doctor` still has one top-level `ok` fold and no `availability_ok` / `provenance_ok`. |
-| P1-RFC0170-P1-CULLING | P1 | 06-28 P1, 07-01 smell | Still live; #618 and #619 remain open and roadmap lists P1 deferrals. |
-| P1-READ-LEAST-PRIVILEGE | P1 | 06-28 P1 | Still live; many sensitive tables remain `runtime_sensitive_select` by explicit inventory. |
-| P1-DEPRECATED-ROUTES | P1 | 06-28 P1 | Still live; contract has 155 methods and 10 deprecated aliases. |
-| P2-PLACEMENT-ADOPTION | P2 | 07-01 P2 | Partly stale; artifact placement is already explicit and generator-tested. Remaining work is adoption policy/defaults for new non-self target repos. |
-| P2-SWEEP-TRIP-LATCH | P2 | 07-01 P2 | Partly stale; read-side recovery cursor latch and doctor wedge checks exist. Missing piece is a breaker that excludes repeatedly degraded runs from candidate selection and escalates once. |
-| P2-ACTIVE-COMMENT-CLEANUP | P2 | 06-28 P2 | Still useful but low risk; active docs and some Go tests/comments retain Python/parity/legacy wording. |
-| P2-REVIEW-CADENCE-BUDGET | P2 | 07-01 smell | Process/documentation guardrail only; prevents reviews becoming another exhaust stream. |
+| P0-MIGRATION-HASH-PARK | P0 | 07-01 blocker | Landed in `b2ca7495`: migration hash mismatch is typed and parks daemon boot with the non-restartable exit-79 path. |
+| P0-CLAUDE-PROVIDER-DOCTOR | P0 | 07-01 P0 recommendation | Landed in `7b4f4685` plus docs follow-up `75b53b81`: provider auth doctor checks now cover Claude offline credential freshness. |
+| P0-BLOB-BOUNDARY-WORDING | P0 | 06-28 P0 | Landed in `c46a164d`: product text now distinguishes prohibited hosted persistence from operator-provided local/S3-compatible blob storage. |
+| P1-ROUTE-BUDGET-GATE | P1 | 06-28 P0, 07-01 smell | Landed in `95958d6b`: daemon route metadata now carries budget/rationale guardrails. |
+| P1-ESCALATION-NOTIFIER | P1 | 07-01 blocker/P1 | Landed in `368a93dd`: recovery escalation can send opt-in post-commit notifications without making notifier success authoritative. |
+| P1-VERDICT-MODEL-IDENTITY | P1 | 07-01 serious | Landed in `ebe789ef`: verdict rows persist declared model identity, family, and basis with historical `unknown` semantics. |
+| P1-DOCTOR-PLANES | P1 | 07-01 P1 | Landed in `f409a1d6`: doctor source now classifies availability/provenance planes and preserves compatible `ok`. |
+| P1-RFC0170-P1-CULLING | P1 | 06-28 P1, 07-01 smell | Landed in `eaaef169` and `64121226`: frozen citations and cull-slot liveness fences are closed without adding deletion behavior. |
+| P1-READ-LEAST-PRIVILEGE | P1 | 06-28 P1 | Landed first table-family slice in `4eeb9df3`: `clients` is formalized as `runtime_column_scoped_select`; remaining tables stay future #164 work. |
+| P1-DEPRECATED-ROUTES | P1 | 06-28 P1 | Landed in `25875fa3`: deprecated alias count decreased by retiring `recovery.auto`. |
+| P2-PLACEMENT-ADOPTION | P2 | 07-01 P2 | Landed in `949ab57d`: generated workflows adopt placement posture policy for blob-routed review/dialogue exhaust. |
+| P2-SWEEP-TRIP-LATCH | P2 | 07-01 P2 | Landed in `789f8968`: repeated degraded recovery sweeps trip, escalate, and exclude the run until recovery clears it. |
+| P2-ACTIVE-COMMENT-CLEANUP | P2 | 06-28 P2 | Landed in `7efb8336`: active docs/comments no longer imply retired Python/SQLite runtime behavior. |
+| P2-REVIEW-CADENCE-BUDGET | P2 | 07-01 smell | Landed in `0249044c`: durable audit follow-through now requires owner/refusal/deferral instead of silent backlog growth. |
 
 ## P0 Workstreams
 
@@ -713,23 +721,19 @@ Wave 2 cleanup can run after Wave 1 integration:
 - Web UI or metrics removal: refused. Reviews classify them as bounded and
   useful local read surfaces; keep them read/local/allowlisted.
 
-## Open Questions
+## Closed Questions
 
-1. Is a second non-Striatum target repository a 2026 adoption goal? If yes,
-   P2-PLACEMENT-ADOPTION should move up after the P0s because mainline
-   provenance exhaust is an adoption blocker.
-2. Should cloud S3 be explicitly discouraged while local Garage/MinIO is
-   supported, or should all operator-provided S3-compatible endpoints be treated
-   equally? P0-BLOB-BOUNDARY-WORDING must answer this in product text.
-3. For P1-ESCALATION-NOTIFIER, is a loopback/tailnet HTTP POST enough, or does
-   the operator want marker-file/shell hooks retained from RFC 0020? The smallest
-   safe implementation is HTTP-only.
-4. For P1-ROUTE-BUDGET-GATE, should the rationale live in
-   `contracts/daemon_methods.json` metadata and be mechanically tested, or in
-   the decision/RFC plus command-authority docs? Prefer metadata only if it stays
-   compact.
-5. Which table family should be first for P1-READ-LEAST-PRIVILEGE after the
-   model-identity path: `verdicts`, `clients`, or `events`?
+1. P2-PLACEMENT-ADOPTION moved up and landed in source as a generated-workflow
+   policy/defaults change, independent of naming a second target repository.
+2. P0-BLOB-BOUNDARY-WORDING treats all operator-provided S3-compatible endpoints
+   as an operator-configured durability backend while preserving the no-hosted-
+   service/no-telemetry product boundary.
+3. P1-ESCALATION-NOTIFIER landed as loopback/tailnet HTTP(S) POST only; shell
+   hooks and marker-file hooks remain out of the current product surface.
+4. P1-ROUTE-BUDGET-GATE put compact rationale metadata in
+   `contracts/daemon_methods.json` and tests it mechanically.
+5. P1-READ-LEAST-PRIVILEGE chose `clients` as the first narrow table family,
+   because owner bundle 0005 already supplied the token-secret column gate.
 
 ## Campaign Done
 
@@ -747,3 +751,7 @@ This campaign is done when:
   the decision log are updated where the landed changes alter current state;
 - Plane work items record branch/worktree, base SHA, verification evidence, and
   final commit SHA for each workstream.
+
+Closeout note: source workstreams all landed on `main` by `4eeb9df3`. The final
+coordinator gate should be read from the closing commit that updates this plan,
+`docs/operator/BRIEF.md`, and `CHANGELOG.md`.
