@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -262,6 +263,129 @@ func TestEscalationNotifierDryRunDoesNotRequest(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("dry-run created %d recovery_exhausted blockers, want 0", len(rows))
+	}
+}
+
+// TestBlockWorkEscalationNotifiesAfterCommit: an escalation-class work.block
+// (kind in the isEscalation set) creates a pending escalation_inbox row and
+// wakes the opt-in notifier exactly once, strictly after the handler's
+// transaction committed, with the ID-only payload naming the producer.
+func TestBlockWorkEscalationNotifiesAfterCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	ids := seedWorktreeRequiredJob(t, ctx, runner, t.TempDir(), "block_escalation_notify", false)
+
+	var requests atomic.Int64
+	payloads := make(chan map[string]any, 1)
+	handlerErrs := make(chan error, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			handlerErrs <- fmt.Errorf("decode payload: %w", err)
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		// Post-commit proof: the escalation row is durable when the notify fires.
+		rows, err := queryRows(r.Context(), runner, `
+			SELECT escalation_id FROM striatumd.escalation_inbox
+			 WHERE repository_id = $1 AND run_id = $2 AND blocker_kind = 'ambiguous_goal'`,
+			ids.repoID, ids.runID)
+		if err != nil {
+			handlerErrs <- fmt.Errorf("read committed escalation from handler: %w", err)
+			http.Error(w, "query", http.StatusInternalServerError)
+			return
+		}
+		if len(rows) != 1 {
+			handlerErrs <- fmt.Errorf("handler saw %d committed escalations, want 1", len(rows))
+			http.Error(w, "not committed", http.StatusConflict)
+			return
+		}
+		payloads <- payload
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	t.Setenv(escalationNotifyURLEnv, server.URL+"/notify")
+
+	blocked, err := HandleBlockWork(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"session_id":  ids.sessionID,
+		"job_id":      ids.jobID,
+		"lease_id":    ids.leaseID,
+		"severity":    "blocked",
+		"kind":        "ambiguous_goal",
+		"description": "goal ambiguous; operator decision needed",
+	}))
+	if err != nil {
+		t.Fatalf("work.block: %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("notifier requests = %d, want 1", got)
+	}
+
+	var payload map[string]any
+	select {
+	case payload = <-payloads:
+	case err := <-handlerErrs:
+		t.Fatalf("notifier handler error: %v", err)
+	}
+	select {
+	case err := <-handlerErrs:
+		t.Fatalf("notifier handler error: %v", err)
+	default:
+	}
+	if got := fmt.Sprint(payload["source"]); got != "work.block" {
+		t.Fatalf("payload source = %q, want work.block", got)
+	}
+	if got := fmt.Sprint(payload["blocker_id"]); got != fmt.Sprint(blocked["blocker_id"]) {
+		t.Fatalf("payload blocker_id = %q, want %v", got, blocked["blocker_id"])
+	}
+	if got := fmt.Sprint(payload["escalation_kind"]); got != "ambiguous_goal" {
+		t.Fatalf("payload escalation_kind = %q, want ambiguous_goal", got)
+	}
+	if got := fmt.Sprint(payload["run_id"]); got != ids.runID {
+		t.Fatalf("payload run_id = %q, want %s", got, ids.runID)
+	}
+	if got := fmt.Sprint(payload["job_id"]); got != ids.jobID {
+		t.Fatalf("payload job_id = %q, want %s", got, ids.jobID)
+	}
+	if _, ok := payload["description"]; ok {
+		t.Fatalf("payload leaked the blocker description: %#v", payload)
+	}
+}
+
+// TestBlockWorkNonEscalationDoesNotNotify: a plain (non-escalation-class)
+// work.block creates no escalation_inbox row and must not wake the notifier.
+func TestBlockWorkNonEscalationDoesNotNotify(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	ctx := context.Background()
+	runner := pgtest.Pool(t).Runner
+	ids := seedWorktreeRequiredJob(t, ctx, runner, t.TempDir(), "block_plain_no_notify", false)
+
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "non-escalation block must not notify", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	t.Setenv(escalationNotifyURLEnv, server.URL+"/notify")
+
+	if _, err := HandleBlockWork(ctx, runner, intgEnv(ids.repoID, map[string]any{
+		"session_id":  ids.sessionID,
+		"job_id":      ids.jobID,
+		"lease_id":    ids.leaseID,
+		"severity":    "blocked",
+		"kind":        "write_scope.out_of_scope_dirty",
+		"description": "out-of-scope dirty path blocked completion",
+	})); err != nil {
+		t.Fatalf("work.block: %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("notifier requests for non-escalation block = %d, want 0", got)
 	}
 }
 

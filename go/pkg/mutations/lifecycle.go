@@ -1023,7 +1023,13 @@ func HandleBlockWork(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 	if _, err := enforceSessionBinding(ctx, request.sessionID); err != nil {
 		return nil, err
 	}
-	return withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
+	// Escalation-class blocks additionally wake the opt-in notifier — but only
+	// strictly AFTER withTx commits (never inside the transaction), mirroring
+	// the recovery sweep's post-commit call site. Captured here so the closure
+	// records what to announce and the notify happens on the committed state.
+	var notifyRunID string
+	var notifyEscalations []map[string]any
+	result, err := withTx(ctx, runner, func(tx db.TxRunner) (map[string]any, error) {
 		job, err := rowByID(ctx, tx, repositoryID, "jobs", "job_id", request.jobID, true)
 		if err != nil {
 			return nil, err
@@ -1068,6 +1074,13 @@ func HandleBlockWork(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 			); err != nil {
 				return nil, err
 			}
+			notifyRunID = fmt.Sprint(job["run_id"])
+			notifyEscalations = append(notifyEscalations, map[string]any{
+				"source":       "work.block",
+				"blocker_id":   blockerID,
+				"blocker_kind": request.kind,
+				"job_id":       request.jobID,
+			})
 		}
 		if err := tx.Exec(ctx, `
 			UPDATE striatumd.jobs
@@ -1109,6 +1122,11 @@ func HandleBlockWork(ctx context.Context, runner db.Runner, envelope rpc.Envelop
 		}
 		return map[string]any{"status": "blocked", "blocker_id": blockerID}, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	NotifyEscalationsBestEffort(ctx, repositoryID, notifyRunID, notifyEscalations)
+	return result, nil
 }
 
 // completedByVerdict reports whether the job already reached its completed

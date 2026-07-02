@@ -2039,7 +2039,9 @@ or other live-work signal exists. The transition records an audit-visible
 recovery event and the normal terminal completion record.
 Autonomous recovery escalation is represented by daemon state plus
 blocker/escalation artifact projections. When a live sweep creates recovery
-escalation rows and `STRIATUM_ESCALATION_NOTIFY_URL` is set, the daemon sends a
+escalation rows — including the poison-run sweep-breaker trip latch — or an
+escalation-class `work.block` creates a pending escalation inbox row, and
+`STRIATUM_ESCALATION_NOTIFY_URL` is set, the daemon sends a
 best-effort post-commit JSON HTTP(S) notification to loopback or tailnet targets
 only. Dry-runs do not notify, and notification success or failure is
 not authoritative workflow state. CLI flags

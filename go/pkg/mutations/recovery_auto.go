@@ -375,7 +375,7 @@ func HandleRecoveryAuto(ctx context.Context, runner db.Runner, envelope rpc.Enve
 		return nil, err
 	}
 	if !dryRun {
-		notifyRecoveryEscalationsBestEffort(ctx, repositoryID, runID, notificationEscalations)
+		NotifyEscalationsBestEffort(ctx, repositoryID, runID, notificationEscalations)
 	}
 	return result, nil
 }

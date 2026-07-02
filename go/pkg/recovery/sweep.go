@@ -559,6 +559,19 @@ func tripRecoverySweepBreaker(ctx context.Context, runner db.Runner, repositoryI
 		return recoverySweepTrip{}, err
 	}
 	committed = true
+	// Wake the opt-in escalation notifier strictly AFTER the trip transaction
+	// committed — the exact seam the breaker exists to page an AFK operator
+	// about (an otherwise-unattended wedge). Best-effort: the notifier swallows
+	// errors and is bounded by its own 3s client timeout, so a failing or
+	// hanging endpoint can never roll back the trip or wedge the sweep. Only
+	// this fresh-insert path notifies; the existing-blocker re-flip path above
+	// creates no new escalation row (its pending row was already announced).
+	mutations.NotifyEscalationsBestEffort(ctx, repositoryID, runID, []map[string]any{{
+		"source":       recoverySweepTripSource,
+		"blocker_id":   blockerID,
+		"blocker_kind": recoveryExhaustedKind,
+		"disposition":  "sweep_trip_latch",
+	}})
 	return recoverySweepTrip{
 		escalationID:    blockerID,
 		recoveryCommand: recoveryCommand,

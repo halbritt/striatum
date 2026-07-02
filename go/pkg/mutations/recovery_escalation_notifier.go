@@ -22,7 +22,16 @@ var (
 	tailnetIPv4Prefix          = netip.MustParsePrefix("100.64.0.0/10")
 )
 
-func notifyRecoveryEscalationsBestEffort(ctx context.Context, repositoryID, runID string, escalations []map[string]any) {
+// NotifyEscalationsBestEffort posts one opt-in, best-effort JSON notification
+// per newly-created escalation_inbox row. Callers MUST invoke it strictly
+// AFTER the transaction that created the rows has committed: it performs
+// network I/O (bounded by the 3s client timeout), swallows every error, and
+// must never be able to roll back or delay a mutation. It is a no-op unless
+// STRIATUM_ESCALATION_NOTIFY_URL names a loopback/tailnet target, and callers
+// on dry-run paths must not call it at all. It is exported so producers
+// outside this package (the recovery sweep's poison-run breaker trip) can
+// share the exact same guardrails instead of growing a second notifier.
+func NotifyEscalationsBestEffort(ctx context.Context, repositoryID, runID string, escalations []map[string]any) {
 	if len(escalations) == 0 {
 		return
 	}
@@ -87,9 +96,16 @@ func recoveryEscalationNotificationPayload(repositoryID, runID string, escalatio
 	if kind == "" {
 		kind = recoveryExhaustedBlockerKind
 	}
+	// The producer may name itself via a "source" key (e.g. the sweep breaker's
+	// recovery.sweep_trip_latch, work.block); the original sweep producer's
+	// value stays the default so existing consumers see an unchanged payload.
+	source := notificationString(escalation, "source")
+	if source == "" {
+		source = "recovery.sweep"
+	}
 	payload := map[string]any{
 		"schema_version":  "striatum.escalation_notification.v1",
-		"source":          "recovery.sweep",
+		"source":          source,
 		"repository_id":   repositoryID,
 		"run_id":          runID,
 		"escalation_kind": kind,

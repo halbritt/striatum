@@ -64,6 +64,13 @@
 
 ### Fixed
 
+- **Sweep breaker trips and escalation-class work blocks now page the opt-in
+  notifier.** The recovery sweep's poison-run circuit breaker and
+  escalation-class `work.block` created pending `escalation_inbox` rows without
+  firing the `STRIATUM_ESCALATION_NOTIFY_URL` notifier, so the unattended-wedge
+  class the breaker exists to catch went unpaged for an AFK operator. Both
+  producers now send the same post-commit, best-effort, ID-only notification
+  the sweep's recovery escalations already send.
 - **Migration hash mismatches park daemon boot instead of crash-looping.**
   Recorded or embedded/source PostgreSQL migration hash mismatches now return a
   typed `MigrationHashMismatchError` and route `striatumd` through the same
