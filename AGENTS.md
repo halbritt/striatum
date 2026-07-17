@@ -21,7 +21,8 @@ first, in order:
 5. `docs/decisions/decision-log.md`
 6. `docs/reference/ubiquitous-language.md`
 7. `docs/reference/todo.md` (archived pointer — current work lives in
-   `docs/operator/BRIEF.md` and the open GitHub issues)
+   `docs/operator/BRIEF.md`, `docs/operator/rfc-roadmap.md`, and the local
+   `Striatum` Plane project)
 8. `docs/operator/BRIEF.md` for current operator state and the bounded
    plan links that supersede older handoffs.
 9. `docs/operator/rfc-roadmap.md` when the task is to advance the RFC
@@ -131,7 +132,8 @@ Examples live under `examples`. Historical execution prompts live under
 - **Do not strand pushed branches.** Source reaches `main` two ways only: the
   daemon's run-integration for lane work (reviewed in-band by the workflow's
   reviewer lanes and verdicts), or a direct, sync-guarded commit to `main` for
-  operator changes. **Not GitHub pull requests** — GitHub is the issue tracker
+  operator changes. **Not GitHub pull requests** — Plane is the issue tracker
+  in the local/private `Proximal` workspace; GitHub is the repository remote
   only, never the merge mechanism; do not open PRs to land work. Completed work
   must not sit unmerged on a feature branch: integrate it promptly; if a blocker
   prevents it (e.g. missing push/merge credentials), record the concrete blocker
@@ -159,8 +161,8 @@ Examples live under `examples`. Historical execution prompts live under
   (`recovery requeue-stale`, `recovery resume`, `recovery complete-stalled`,
   `checkpoint resolve`, or the matching MCP recovery methods); if it cannot be
   cleanly recovered, the run is exposing a real runner defect — **surface it**:
-  file or update a GitHub issue, record the friction in the operator report and
-  `docs/operator/BRIEF.md`, and fix the runner (or escalate) before continuing. A
+  file or update a Plane work item, record the friction in the operator report
+  and `docs/operator/BRIEF.md`, and fix the runner (or escalate) before continuing. A
   red `doctor` is a stop-and-fix condition, not a thing to route around: do not
   launch or continue dogfoods on top of accumulating integrity problems.
 - **Keep the shared checkout clean and current — no dirty trees, no stale
@@ -217,3 +219,8 @@ This repository is represented in the local/private Plane workspace `Proximal`.
 - When updating Plane, include the repo, branch/worktree, `run_id`, `base_sha`, artifact links, verification evidence, and authority scope in the work item description or comments.
 - Do not commit Plane API tokens. Local tokens and MCP env files live outside git under `~/.config/plane/`.
 <!-- END PROXIMAL PLANE TRACKING -->
+
+
+## Branch hygiene
+
+Do not leave unmerged code lying around. If a task uses a branch, merge its authorized work into the intended target branch before reporting completion. If merge authority is absent, report that as a blocker instead of treating the branch as finished. Clean up branches and associated worktrees after merge.
